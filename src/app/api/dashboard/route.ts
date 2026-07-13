@@ -7,8 +7,7 @@ import {
   parsePipelineWowTab,
 } from "@/lib/parse";
 
-export const revalidate = 300; // cache for 5 minutes
-
+export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const [arrRows, aeRows, pipelineRows, pipelineWowRows] = await Promise.all([
