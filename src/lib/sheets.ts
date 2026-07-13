@@ -4,17 +4,24 @@ const SHEET_ID = process.env.GOOGLE_SHEET_ID!;
 
 function getAuth() {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const key = process.env.GOOGLE_PRIVATE_KEY;
+  const b64Key = process.env.GOOGLE_PRIVATE_KEY_B64;
+  const rawKey = process.env.GOOGLE_PRIVATE_KEY;
 
-  if (!email || !key) {
+  if (!email || (!b64Key && !rawKey)) {
     throw new Error(
-      "Missing GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY env vars"
+      "Missing GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY(_B64) env vars"
     );
   }
 
+  // Prefer the base64 version — it can't be mangled by copy/paste the way
+  // a raw PEM string (with \n escapes) can be in web forms.
+  const key = b64Key
+    ? Buffer.from(b64Key, "base64").toString("utf-8")
+    : rawKey!.replace(/\\n/g, "\n");
+
   return new google.auth.JWT({
     email,
-    key: key.replace(/\\n/g, "\n"), // env vars store newlines escaped
+    key,
     scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
   });
 }
