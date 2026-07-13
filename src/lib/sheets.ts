@@ -13,8 +13,6 @@ function getAuth() {
     );
   }
 
-  // Prefer the base64 version — it can't be mangled by copy/paste the way
-  // a raw PEM string (with \n escapes) can be in web forms.
   const key = b64Key
     ? Buffer.from(b64Key, "base64").toString("utf-8")
     : rawKey!.replace(/\\n/g, "\n");
