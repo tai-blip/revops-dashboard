@@ -3,7 +3,7 @@
 type Row = (string | number | null)[];
 
 export function parseArrTab(rows: Row[]) {
-  // Find the monthly table: header row starts with "Month"
+  // Header lives on row 2 (index 1), starting with "Month"
   const headerIdx = rows.findIndex((r) => r[0] === "Month");
   if (headerIdx === -1) return { monthly: [] };
 
@@ -20,10 +20,10 @@ export function parseArrTab(rows: Row[]) {
     if (!r[0] || typeof r[0] !== "string" || !/^\d{4}-\d{2}$/.test(r[0])) break;
     monthly.push({
       month: String(r[0]),
-      newARR: Number(r[1] ?? 0),
-      activeARR: Number(r[5] ?? 0),
-      churnedARR: Number(r[10] ?? 0),
-      momChangePct: r[12] != null ? Number(r[12]) : null,
+      newARR: Number(r[1] ?? 0), // New ARR Added ($)
+      activeARR: Number(r[5] ?? 0), // Active ARR Snapshot ($)
+      churnedARR: Number(r[11] ?? 0), // Churned ARR ($)
+      momChangePct: r[13] != null ? Number(r[13]) : null, // MoM Change (%)
     });
   }
 
