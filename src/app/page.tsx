@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { C, fmt, pct, Card, KV, Bar, Pill, HeroStat, Th, Td } from "@/lib/ui";
 import { ArrChart } from "@/lib/ArrChart";
+import { BarTrendChart } from "@/lib/BarTrendChart";
 import type { ArrPoint } from "@/lib/parse";
 import { AE_PLAN, TEAM_PIPE_GEN_TARGET_Q3 } from "@/lib/aePlan";
 
@@ -73,6 +74,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<string>("command");
   const [period, setPeriod] = useState<"monthly" | "weekly">("monthly");
+  const [trendRep, setTrendRep] = useState<string>("James Burdick");
 
   useEffect(() => {
     fetch("/api/dashboard")
@@ -285,7 +287,7 @@ export default function Dashboard() {
                       marginBottom: 6,
                     }}
                   >
-                    <span style={{ fontWeight: 600 }}>{rep.name}</span>
+                    <span style={{ fontWeight: 600, color: C.t1 }}>{rep.name}</span>
                     <span style={{ color: C.t2 }}>
                       {fmt(rep.actual)} / {fmt(rep.quota)} ({pct(rep.pctOfQuota)})
                     </span>
@@ -426,7 +428,7 @@ export default function Dashboard() {
                       }}
                     >
                       <span style={{ color: C.t2 }}>{row.metric}</span>
-                      <span style={{ fontFamily: "var(--font-dm-mono)" }}>
+                      <span style={{ fontFamily: "var(--font-dm-mono)", color: C.t1 }}>
                         {row.metric.toLowerCase().includes("ratio")
                           ? row.value.toFixed(2) + "x"
                           : row.metric.toLowerCase().includes("%")
@@ -499,6 +501,54 @@ export default function Dashboard() {
                 ))}
               </tbody>
             </table>
+          </Card>
+
+          <Card
+            title="Pipe Generation History — Monthly"
+            sub="New ARR created and new opps entered SQL, by rep, since Jan-25"
+          >
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ marginBottom: 16 }}>
+                <select
+                  value={trendRep}
+                  onChange={(e) => setTrendRep(e.target.value)}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: `1px solid ${C.bd}`,
+                    fontSize: 13,
+                    color: C.t1,
+                    background: "#fff",
+                  }}
+                >
+                  {Object.keys(data.pipelineWow.newArrMom.reps).map((rep) => (
+                    <option key={rep} value={rep}>
+                      {rep}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 6 }}>
+                New ARR Created ($)
+              </div>
+              <div style={{ marginBottom: 24 }}>
+                <BarTrendChart
+                  labels={data.pipelineWow.newArrMom.months}
+                  values={data.pipelineWow.newArrMom.reps[trendRep] ?? []}
+                  valueFormat="currency"
+                />
+              </div>
+
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 6 }}>
+                New Opps Entered (SQL)
+              </div>
+              <BarTrendChart
+                labels={data.pipelineWow.newOppsMom.months}
+                values={data.pipelineWow.newOppsMom.reps[trendRep] ?? []}
+                valueFormat="number"
+              />
+            </div>
           </Card>
         </div>
       )}

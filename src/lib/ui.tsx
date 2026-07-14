@@ -196,7 +196,7 @@ export function Card({
             borderLeft: accent ? `3px solid ${accent}` : "none",
           }}
         >
-          <div style={{ fontWeight: 700, fontSize: 15.5 }}>{title}</div>
+          <div style={{ fontWeight: 700, fontSize: 15.5, color: C.t1 }}>{title}</div>
           {sub && (
             <div style={{ fontSize: 12.5, color: C.t2, marginTop: 3 }}>{sub}</div>
           )}
