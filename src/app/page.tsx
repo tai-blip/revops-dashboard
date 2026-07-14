@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { C, fmt, pct, Card, KV, Bar, Pill, HeroStat, Th, Td } from "@/lib/ui";
 import { ArrChart } from "@/lib/ArrChart";
 import type { ArrPoint } from "@/lib/parse";
+import { AE_PLAN, TEAM_PIPE_GEN_TARGET_Q3 } from "@/lib/aePlan";
 
 type DashboardData = {
   updatedAt: string;
@@ -22,8 +23,12 @@ type DashboardData = {
     filterRep: string;
     weekLabels: string[];
     weeks: { metric: string; values: (number | null)[] }[];
+    newOppsMom: { months: string[]; reps: Record<string, number[]> };
+    newArrMom: { months: string[]; reps: Record<string, number[]> };
   };
 };
+
+const Q3_FY26_MONTHS = ["Jul-26", "Aug-26", "Sep-26"];
 
 const TABS = [
   ["command", "Command"],
@@ -295,8 +300,115 @@ export default function Dashboard() {
 
       {tab === "pipeline" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          <div style={{ marginBottom: 12 }}>
-            <Pill tone="blue">Filtered by: {data.pipeline.filterRep}</Pill>
+          {(() => {
+            const { newArrMom, newOppsMom } = data.pipelineWow;
+            const qtdIdxArr = newArrMom.months
+              .map((m, i) => (Q3_FY26_MONTHS.includes(m) ? i : -1))
+              .filter((i) => i >= 0);
+
+            function qtdSum(reps: Record<string, number[]>, rep: string) {
+              const vals = reps[rep] ?? [];
+              return qtdIdxArr.reduce((s, i) => s + (vals[i] ?? 0), 0);
+            }
+
+            const repNames = Object.keys(AE_PLAN);
+            const teamGenerated = repNames.reduce(
+              (s, r) => s + qtdSum(newArrMom.reps, r),
+              0
+            );
+            const teamOpps = repNames.reduce(
+              (s, r) => s + qtdSum(newOppsMom.reps, r),
+              0
+            );
+            const teamOpenPipeline = (data.pipeline.sections["1. TOTAL PIPELINE"] ?? [])
+              .find((m) => m.metric === "Total Pipeline (ARR)")?.value ?? 0;
+
+            return (
+              <>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: 16,
+                    marginBottom: 20,
+                  }}
+                >
+                  <Card title="Pipe Created QTD (TCV)">
+                    <div style={{ padding: 20 }}>
+                      <KV
+                        label={`${((teamGenerated / TEAM_PIPE_GEN_TARGET_Q3) * 100).toFixed(0)}% of ${fmt(TEAM_PIPE_GEN_TARGET_Q3)} goal`}
+                        v={fmt(teamGenerated)}
+                        color={C.coralDk}
+                      />
+                    </div>
+                  </Card>
+                  <Card title="Open Pipeline (All)">
+                    <div style={{ padding: 20 }}>
+                      <KV label="Total ARR-weighted open deals" v={fmt(teamOpenPipeline)} />
+                    </div>
+                  </Card>
+                  <Card title="New Opps This Quarter">
+                    <div style={{ padding: 20 }}>
+                      <KV label="Opportunities reaching SQL" v={String(teamOpps)} />
+                    </div>
+                  </Card>
+                </div>
+
+                <Card
+                  title="Pipeline Generation by AE — Q3 FY26"
+                  sub="New pipeline created this quarter (Amount of opps reaching SQL) vs each AE's quarterly pipe-generation target."
+                >
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>AE</Th>
+                        <Th>Gen Target</Th>
+                        <Th>Generated QTD</Th>
+                        <Th l>Progress</Th>
+                        <Th># Opps</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {repNames.map((rep) => {
+                        const plan = AE_PLAN[rep];
+                        const generated = qtdSum(newArrMom.reps, rep);
+                        const opps = qtdSum(newOppsMom.reps, rep);
+                        return (
+                          <tr key={rep} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                            <Td l bold>{plan.short}</Td>
+                            <Td mono>
+                              {plan.pipeGenTargetQ3 > 0 ? fmt(plan.pipeGenTargetQ3) : "—"}
+                            </Td>
+                            <Td mono color={C.purp}>{fmt(generated)}</Td>
+                            <td style={{ padding: "10px 16px", width: 160 }}>
+                              {plan.pipeGenTargetQ3 > 0 ? (
+                                <Bar value={generated} target={plan.pipeGenTargetQ3} />
+                              ) : (
+                                <span style={{ fontSize: 12, color: C.t3 }}>no target</span>
+                              )}
+                            </td>
+                            <Td mono>{opps}</Td>
+                          </tr>
+                        );
+                      })}
+                      <tr style={{ borderTop: `2px solid ${C.navy}`, fontWeight: 700 }}>
+                        <Td l bold>Team (AEs)</Td>
+                        <Td mono bold>{fmt(TEAM_PIPE_GEN_TARGET_Q3)}</Td>
+                        <Td mono bold color={C.purp}>{fmt(teamGenerated)}</Td>
+                        <td style={{ padding: "10px 16px" }}>
+                          <Bar value={teamGenerated} target={TEAM_PIPE_GEN_TARGET_Q3} />
+                        </td>
+                        <Td mono bold>{teamOpps}</Td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </Card>
+              </>
+            );
+          })()}
+
+          <div style={{ marginBottom: 12, marginTop: 8 }}>
+            <Pill tone="blue">Stage/coverage view filtered by: {data.pipeline.filterRep}</Pill>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
             {Object.entries(data.pipeline.sections).map(([section, rows]) => (

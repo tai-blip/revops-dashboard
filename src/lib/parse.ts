@@ -140,5 +140,29 @@ export function parsePipelineWowTab(rows: Row[]) {
     }
   }
 
-  return { filterRep, weekLabels, weeks };
+  // Rep-by-rep MoM tables: "New Opps Entered (SQL)" and "New ARR Created ($)"
+  function parseRepTable(sectionMarker: string) {
+    const idx = rows.findIndex(
+      (r) => typeof r[0] === "string" && r[0].includes(sectionMarker)
+    );
+    if (idx === -1) return { months: [] as string[], reps: {} as Record<string, number[]> };
+
+    const headerRow = rows[idx + 1];
+    const months = headerRow
+      .slice(1, -1) // drop "Rep" and trailing "TOTAL"
+      .filter((v): v is string => typeof v === "string");
+
+    const reps: Record<string, number[]> = {};
+    for (let i = idx + 2; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r[0] || typeof r[0] !== "string") break;
+      reps[String(r[0])] = r.slice(1, 1 + months.length).map((v) => Number(v ?? 0));
+    }
+    return { months, reps };
+  }
+
+  const newOppsMom = parseRepTable("MONTH OVER MONTH — New Opps Entered");
+  const newArrMom = parseRepTable("MONTH OVER MONTH — New ARR Created");
+
+  return { filterRep, weekLabels, weeks, newOppsMom, newArrMom };
 }

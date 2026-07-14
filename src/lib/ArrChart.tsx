@@ -62,20 +62,20 @@ export function ArrChart({ points }: { points: ArrPoint[] }) {
               stroke={C.s2}
               strokeWidth={1}
             />
-            <text x={padL - 8} y={y(v) + 4} textAnchor="end" fontSize={10} fill={C.t3}>
+            <text x={padL - 10} y={y(v) + 4} textAnchor="end" fontSize={12} fontWeight={600} fill={C.t1}>
               {fmt(v)}
             </text>
           </g>
         ))}
 
         {/* area + line */}
-        <path d={areaPath} fill={C.coralSoft} opacity={0.5} />
-        <path d={linePath} fill="none" stroke={C.coralDk} strokeWidth={2} />
+        <path d={areaPath} fill={C.navy} opacity={0.08} />
+        <path d={linePath} fill="none" stroke={C.navy} strokeWidth={2.5} />
 
         {/* points + hover targets */}
         {points.map((p, i) => (
           <g key={p.label}>
-            <circle cx={x(i)} cy={y(p.activeARR)} r={hoverIdx === i ? 5 : 3} fill={C.coralDk} />
+            <circle cx={x(i)} cy={y(p.activeARR)} r={hoverIdx === i ? 6 : 3.5} fill={C.navy} />
             {/* invisible wide hit area */}
             <rect
               x={x(i) - innerW / points.length / 2}
@@ -90,8 +90,9 @@ export function ArrChart({ points }: { points: ArrPoint[] }) {
                 x={x(i)}
                 y={H - 10}
                 textAnchor="middle"
-                fontSize={10}
-                fill={C.t3}
+                fontSize={11}
+                fontWeight={600}
+                fill={C.t2}
               >
                 {p.label.slice(5) || p.label}
               </text>
@@ -106,8 +107,8 @@ export function ArrChart({ points }: { points: ArrPoint[] }) {
             x2={x(hoverIdx)}
             y1={padT}
             y2={padT + innerH}
-            stroke={C.t3}
-            strokeWidth={1}
+            stroke={C.coral}
+            strokeWidth={1.5}
             strokeDasharray="3,3"
           />
         )}
@@ -122,17 +123,23 @@ export function ArrChart({ points }: { points: ArrPoint[] }) {
             background: C.navy,
             color: "#fff",
             borderRadius: 8,
-            padding: "8px 12px",
-            fontSize: 12,
-            minWidth: 140,
+            padding: "10px 14px",
+            fontSize: 13,
+            minWidth: 160,
             pointerEvents: "none",
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>{hovered.label}</div>
-          <div>Active ARR: <span style={{ fontFamily: "var(--font-dm-mono)" }}>{fmt(hovered.activeARR)}</span></div>
-          <div>New ARR: <span style={{ fontFamily: "var(--font-dm-mono)" }}>{fmt(hovered.newARR)}</span></div>
-          <div>Churned: <span style={{ fontFamily: "var(--font-dm-mono)" }}>{fmt(hovered.churnedARR)}</span></div>
-          <div style={{ color: (hovered.changePct ?? 0) >= 0 ? "#9FD9A4" : "#F0A99C" }}>
+          <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>{hovered.label}</div>
+          <div style={{ marginBottom: 2 }}>
+            Active ARR: <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 600 }}>{fmt(hovered.activeARR)}</span>
+          </div>
+          <div style={{ marginBottom: 2 }}>
+            New ARR: <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 600 }}>{fmt(hovered.newARR)}</span>
+          </div>
+          <div style={{ marginBottom: 2 }}>
+            Churned: <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 600 }}>{fmt(hovered.churnedARR)}</span>
+          </div>
+          <div style={{ color: (hovered.changePct ?? 0) >= 0 ? "#9FD9A4" : "#F0A99C", fontWeight: 600 }}>
             Change: {pct(hovered.changePct)}
           </div>
         </div>
