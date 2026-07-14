@@ -27,6 +27,30 @@ type DashboardData = {
     newOppsMom: { months: string[]; reps: Record<string, number[]> };
     newArrMom: { months: string[]; reps: Record<string, number[]> };
   };
+  dealHealth: { label: string; min: number; max: number; arr: number; count: number }[];
+  forecast: {
+    rawTotal: number;
+    weightedTotal: number;
+    byStage: Record<string, { raw: number; weighted: number; count: number }>;
+  };
+  winRates: { derived: boolean; n: number; overall: number | null };
+  winRateYtd: {
+    winRate: number | null;
+    avgCycle: number | null;
+    medianCycle: number | null;
+    closedCount: number;
+    wonCount: number;
+  };
+  acv: {
+    buckets: { label: string; min: number; max: number; count: number; arr: number }[];
+    avg: number;
+    median: number;
+    count: number;
+  };
+  whoDoesWhat: Record<
+    string,
+    { openCount: number; openArr: number; staleCount: number; staleArr: number }
+  >;
 };
 
 const Q3_FY26_MONTHS = ["Jul-26", "Aug-26", "Sep-26"];
@@ -35,7 +59,11 @@ const TABS = [
   ["command", "Command"],
   ["targets", "Targets & Progress"],
   ["pipeline", "Pipeline"],
+  ["forecast", "Forecast"],
+  ["health", "Deal Health"],
   ["attainment", "AE Attainment"],
+  ["acv", "ACV & Deal Size"],
+  ["actions", "Who Does What"],
 ] as const;
 
 function ChartPeriodToggle({
@@ -553,10 +581,182 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 30px 30px", fontSize: 12, color: C.t3 }}>
-        Note: Deal Health, Forecast, ACV & Deal Size, and Who Does What tabs from the
-        original dashboard aren&apos;t included here yet.
-      </div>
+      {tab === "forecast" && (
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 20 }}>
+            <Card title="Raw Open Pipeline">
+              <div style={{ padding: 20 }}>
+                <KV label="Full value if every deal closed" v={fmt(data.forecast.rawTotal)} />
+              </div>
+            </Card>
+            <Card title="AE-Weighted Forecast">
+              <div style={{ padding: 20 }}>
+                <KV
+                  label="Stage-adjusted realistic value"
+                  v={fmt(data.forecast.weightedTotal)}
+                  color={C.purp}
+                />
+              </div>
+            </Card>
+            <Card title="Historical Win Rate Basis">
+              <div style={{ padding: 20 }}>
+                <KV
+                  label={data.winRates.derived ? `Derived from ${data.winRates.n} closed deals` : "Using default assumptions (no history)"}
+                  v={data.winRates.overall != null ? pct(data.winRates.overall) : "—"}
+                />
+              </div>
+            </Card>
+          </div>
+
+          <Card
+            title="Pipeline by Stage — Raw vs Weighted"
+            sub="Weighted value = ARR × derived win rate for that stage"
+          >
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                  <Th l>Stage</Th>
+                  <Th># Deals</Th>
+                  <Th>Raw ARR</Th>
+                  <Th>Win Rate</Th>
+                  <Th>Weighted ARR</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(data.forecast.byStage)
+                  .filter(([, v]) => v.count > 0)
+                  .map(([stage, v]) => (
+                    <tr key={stage} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                      <Td l bold>{stage}</Td>
+                      <Td mono>{v.count}</Td>
+                      <Td mono>{fmt(v.raw)}</Td>
+                      <Td mono>{v.raw > 0 ? pct(v.weighted / v.raw) : "—"}</Td>
+                      <Td mono color={C.purp}>{fmt(v.weighted)}</Td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
+
+      {tab === "health" && (
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+          <Card
+            title="Pipeline Aging"
+            sub="Open deals bucketed by days since last stage change — stale deals need attention"
+          >
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                  <Th l>Age Bucket</Th>
+                  <Th># Deals</Th>
+                  <Th>ARR</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.dealHealth.map((b) => (
+                  <tr key={b.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                    <Td l bold color={b.min >= 91 ? C.red : b.min >= 31 ? C.ylw : C.t1}>
+                      {b.label}
+                    </Td>
+                    <Td mono>{b.count}</Td>
+                    <Td mono>{fmt(b.arr)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
+
+      {tab === "acv" && (
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 20 }}>
+            <Card title="Average Deal Size">
+              <div style={{ padding: 20 }}>
+                <KV label="Across all won deals (18mo)" v={fmt(data.acv.avg)} />
+              </div>
+            </Card>
+            <Card title="Median Deal Size">
+              <div style={{ padding: 20 }}>
+                <KV label="Less skewed by outliers" v={fmt(data.acv.median)} />
+              </div>
+            </Card>
+            <Card title="Win Rate (YTD)">
+              <div style={{ padding: 20 }}>
+                <KV
+                  label={`${data.winRateYtd.wonCount} of ${data.winRateYtd.closedCount} closed New Biz`}
+                  v={data.winRateYtd.winRate != null ? pct(data.winRateYtd.winRate) : "—"}
+                  color={C.navy}
+                />
+              </div>
+            </Card>
+          </div>
+
+          <Card title="Avg Sales Cycle (YTD)" sub="Days from SQL to close, won New Business deals">
+            <div style={{ padding: 20, display: "flex", gap: 40 }}>
+              <KV label="Average" v={data.winRateYtd.avgCycle != null ? `${data.winRateYtd.avgCycle.toFixed(0)}d` : "—"} />
+              <KV label="Median" v={data.winRateYtd.medianCycle != null ? `${data.winRateYtd.medianCycle}d` : "—"} />
+            </div>
+          </Card>
+
+          <Card title="Deal Size Distribution">
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                  <Th l>Range</Th>
+                  <Th># Deals</Th>
+                  <Th>Total ARR</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.acv.buckets.map((b) => (
+                  <tr key={b.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                    <Td l bold>{b.label}</Td>
+                    <Td mono>{b.count}</Td>
+                    <Td mono>{fmt(b.arr)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
+
+      {tab === "actions" && (
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+          <Card
+            title="Who Does What — Open Pipeline by Owner"
+            sub="Stale = no stage change in 60+ days"
+          >
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                  <Th l>Owner</Th>
+                  <Th># Open Deals</Th>
+                  <Th>Open ARR</Th>
+                  <Th># Stale</Th>
+                  <Th>Stale ARR</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(data.whoDoesWhat)
+                  .sort((a, b) => b[1].openArr - a[1].openArr)
+                  .map(([owner, v]) => (
+                    <tr key={owner} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                      <Td l bold>{owner}</Td>
+                      <Td mono>{v.openCount}</Td>
+                      <Td mono>{fmt(v.openArr)}</Td>
+                      <Td mono color={v.staleCount > 0 ? C.red : C.t1}>{v.staleCount}</Td>
+                      <Td mono color={v.staleArr > 0 ? C.red : C.t1}>{fmt(v.staleArr)}</Td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
