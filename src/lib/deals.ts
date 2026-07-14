@@ -221,7 +221,36 @@ export function computeWinRateAndCycle(closedDeals: ClosedDeal[], year: number) 
   return { winRate, avgCycle, medianCycle, closedCount: ytd.length, wonCount: won.length };
 }
 
-// ACV & Deal Size — distribution of won-deal ARR.
+// Flat trend events for WoW/MoM pipeline movement charting, filterable by owner and type.
+export type TrendEvent = {
+  date: string; // ISO date
+  owner: string;
+  arr: number;
+  type: "created" | "closedWon" | "closedLost";
+};
+
+export function buildTrendEvents(openDeals: OpenDeal[], closedDeals: ClosedDeal[]): TrendEvent[] {
+  const events: TrendEvent[] = [];
+  for (const d of openDeals) {
+    if (!d.createdDate) continue;
+    events.push({
+      date: d.createdDate.toISOString().slice(0, 10),
+      owner: d.owner,
+      arr: d.arr,
+      type: "created",
+    });
+  }
+  for (const d of closedDeals) {
+    if (!d.closeDate) continue;
+    events.push({
+      date: d.closeDate.toISOString().slice(0, 10),
+      owner: d.owner,
+      arr: d.arr,
+      type: d.isWon ? "closedWon" : "closedLost",
+    });
+  }
+  return events;
+}
 export function computeAcvDistribution(closedDeals: ClosedDeal[]) {
   const won = closedDeals.filter((d) => d.isWon && d.arr > 0);
   const buckets = [

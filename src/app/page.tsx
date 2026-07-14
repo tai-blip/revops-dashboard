@@ -37,6 +37,7 @@ type DashboardData = {
   };
   dealHealth: { label: string; min: number; max: number; arr: number; count: number }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
+  trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
   forecast: {
     rawTotal: number;
     weightedTotal: number;
@@ -123,6 +124,11 @@ export default function Dashboard() {
   const [tab, setTab] = useState<string>("command");
   const [period, setPeriod] = useState<"monthly" | "weekly">("monthly");
   const [trendRep, setTrendRep] = useState<string>("James Burdick");
+  const [pipeAeFilter, setPipeAeFilter] = useState<string>("All");
+  const [pipeCriteria, setPipeCriteria] = useState<
+    "created" | "createdCount" | "closedWon" | "closedLost"
+  >("created");
+  const [pipePeriod, setPipePeriod] = useState<"weekly" | "monthly">("weekly");
 
   useEffect(() => {
     fetch("/api/dashboard")
@@ -157,6 +163,45 @@ export default function Dashboard() {
       coverageRatio,
     };
   }, [data]);
+
+  const pipeOwners = useMemo(() => {
+    if (!data) return [];
+    return Array.from(new Set(data.trendEvents.map((e) => e.owner))).sort();
+  }, [data]);
+
+  function getWeekStart(dateStr: string): string {
+    const d = new Date(dateStr + "T00:00:00Z");
+    const day = d.getUTCDay();
+    const diff = (day === 0 ? -6 : 1) - day; // Monday start
+    d.setUTCDate(d.getUTCDate() + diff);
+    return d.toISOString().slice(0, 10);
+  }
+
+  const pipelineTrend = useMemo(() => {
+    if (!data) return { labels: [], values: [] };
+    const filtered = data.trendEvents.filter(
+      (e) => pipeAeFilter === "All" || e.owner === pipeAeFilter
+    );
+    const typeMap: Record<string, "created" | "closedWon" | "closedLost"> = {
+      created: "created",
+      createdCount: "created",
+      closedWon: "closedWon",
+      closedLost: "closedLost",
+    };
+    const wantType = typeMap[pipeCriteria];
+    const isCount = pipeCriteria === "createdCount";
+
+    const buckets: Record<string, number> = {};
+    for (const e of filtered) {
+      if (e.type !== wantType) continue;
+      const key = pipePeriod === "weekly" ? getWeekStart(e.date) : e.date.slice(0, 7);
+      buckets[key] = (buckets[key] ?? 0) + (isCount ? 1 : e.arr);
+    }
+    const labels = Object.keys(buckets).sort();
+    const values = labels.map((l) => buckets[l]);
+    // keep it readable — last 20 periods
+    return { labels: labels.slice(-20), values: values.slice(-20) };
+  }, [data, pipeAeFilter, pipeCriteria, pipePeriod]);
 
   if (error) {
     return (
@@ -343,8 +388,80 @@ export default function Dashboard() {
 
       {tab === "pipeline" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+          <Card
+            title="Pipeline Movement — Trend"
+            sub="New pipeline created, closed-won, and closed-lost, over time — filter by AE and by what you want to see"
+            accent={C.coral}
+          >
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.t3, marginBottom: 4, textTransform: "uppercase" }}>
+                    AE
+                  </div>
+                  <select
+                    value={pipeAeFilter}
+                    onChange={(e) => setPipeAeFilter(e.target.value)}
+                    style={{ padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.bd}`, fontSize: 13, color: C.t1, background: "#fff" }}
+                  >
+                    <option value="All">All AEs</option>
+                    {pipeOwners.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.t3, marginBottom: 4, textTransform: "uppercase" }}>
+                    Criteria
+                  </div>
+                  <select
+                    value={pipeCriteria}
+                    onChange={(e) => setPipeCriteria(e.target.value as typeof pipeCriteria)}
+                    style={{ padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.bd}`, fontSize: 13, color: C.t1, background: "#fff" }}
+                  >
+                    <option value="created">New Pipeline Created ($)</option>
+                    <option value="createdCount">New Opps Created (#)</option>
+                    <option value="closedWon">Closed Won ($)</option>
+                    <option value="closedLost">Closed Lost ($)</option>
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.t3, marginBottom: 4, textTransform: "uppercase" }}>
+                    Period
+                  </div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {(["weekly", "monthly"] as const).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => setPipePeriod(p)}
+                        style={{
+                          padding: "6px 12px",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          borderRadius: 6,
+                          border: `1px solid ${C.bd}`,
+                          background: pipePeriod === p ? C.navy : "#fff",
+                          color: pipePeriod === p ? "#fff" : C.t2,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {p === "weekly" ? "WoW" : "MoM"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <BarTrendChart
+                labels={pipelineTrend.labels}
+                values={pipelineTrend.values}
+                valueFormat={pipeCriteria === "createdCount" ? "number" : "currency"}
+              />
+            </div>
+          </Card>
+
           <div style={{ marginBottom: 12 }}>
-            <Pill tone="blue">Filtered by: {data.pipeline.filterRep}</Pill>
+            <Pill tone="blue">Stage/coverage snapshot filtered by: {data.pipeline.filterRep}</Pill>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
