@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { C, fmt, pct, Card, KV, Bar, Pill, HeroStat, Th, Td } from "@/lib/ui";
 import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
+import { LineTrendChart } from "@/lib/LineTrendChart";
 import type { ArrPoint } from "@/lib/parse";
 
 type MetricRow = { metric: string; value: number; kind: "currency" | "count" | "percent" | "ratio" };
@@ -571,6 +572,57 @@ export default function Dashboard() {
             title="Pipeline Progression — Week over Week"
             sub={`Filtered by: ${data.pipelineWow.filterRep}`}
           >
+            {(() => {
+              const weeks = data.pipelineWow.weeks;
+              const labels = data.pipelineWow.weekLabels;
+              const findRow = (name: string) => weeks.find((w) => w.metric === name)?.values ?? [];
+
+              const countSeries = [
+                { label: "New Opps Entered (SQL)", values: findRow("New Opps Entered (SQL)"), color: C.navy },
+                { label: "Progressed to SAL", values: findRow("Progressed to SAL"), color: C.teal },
+                { label: "Progressed to SQO", values: findRow("Progressed to SQO"), color: C.purp },
+                { label: "Stage Movements (any)", values: findRow("Stage Movements (any)"), color: C.coralDk },
+              ].filter((s) => s.values.length > 0);
+
+              const arrSeries = [
+                { label: "New ARR pipeline Created ($)", values: findRow("New ARR pipeline Created ($)"), color: C.coralDk },
+              ].filter((s) => s.values.length > 0);
+
+              const pctSeries = [
+                { label: "New Opps WoW Δ%", values: findRow("New Opps WoW Δ%"), color: C.navy },
+                { label: "New ARR WoW Δ%", values: findRow("New ARR WoW Δ%"), color: C.coralDk },
+              ].filter((s) => s.values.length > 0);
+
+              return (
+                <div style={{ padding: "16px 20px", display: "grid", gap: 24 }}>
+                  {countSeries.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 8 }}>
+                        Opp & Stage Movement Counts
+                      </div>
+                      <LineTrendChart labels={labels} series={countSeries} valueFormat="number" />
+                    </div>
+                  )}
+                  {arrSeries.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 8 }}>
+                        New ARR Pipeline Created
+                      </div>
+                      <LineTrendChart labels={labels} series={arrSeries} valueFormat="currency" />
+                    </div>
+                  )}
+                  {pctSeries.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 8 }}>
+                        WoW % Change
+                      </div>
+                      <LineTrendChart labels={labels} series={pctSeries} valueFormat="percent" />
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
