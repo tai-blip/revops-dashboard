@@ -2,17 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { C, fmt, pct, Card, KV, Bar, Pill, HeroStat, Th, Td } from "@/lib/ui";
+import { ArrChart } from "@/lib/ArrChart";
+import type { ArrPoint } from "@/lib/parse";
 
 type DashboardData = {
   updatedAt: string;
   arr: {
-    monthly: {
-      month: string;
-      newARR: number;
-      activeARR: number;
-      churnedARR: number;
-      momChangePct: number | null;
-    }[];
+    monthly: ArrPoint[];
+    weekly: ArrPoint[];
   };
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number }[];
@@ -35,10 +32,42 @@ const TABS = [
   ["attainment", "AE Attainment"],
 ] as const;
 
+function ChartPeriodToggle({
+  period,
+  onChange,
+}: {
+  period: "monthly" | "weekly";
+  onChange: (p: "monthly" | "weekly") => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      {(["monthly", "weekly"] as const).map((p) => (
+        <button
+          key={p}
+          onClick={() => onChange(p)}
+          style={{
+            padding: "5px 12px",
+            fontSize: 12,
+            fontWeight: 600,
+            borderRadius: 6,
+            border: `1px solid ${C.bd}`,
+            background: period === p ? C.navy : "#fff",
+            color: period === p ? "#fff" : C.t2,
+            cursor: "pointer",
+          }}
+        >
+          {p === "monthly" ? "MoM" : "WoW"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<string>("command");
+  const [period, setPeriod] = useState<"monthly" | "weekly">("monthly");
 
   useEffect(() => {
     fetch("/api/dashboard")
@@ -54,9 +83,7 @@ export default function Dashboard() {
     if (!data) return null;
     const months = data.arr.monthly;
     const latest = months[months.length - 1];
-    const prevMonths = months.slice(-4, -1);
 
-    // Team quota totals from AE attainment tab
     const teamQuota = data.aeAttainment.reps.reduce((s, r) => s + r.quota, 0);
     const teamActual = data.aeAttainment.reps.reduce((s, r) => s + r.actual, 0);
     const teamPctOfQuota = teamQuota > 0 ? teamActual / teamQuota : 0;
@@ -70,7 +97,6 @@ export default function Dashboard() {
 
     return {
       latest,
-      prevMonths,
       teamQuota,
       teamActual,
       teamPctOfQuota,
@@ -95,9 +121,10 @@ export default function Dashboard() {
     );
   }
 
+  const chartPoints = period === "monthly" ? data.arr.monthly : data.arr.weekly;
+
   return (
     <div style={{ fontFamily: "var(--font-dm-sans)", background: C.bg, minHeight: "100vh" }}>
-      {/* Header / tab bar */}
       <div style={{ background: C.card, borderBottom: `1px solid ${C.bd}` }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 30px 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -148,10 +175,7 @@ export default function Dashboard() {
                 }}
               >
                 <HeroStat label="Live ARR" value={fmt(derived.latest?.activeARR)} tone="good" />
-                <HeroStat
-                  label="New ARR (Latest Month)"
-                  value={fmt(derived.latest?.newARR)}
-                />
+                <HeroStat label="New ARR (Latest Month)" value={fmt(derived.latest?.newARR)} />
                 <HeroStat
                   label="Churned ARR (Latest Month)"
                   value={fmt(derived.latest?.churnedARR)}
@@ -159,13 +183,10 @@ export default function Dashboard() {
                 />
                 <HeroStat
                   label="MoM Change"
-                  value={pct(derived.latest?.momChangePct)}
-                  tone={(derived.latest?.momChangePct ?? 0) >= 0 ? "good" : "bad"}
+                  value={pct(derived.latest?.changePct)}
+                  tone={(derived.latest?.changePct ?? 0) >= 0 ? "good" : "bad"}
                 />
-                <HeroStat
-                  label="Total Pipeline"
-                  value={fmt(derived.totalPipelineARR)}
-                />
+                <HeroStat label="Total Pipeline" value={fmt(derived.totalPipelineARR)} />
                 <HeroStat
                   label="Pipeline Coverage"
                   value={derived.coverageRatio.toFixed(2) + "x"}
@@ -176,6 +197,19 @@ export default function Dashboard() {
           </div>
 
           <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+            <Card
+              title="ARR Trend"
+              sub="Hover a point for details"
+              accent={C.coral}
+            >
+              <div style={{ padding: "16px 20px" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+                  <ChartPeriodToggle period={period} onChange={setPeriod} />
+                </div>
+                <ArrChart points={chartPoints} />
+              </div>
+            </Card>
+
             <Card title="Team Attainment — Q3 FY26" sub="Actual vs quota across all AEs">
               <div style={{ padding: 20 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
@@ -196,26 +230,37 @@ export default function Dashboard() {
 
       {tab === "targets" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          <Card title="ARR Trend vs Prior Months" sub="Last 12 months, from your ARR & recurring revenue tab">
+          <Card title="ARR Trend" sub="Hover a point for details" accent={C.coral}>
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+                <ChartPeriodToggle period={period} onChange={setPeriod} />
+              </div>
+              <ArrChart points={chartPoints} />
+            </div>
+          </Card>
+
+          <Card
+            title={period === "monthly" ? "ARR Trend Table (Monthly)" : "ARR Trend Table (Weekly)"}
+          >
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                  <Th l>Month</Th>
+                  <Th l>{period === "monthly" ? "Month" : "Week Starting"}</Th>
                   <Th>New ARR</Th>
                   <Th>Active ARR</Th>
                   <Th>Churned ARR</Th>
-                  <Th>MoM %</Th>
+                  <Th>{period === "monthly" ? "MoM %" : "WoW %"}</Th>
                 </tr>
               </thead>
               <tbody>
-                {data.arr.monthly.slice(-12).map((m) => (
-                  <tr key={m.month} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                    <Td l mono>{m.month}</Td>
-                    <Td mono>{fmt(m.newARR)}</Td>
-                    <Td mono>{fmt(m.activeARR)}</Td>
-                    <Td mono color={C.red}>{fmt(m.churnedARR)}</Td>
-                    <Td mono color={(m.momChangePct ?? 0) >= 0 ? C.grn : C.red}>
-                      {pct(m.momChangePct)}
+                {chartPoints.slice(-16).map((p) => (
+                  <tr key={p.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                    <Td l mono>{p.label}</Td>
+                    <Td mono>{fmt(p.newARR)}</Td>
+                    <Td mono>{fmt(p.activeARR)}</Td>
+                    <Td mono color={C.red}>{fmt(p.churnedARR)}</Td>
+                    <Td mono color={(p.changePct ?? 0) >= 0 ? C.grn : C.red}>
+                      {pct(p.changePct)}
                     </Td>
                   </tr>
                 ))}
@@ -348,8 +393,7 @@ export default function Dashboard() {
 
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 30px 30px", fontSize: 12, color: C.t3 }}>
         Note: Deal Health, Forecast, ACV & Deal Size, and Who Does What tabs from the
-        original dashboard aren&apos;t included here — they require deal-level Salesforce data
-        (individual opportunity records) that isn&apos;t available in the Sheet.
+        original dashboard aren&apos;t included here yet.
       </div>
     </div>
   );

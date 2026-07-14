@@ -2,32 +2,64 @@
 
 type Row = (string | number | null)[];
 
+// Google Sheets API (UNFORMATTED_VALUE) returns dates as serial day-numbers
+// (days since Dec 30, 1899), not JS Dates or ISO strings. Convert properly.
+function sheetsSerialToISODate(v: unknown): string {
+  if (typeof v === "number") {
+    const ms = Date.UTC(1899, 11, 30) + v * 86400000;
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+  if (typeof v === "string") return v.slice(0, 10);
+  return String(v ?? "");
+}
+
+export type ArrPoint = {
+  label: string;
+  newARR: number;
+  activeARR: number;
+  churnedARR: number;
+  changePct: number | null;
+};
+
 export function parseArrTab(rows: Row[]) {
-  // Header lives on row 2 (index 1), starting with "Month"
-  const headerIdx = rows.findIndex((r) => r[0] === "Month");
-  if (headerIdx === -1) return { monthly: [] };
-
-  const monthly: {
-    month: string;
-    newARR: number;
-    activeARR: number;
-    churnedARR: number;
-    momChangePct: number | null;
-  }[] = [];
-
-  for (let i = headerIdx + 1; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r[0] || typeof r[0] !== "string" || !/^\d{4}-\d{2}$/.test(r[0])) break;
-    monthly.push({
-      month: String(r[0]),
-      newARR: Number(r[1] ?? 0), // New ARR Added ($)
-      activeARR: Number(r[5] ?? 0), // Active ARR Snapshot ($)
-      churnedARR: Number(r[11] ?? 0), // Churned ARR ($)
-      momChangePct: r[13] != null ? Number(r[13]) : null, // MoM Change (%)
-    });
+  // Monthly section — header on the row starting with "Month"
+  const monthlyHeaderIdx = rows.findIndex((r) => r[0] === "Month");
+  const monthly: ArrPoint[] = [];
+  if (monthlyHeaderIdx !== -1) {
+    for (let i = monthlyHeaderIdx + 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r[0] || typeof r[0] !== "string" || !/^\d{4}-\d{2}$/.test(r[0])) break;
+      monthly.push({
+        label: String(r[0]),
+        newARR: Number(r[1] ?? 0), // New ARR Added ($)
+        activeARR: Number(r[5] ?? 0), // Active ARR Snapshot ($)
+        churnedARR: Number(r[11] ?? 0), // Churned ARR ($)
+        changePct: r[13] != null ? Number(r[13]) : null, // MoM Change (%)
+      });
+    }
   }
 
-  return { monthly };
+  // Weekly section — header on the row starting with "Week Starting"
+  const weeklyHeaderIdx = rows.findIndex((r) => r[0] === "Week Starting");
+  const weekly: ArrPoint[] = [];
+  if (weeklyHeaderIdx !== -1) {
+    for (let i = weeklyHeaderIdx + 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r[0]) break;
+      // Week Starting is a date (parsed as string by Sheets API in serial or ISO form)
+      const rawLabel = r[0] as unknown;
+      const label = sheetsSerialToISODate(rawLabel);
+      weekly.push({
+        label,
+        newARR: Number(r[1] ?? 0),
+        activeARR: Number(r[5] ?? 0),
+        churnedARR: Number(r[11] ?? 0),
+        changePct: r[13] != null ? Number(r[13]) : null, // WoW Change (%)
+      });
+    }
+  }
+
+  return { monthly, weekly };
 }
 
 export function parseAeAttainmentTab(rows: Row[]) {
