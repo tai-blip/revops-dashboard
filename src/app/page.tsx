@@ -5,7 +5,11 @@ import { C, fmt, pct, Card, KV, Bar, Pill, HeroStat, Th, Td } from "@/lib/ui";
 import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
 import type { ArrPoint } from "@/lib/parse";
-import { AE_PLAN, TEAM_PIPE_GEN_TARGET_Q3 } from "@/lib/aePlan";
+
+type MetricRow = { metric: string; value: number; kind: "currency" | "count" | "percent" | "ratio" };
+type BreakdownRow = { label: string; opps: number; arr: number; pctOfTotal: number };
+type StageWeightRow = { stage: string; arr: number; probability: number; weighted: number };
+type AeBreakdownRow = { name: string; quota: number | null; actual: number };
 
 type DashboardData = {
   updatedAt: string;
@@ -15,10 +19,14 @@ type DashboardData = {
   };
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number }[];
+    monthlyTeamActual: { label: string; actual: number }[];
   };
   pipeline: {
     filterRep: string;
-    sections: Record<string, { metric: string; value: number }[]>;
+    metricSections: Record<string, MetricRow[]>;
+    breakdownSections: Record<string, BreakdownRow[]>;
+    stageWeights: StageWeightRow[];
+    aeBreakdown: AeBreakdownRow[];
   };
   pipelineWow: {
     filterRep: string;
@@ -28,6 +36,7 @@ type DashboardData = {
     newArrMom: { months: string[]; reps: Record<string, number[]> };
   };
   dealHealth: { label: string; min: number; max: number; arr: number; count: number }[];
+  rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   forecast: {
     rawTotal: number;
     weightedTotal: number;
@@ -53,8 +62,6 @@ type DashboardData = {
   >;
 };
 
-const Q3_FY26_MONTHS = ["Jul-26", "Aug-26", "Sep-26"];
-
 const TABS = [
   ["command", "Command"],
   ["targets", "Targets & Progress"],
@@ -65,6 +72,19 @@ const TABS = [
   ["acv", "ACV & Deal Size"],
   ["actions", "Who Does What"],
 ] as const;
+
+function formatMetric(row: MetricRow): string {
+  switch (row.kind) {
+    case "ratio":
+      return row.value.toFixed(2) + "x";
+    case "percent":
+      return pct(row.value);
+    case "count":
+      return String(row.value);
+    default:
+      return fmt(row.value);
+  }
+}
 
 function ChartPeriodToggle({
   period,
@@ -123,12 +143,10 @@ export default function Dashboard() {
     const teamActual = data.aeAttainment.reps.reduce((s, r) => s + r.actual, 0);
     const teamPctOfQuota = teamQuota > 0 ? teamActual / teamQuota : 0;
 
-    const pipelineTotals = data.pipeline.sections["1. TOTAL PIPELINE"] ?? [];
     const totalPipelineARR =
-      pipelineTotals.find((m) => m.metric === "Total Pipeline (ARR)")?.value ?? 0;
-    const coverage = data.pipeline.sections["3. PIPELINE COVERAGE"] ?? [];
+      data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Pipeline (ARR)")?.value ?? 0;
     const coverageRatio =
-      coverage.find((m) => m.metric === "Pipeline Coverage Ratio")?.value ?? 0;
+      data.pipeline.metricSections["3. PIPELINE COVERAGE"]?.find((m) => m.metric === "Pipeline Coverage Ratio")?.value ?? 0;
 
     return {
       latest,
@@ -170,7 +188,7 @@ export default function Dashboard() {
               Live · updated {new Date(data.updatedAt).toLocaleTimeString()}
             </div>
           </div>
-          <div style={{ display: "flex", gap: 4, marginTop: 14 }}>
+          <div style={{ display: "flex", gap: 4, marginTop: 14, overflowX: "auto" }}>
             {TABS.map(([key, label]) => (
               <button
                 key={key}
@@ -184,6 +202,7 @@ export default function Dashboard() {
                   border: "none",
                   borderBottom: tab === key ? `2px solid ${C.coral}` : "2px solid transparent",
                   cursor: "pointer",
+                  whiteSpace: "nowrap",
                 }}
               >
                 {label}
@@ -232,11 +251,7 @@ export default function Dashboard() {
           </div>
 
           <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-            <Card
-              title="ARR Trend"
-              sub="Hover a point for details"
-              accent={C.coral}
-            >
+            <Card title="ARR Trend" sub="Hover a point for details" accent={C.coral}>
               <div style={{ padding: "16px 20px" }}>
                 <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
                   <ChartPeriodToggle period={period} onChange={setPeriod} />
@@ -245,18 +260,27 @@ export default function Dashboard() {
               </div>
             </Card>
 
-            <Card title="Team Attainment — Q3 FY26" sub="Actual vs quota across all AEs">
-              <div style={{ padding: 20 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                  <KV label="Actual" v={fmt(derived.teamActual)} />
-                  <KV label="Quota" v={fmt(derived.teamQuota)} />
+            <Card
+              title="Team ARR Attainment — Monthly vs Q3 Quota"
+              sub="Column chart of closed-won + live-paying ARR by month, against the Q3 quota target"
+            >
+              <div style={{ padding: "16px 20px" }}>
+                <BarTrendChart
+                  labels={data.aeAttainment.monthlyTeamActual.map((m) => m.label)}
+                  values={data.aeAttainment.monthlyTeamActual.map((m) => m.actual)}
+                  valueFormat="currency"
+                  targetLine={derived.teamQuota}
+                  targetLabel="Q3 Quota"
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
+                  <KV label="Actual (Q3)" v={fmt(derived.teamActual)} />
+                  <KV label="Quota (Q3)" v={fmt(derived.teamQuota)} />
                   <KV
                     label="% of Quota"
                     v={pct(derived.teamPctOfQuota)}
                     color={derived.teamPctOfQuota >= 1 ? C.grn : C.t1}
                   />
                 </div>
-                <Bar value={derived.teamActual} target={derived.teamQuota} h={10} />
               </div>
             </Card>
           </div>
@@ -274,9 +298,7 @@ export default function Dashboard() {
             </div>
           </Card>
 
-          <Card
-            title={period === "monthly" ? "ARR Trend Table (Monthly)" : "ARR Trend Table (Weekly)"}
-          >
+          <Card title={period === "monthly" ? "ARR Trend Table (Monthly)" : "ARR Trend Table (Weekly)"}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
@@ -294,9 +316,7 @@ export default function Dashboard() {
                     <Td mono>{fmt(p.newARR)}</Td>
                     <Td mono>{fmt(p.activeARR)}</Td>
                     <Td mono color={C.red}>{fmt(p.churnedARR)}</Td>
-                    <Td mono color={(p.changePct ?? 0) >= 0 ? C.grn : C.red}>
-                      {pct(p.changePct)}
-                    </Td>
+                    <Td mono color={(p.changePct ?? 0) >= 0 ? C.grn : C.red}>{pct(p.changePct)}</Td>
                   </tr>
                 ))}
               </tbody>
@@ -307,14 +327,7 @@ export default function Dashboard() {
             <div style={{ padding: 20, display: "grid", gap: 16 }}>
               {data.aeAttainment.reps.map((rep) => (
                 <div key={rep.name}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      fontSize: 13,
-                      marginBottom: 6,
-                    }}
-                  >
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6 }}>
                     <span style={{ fontWeight: 600, color: C.t1 }}>{rep.name}</span>
                     <span style={{ color: C.t2 }}>
                       {fmt(rep.actual)} / {fmt(rep.quota)} ({pct(rep.pctOfQuota)})
@@ -330,118 +343,12 @@ export default function Dashboard() {
 
       {tab === "pipeline" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          {(() => {
-            const { newArrMom, newOppsMom } = data.pipelineWow;
-            const qtdIdxArr = newArrMom.months
-              .map((m, i) => (Q3_FY26_MONTHS.includes(m) ? i : -1))
-              .filter((i) => i >= 0);
-
-            function qtdSum(reps: Record<string, number[]>, rep: string) {
-              const vals = reps[rep] ?? [];
-              return qtdIdxArr.reduce((s, i) => s + (vals[i] ?? 0), 0);
-            }
-
-            const repNames = Object.keys(AE_PLAN);
-            const teamGenerated = repNames.reduce(
-              (s, r) => s + qtdSum(newArrMom.reps, r),
-              0
-            );
-            const teamOpps = repNames.reduce(
-              (s, r) => s + qtdSum(newOppsMom.reps, r),
-              0
-            );
-            const teamOpenPipeline = (data.pipeline.sections["1. TOTAL PIPELINE"] ?? [])
-              .find((m) => m.metric === "Total Pipeline (ARR)")?.value ?? 0;
-
-            return (
-              <>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(3, 1fr)",
-                    gap: 16,
-                    marginBottom: 20,
-                  }}
-                >
-                  <Card title="Pipe Created QTD (TCV)">
-                    <div style={{ padding: 20 }}>
-                      <KV
-                        label={`${((teamGenerated / TEAM_PIPE_GEN_TARGET_Q3) * 100).toFixed(0)}% of ${fmt(TEAM_PIPE_GEN_TARGET_Q3)} goal`}
-                        v={fmt(teamGenerated)}
-                        color={C.coralDk}
-                      />
-                    </div>
-                  </Card>
-                  <Card title="Open Pipeline (All)">
-                    <div style={{ padding: 20 }}>
-                      <KV label="Total ARR-weighted open deals" v={fmt(teamOpenPipeline)} />
-                    </div>
-                  </Card>
-                  <Card title="New Opps This Quarter">
-                    <div style={{ padding: 20 }}>
-                      <KV label="Opportunities reaching SQL" v={String(teamOpps)} />
-                    </div>
-                  </Card>
-                </div>
-
-                <Card
-                  title="Pipeline Generation by AE — Q3 FY26"
-                  sub="New pipeline created this quarter (Amount of opps reaching SQL) vs each AE's quarterly pipe-generation target."
-                >
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>AE</Th>
-                        <Th>Gen Target</Th>
-                        <Th>Generated QTD</Th>
-                        <Th l>Progress</Th>
-                        <Th># Opps</Th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {repNames.map((rep) => {
-                        const plan = AE_PLAN[rep];
-                        const generated = qtdSum(newArrMom.reps, rep);
-                        const opps = qtdSum(newOppsMom.reps, rep);
-                        return (
-                          <tr key={rep} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                            <Td l bold>{plan.short}</Td>
-                            <Td mono>
-                              {plan.pipeGenTargetQ3 > 0 ? fmt(plan.pipeGenTargetQ3) : "—"}
-                            </Td>
-                            <Td mono color={C.purp}>{fmt(generated)}</Td>
-                            <td style={{ padding: "10px 16px", width: 160 }}>
-                              {plan.pipeGenTargetQ3 > 0 ? (
-                                <Bar value={generated} target={plan.pipeGenTargetQ3} />
-                              ) : (
-                                <span style={{ fontSize: 12, color: C.t3 }}>no target</span>
-                              )}
-                            </td>
-                            <Td mono>{opps}</Td>
-                          </tr>
-                        );
-                      })}
-                      <tr style={{ borderTop: `2px solid ${C.navy}`, fontWeight: 700 }}>
-                        <Td l bold>Team (AEs)</Td>
-                        <Td mono bold>{fmt(TEAM_PIPE_GEN_TARGET_Q3)}</Td>
-                        <Td mono bold color={C.purp}>{fmt(teamGenerated)}</Td>
-                        <td style={{ padding: "10px 16px" }}>
-                          <Bar value={teamGenerated} target={TEAM_PIPE_GEN_TARGET_Q3} />
-                        </td>
-                        <Td mono bold>{teamOpps}</Td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </Card>
-              </>
-            );
-          })()}
-
-          <div style={{ marginBottom: 12, marginTop: 8 }}>
-            <Pill tone="blue">Stage/coverage view filtered by: {data.pipeline.filterRep}</Pill>
+          <div style={{ marginBottom: 12 }}>
+            <Pill tone="blue">Filtered by: {data.pipeline.filterRep}</Pill>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-            {Object.entries(data.pipeline.sections).map(([section, rows]) => (
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
+            {Object.entries(data.pipeline.metricSections).map(([section, rows]) => (
               <Card key={section} title={section}>
                 <div style={{ padding: 16 }}>
                   {rows.map((row) => (
@@ -457,11 +364,7 @@ export default function Dashboard() {
                     >
                       <span style={{ color: C.t2 }}>{row.metric}</span>
                       <span style={{ fontFamily: "var(--font-dm-mono)", color: C.t1 }}>
-                        {row.metric.toLowerCase().includes("ratio")
-                          ? row.value.toFixed(2) + "x"
-                          : row.metric.toLowerCase().includes("%")
-                          ? pct(row.value)
-                          : fmt(row.value)}
+                        {formatMetric(row)}
                       </span>
                     </div>
                   ))}
@@ -469,6 +372,83 @@ export default function Dashboard() {
               </Card>
             ))}
           </div>
+
+          <Card title="AE Pipeline Breakdown — Q3 FY26" sub="Quota vs actual open pipeline per AE, from your Pipeline tab">
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                  <Th l>AE</Th>
+                  <Th>Q3 Pipe Quota</Th>
+                  <Th>Actual Pipeline</Th>
+                  <Th l>Progress</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.pipeline.aeBreakdown.map((row) => (
+                  <tr key={row.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                    <Td l bold>{row.name}</Td>
+                    <Td mono>{row.quota != null ? fmt(row.quota) : "—"}</Td>
+                    <Td mono color={C.purp}>{fmt(row.actual)}</Td>
+                    <td style={{ padding: "10px 16px", width: 160 }}>
+                      {row.quota != null && row.quota > 0 ? (
+                        <Bar value={row.actual} target={row.quota} />
+                      ) : (
+                        <span style={{ fontSize: 12, color: C.t3 }}>no quota</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, margin: "18px 0" }}>
+            {Object.entries(data.pipeline.breakdownSections).map(([section, rows]) => (
+              <Card key={section} title={section}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      <Th l>{section.includes("STAGE") ? "Stage" : section.includes("SOURCE") ? "Source" : "Age"}</Th>
+                      <Th># Opps</Th>
+                      <Th>ARR</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                        <Td l bold={row.label === "TOTAL"}>{row.label}</Td>
+                        <Td mono>{row.opps}</Td>
+                        <Td mono>{fmt(row.arr)}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            ))}
+          </div>
+
+          <Card title="9. Weighted Pipeline" sub="Stage probability weights as configured in your Pipeline tab">
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                  <Th l>Stage</Th>
+                  <Th>ARR</Th>
+                  <Th>Probability</Th>
+                  <Th>Weighted ARR</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.pipeline.stageWeights.map((row) => (
+                  <tr key={row.stage} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                    <Td l bold>{row.stage}</Td>
+                    <Td mono>{fmt(row.arr)}</Td>
+                    <Td mono>{pct(row.probability)}</Td>
+                    <Td mono color={C.purp}>{fmt(row.weighted)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
 
           <Card
             title="Pipeline Progression — Week over Week"
@@ -519,9 +499,7 @@ export default function Dashboard() {
                     <Td l bold>{rep.name}</Td>
                     <Td mono>{fmt(rep.quota)}</Td>
                     <Td mono>{fmt(rep.actual)}</Td>
-                    <Td mono color={rep.pctOfQuota >= 1 ? C.grn : C.t1}>
-                      {pct(rep.pctOfQuota)}
-                    </Td>
+                    <Td mono color={rep.pctOfQuota >= 1 ? C.grn : C.t1}>{pct(rep.pctOfQuota)}</Td>
                     <td style={{ padding: "10px 16px", width: 160 }}>
                       <Bar value={rep.actual} target={rep.quota} />
                     </td>
@@ -591,11 +569,7 @@ export default function Dashboard() {
             </Card>
             <Card title="AE-Weighted Forecast">
               <div style={{ padding: 20 }}>
-                <KV
-                  label="Stage-adjusted realistic value"
-                  v={fmt(data.forecast.weightedTotal)}
-                  color={C.purp}
-                />
+                <KV label="Stage-adjusted realistic value" v={fmt(data.forecast.weightedTotal)} color={C.purp} />
               </div>
             </Card>
             <Card title="Historical Win Rate Basis">
@@ -608,10 +582,7 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          <Card
-            title="Pipeline by Stage — Raw vs Weighted"
-            sub="Weighted value = ARR × derived win rate for that stage"
-          >
+          <Card title="Pipeline by Stage — Raw vs Weighted" sub="Weighted value = ARR × derived win rate for that stage">
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
@@ -662,6 +633,33 @@ export default function Dashboard() {
                     </Td>
                     <Td mono>{b.count}</Td>
                     <Td mono>{fmt(b.arr)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+
+          <Card title="Largest Open Deals" sub="Top 25 open deals, ranked by ARR">
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                  <Th l>Deal</Th>
+                  <Th l>Owner</Th>
+                  <Th l>Stage</Th>
+                  <Th>ARR</Th>
+                  <Th>Days Since Stage Change</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.rankedDeals.map((d, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                    <Td l>{d.name}</Td>
+                    <Td l>{d.owner}</Td>
+                    <Td l>{d.stage}</Td>
+                    <Td mono bold>{fmt(d.arr)}</Td>
+                    <Td mono color={(d.ageDays ?? 0) > 90 ? C.red : (d.ageDays ?? 0) > 30 ? C.ylw : C.t1}>
+                      {d.ageDays ?? "—"}
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -726,10 +724,7 @@ export default function Dashboard() {
 
       {tab === "actions" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          <Card
-            title="Who Does What — Open Pipeline by Owner"
-            sub="Stale = no stage change in 60+ days"
-          >
+          <Card title="Who Does What — Open Pipeline by Owner" sub="Stale = no stage change in 60+ days">
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.bd}` }}>

@@ -64,7 +64,17 @@ export function parseArrTab(rows: Row[]) {
 
 export function parseAeAttainmentTab(rows: Row[]) {
   const headerIdx = rows.findIndex((r) => r[0] === "AE");
-  if (headerIdx === -1) return { reps: [] };
+  if (headerIdx === -1) return { reps: [], monthlyTeamActual: [] };
+
+  const headerRow = rows[headerIdx];
+  // Month columns repeat every 3 starting at index 4: Month, MoM$, MoM%
+  const monthCols: { idx: number; label: string }[] = [];
+  for (let c = 4; c < headerRow.length; c += 3) {
+    const v = headerRow[c];
+    if (typeof v === "string" && /^[A-Za-z]{3}-\d{2}$/.test(v)) {
+      monthCols.push({ idx: c, label: v });
+    }
+  }
 
   const reps: {
     name: string;
@@ -72,6 +82,7 @@ export function parseAeAttainmentTab(rows: Row[]) {
     pctOfQuota: number;
     actual: number;
   }[] = [];
+  const monthlySums = monthCols.map(() => 0);
 
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i];
@@ -82,37 +93,104 @@ export function parseAeAttainmentTab(rows: Row[]) {
       pctOfQuota: Number(r[2] ?? 0),
       actual: Number(r[3] ?? 0),
     });
+    monthCols.forEach((m, mi) => {
+      monthlySums[mi] += Number(r[m.idx] ?? 0);
+    });
   }
 
-  return { reps };
+  const monthlyTeamActual = monthCols.map((m, i) => ({
+    label: m.label,
+    actual: monthlySums[i],
+  }));
+
+  return { reps, monthlyTeamActual };
 }
+
+type MetricRow = { metric: string; value: number; kind: "currency" | "count" | "percent" | "ratio" };
+type BreakdownRow = { label: string; opps: number; arr: number; pctOfTotal: number };
+type StageWeightRow = { stage: string; arr: number; probability: number; weighted: number };
+type AeBreakdownRow = { name: string; quota: number | null; actual: number };
 
 export function parsePipelineTab(rows: Row[]) {
   const filterRow = rows.find((r) => r[4] === "🔍 Filter by Rep:");
   const filterRep = filterRow ? String(filterRow[5]) : "All";
 
-  const sections: Record<string, { metric: string; value: number }[]> = {};
-  let currentSection = "";
+  const metricSections: Record<string, MetricRow[]> = {};
+  const breakdownSections: Record<string, BreakdownRow[]> = {};
+  let stageWeights: StageWeightRow[] = [];
+  let aeBreakdown: AeBreakdownRow[] = [];
 
-  for (const r of rows) {
-    if (r[0] && typeof r[0] === "string" && /^\d\./.test(r[0])) {
-      currentSection = r[0];
-      sections[currentSection] = [];
-    } else if (
-      currentSection &&
-      r[0] &&
-      r[0] !== "Metric" &&
-      r[0] !== "Stage" &&
-      typeof r[1] === "number"
-    ) {
-      sections[currentSection].push({
-        metric: String(r[0]),
-        value: Number(r[1]),
+  let currentSection = "";
+  let mode: "metric" | "breakdown" | "weight" | "ae" | "" = "";
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const label = r[0];
+
+    if (typeof label === "string" && /^\d+\./.test(label)) {
+      currentSection = label;
+      mode = "";
+      continue;
+    }
+    if (label === "AE Pipeline Breakdown") {
+      mode = "ae";
+      continue;
+    }
+    if (label === "Metric" && r[1] === "Value") {
+      mode = "metric";
+      metricSections[currentSection] = [];
+      continue;
+    }
+    if (r[1] === "# Opps" && r[2] === "Total ARR") {
+      mode = "breakdown";
+      breakdownSections[currentSection] = [];
+      continue;
+    }
+    if (label === "Stage" && r[1] === "Total ARR" && r[2] === "Probability %") {
+      mode = "weight";
+      continue;
+    }
+    if (label === "AE Name") {
+      mode = "ae";
+      continue;
+    }
+
+    if (!label || typeof label !== "string") continue;
+
+    if (mode === "metric" && typeof r[1] === "number") {
+      const l = label.toLowerCase();
+      const kind: MetricRow["kind"] = l.includes("ratio")
+        ? "ratio"
+        : l.includes("%")
+        ? "percent"
+        : l.startsWith("#") || l.includes("# new") || l.includes("total opportunities")
+        ? "count"
+        : "currency";
+      metricSections[currentSection].push({ metric: label, value: r[1], kind });
+    } else if (mode === "breakdown" && typeof r[1] === "number") {
+      breakdownSections[currentSection].push({
+        label,
+        opps: Number(r[1] ?? 0),
+        arr: Number(r[2] ?? 0),
+        pctOfTotal: Number(r[3] ?? 0),
+      });
+    } else if (mode === "weight" && typeof r[1] === "number") {
+      stageWeights.push({
+        stage: label,
+        arr: Number(r[1] ?? 0),
+        probability: Number(r[2] ?? 0),
+        weighted: Number(r[3] ?? 0),
+      });
+    } else if (mode === "ae" && (typeof r[1] === "number" || r[1] == null)) {
+      aeBreakdown.push({
+        name: label,
+        quota: typeof r[1] === "number" ? r[1] : null,
+        actual: Number(r[2] ?? 0),
       });
     }
   }
 
-  return { filterRep, sections };
+  return { filterRep, metricSections, breakdownSections, stageWeights, aeBreakdown };
 }
 
 export function parsePipelineWowTab(rows: Row[]) {

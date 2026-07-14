@@ -7,10 +7,14 @@ export function BarTrendChart({
   labels,
   values,
   valueFormat = "number",
+  targetLine,
+  targetLabel,
 }: {
   labels: string[];
   values: number[];
   valueFormat?: "number" | "currency";
+  targetLine?: number;
+  targetLabel?: string;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
@@ -27,7 +31,7 @@ export function BarTrendChart({
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
-  const max = Math.max(...values, 1) * 1.1;
+  const max = Math.max(...values, targetLine ?? 0, 1) * 1.1;
   const barW = (innerW / labels.length) * 0.65;
   const gap = innerW / labels.length;
 
@@ -45,6 +49,22 @@ export function BarTrendChart({
         onMouseLeave={() => setHoverIdx(null)}
       >
         <line x1={padL} x2={W - padR} y1={padT + innerH} y2={padT + innerH} stroke={C.bd} />
+        {targetLine != null && (
+          <g>
+            <line
+              x1={padL}
+              x2={W - padR}
+              y1={y(targetLine)}
+              y2={y(targetLine)}
+              stroke={C.coral}
+              strokeWidth={1.5}
+              strokeDasharray="5,4"
+            />
+            <text x={W - padR} y={y(targetLine) - 5} textAnchor="end" fontSize={10} fontWeight={600} fill={C.coralDk}>
+              {targetLabel ?? "Target"}: {fmtVal(targetLine)}
+            </text>
+          </g>
+        )}
         {values.map((v, i) => {
           const x = padL + i * gap + (gap - barW) / 2;
           const barH = innerH - (y(v) - padT);

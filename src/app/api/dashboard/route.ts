@@ -11,6 +11,7 @@ import {
   parseQuery2,
   computeWinRates,
   computeAgingBuckets,
+  rankOpenDeals,
   computeForecast,
   computeWinRateAndCycle,
   computeAcvDistribution,
@@ -40,6 +41,7 @@ export async function GET() {
 
     const winRates = computeWinRates(closedDeals);
     const dealHealth = computeAgingBuckets(openDeals);
+    const rankedDeals = rankOpenDeals(openDeals);
     const forecast = computeForecast(openDeals, winRates.rates);
     const currentYear = new Date().getUTCFullYear();
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
@@ -72,6 +74,7 @@ export async function GET() {
       pipeline,
       pipelineWow,
       dealHealth,
+      rankedDeals,
       forecast,
       winRates: { derived: winRates.derived, n: winRates.n, overall: winRates.overall },
       winRateYtd,

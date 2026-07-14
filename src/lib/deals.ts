@@ -159,6 +159,24 @@ export function computeAgingBuckets(openDeals: OpenDeal[], asOf: Date = new Date
   return buckets;
 }
 
+// Ranked list of open deals by ARR, with computed age in days — for a "biggest/stalest deals" table.
+export function rankOpenDeals(openDeals: OpenDeal[], asOf: Date = new Date(), topN = 25) {
+  return openDeals
+    .map((d) => {
+      const ref = d.lastStageChangeDate ?? d.createdDate;
+      const ageDays = ref ? Math.floor((asOf.getTime() - ref.getTime()) / 86400000) : null;
+      return {
+        name: d.name,
+        owner: d.owner,
+        stage: d.stage,
+        arr: d.arr,
+        ageDays,
+      };
+    })
+    .sort((a, b) => b.arr - a.arr)
+    .slice(0, topN);
+}
+
 // Forecast — stage-weighted pipeline using derived win rates.
 export function computeForecast(openDeals: OpenDeal[], rates: Record<string, number>) {
   let rawTotal = 0;
