@@ -227,6 +227,80 @@ export default function Dashboard() {
 
   const activeWowMetric = wowMetric ?? wowMetrics[0]?.metric ?? null;
 
+  const execSummary = useMemo(() => {
+    if (!data) return null;
+    const months = data.arr.monthly;
+    const latest = months[months.length - 1];
+    const arrNow = latest?.activeARR ?? 0;
+    const gap = 10000000 - arrNow;
+
+    // Q3 pipe generation vs quota vs time elapsed
+    const aeRows = data.pipeline.aeBreakdown.filter((r) => r.name !== "TOTAL");
+    const quota = aeRows.reduce((s, r) => s + (r.quota ?? 0), 0);
+    const gen = Object.values(q3CreatedByOwner).reduce((s, n) => s + n, 0);
+    const genPct = quota > 0 ? (gen / quota) * 100 : 0;
+    const qStart = new Date("2026-07-01").getTime();
+    const qEnd = new Date("2026-09-30").getTime();
+    const elapsedPct = Math.min(100, Math.max(0, ((Date.now() - qStart) / (qEnd - qStart)) * 100));
+    const paceRatio = elapsedPct > 0 ? genPct / elapsedPct : 0;
+    const genStatus =
+      paceRatio >= 0.9
+        ? { label: "On pace", tone: "good" as const }
+        : paceRatio >= 0.5
+        ? { label: "Watch", tone: "warn" as const }
+        : { label: "Behind", tone: "bad" as const };
+
+    // Weekly ARR creation WoW
+    const arrRow = wowMetrics.find((m) => m.metric.includes("New ARR"));
+    const wowDelta = arrRow ? wowDeltaPct(arrRow.values) : null;
+
+    // Churn: latest month vs prior 3-month average
+    const churnLast = latest?.churnedARR ?? 0;
+    const prior = months.slice(-4, -1).map((m) => m.churnedARR);
+    const priorAvg = prior.length ? prior.reduce((s, n) => s + n, 0) / prior.length : 0;
+    const churn12 = months.slice(-12).reduce((s, m) => s + m.churnedARR, 0);
+    const churnStatus =
+      priorAvg > 0 && churnLast > priorAvg * 1.2
+        ? { label: "Rising", tone: "bad" as const }
+        : churnLast === 0 || churnLast < priorAvg * 0.8
+        ? { label: "Low", tone: "good" as const }
+        : { label: "Watch", tone: "warn" as const };
+
+    const coverage =
+      data.pipeline.metricSections["3. PIPELINE COVERAGE"]?.find(
+        (m) => m.metric === "Pipeline Coverage Ratio"
+      )?.value ?? 0;
+    const coverageStatus =
+      coverage >= 3
+        ? { label: "Healthy", tone: "good" as const }
+        : coverage >= 2
+        ? { label: "Watch", tone: "warn" as const }
+        : { label: "Low", tone: "bad" as const };
+
+    const arrStatus =
+      (latest?.changePct ?? 0) >= 0
+        ? { label: "On track", tone: "good" as const }
+        : { label: "Declining", tone: "bad" as const };
+
+    return {
+      arrNow,
+      gap,
+      arrMoM: latest?.changePct ?? null,
+      gen,
+      quota,
+      genPct,
+      elapsedPct,
+      genStatus,
+      wowDelta,
+      churnLast,
+      churn12,
+      churnStatus,
+      coverage,
+      coverageStatus,
+      arrStatus,
+    };
+  }, [data, q3CreatedByOwner, wowMetrics]);
+
   const pipelineTrend = useMemo(() => {
     if (!data) return { labels: [], values: [] };
     const filtered = data.trendEvents.filter(
@@ -346,33 +420,77 @@ export default function Dashboard() {
           </div>
 
           <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-            <Card title="ARR Trend — Path to $10M" sub="Hover a point for details · dashed line = $10M milestone" accent={C.coral}>
-              <div style={{ padding: "16px 20px" }}>
-                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-                  <ChartPeriodToggle period={period} onChange={setPeriod} />
-                </div>
-                <ArrChart points={chartPoints} milestone={10000000} milestoneLabel="$10M Milestone" />
-              </div>
-            </Card>
-
-            {(() => {
-              const mixWindow = period === "monthly" ? chartPoints.slice(-3) : chartPoints.slice(-13);
+            {execSummary && (() => {
+              const S = execSummary;
+              const toneMap = {
+                good: { bg: C.grnBg, fg: C.grn },
+                warn: { bg: C.ylwBg, fg: C.ylw },
+                bad: { bg: C.redBg, fg: C.red },
+              };
+              const Pill2 = ({ s }: { s: { label: string; tone: "good" | "warn" | "bad" } }) => (
+                <span style={{ background: toneMap[s.tone].bg, color: toneMap[s.tone].fg, fontSize: 10.5, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>
+                  {s.label}
+                </span>
+              );
+              const wowPhrase =
+                S.wowDelta == null
+                  ? ""
+                  : S.wowDelta >= 0
+                  ? ` while weekly ARR creation rebounded +${Math.round(S.wowDelta)}% WoW`
+                  : ` while weekly ARR creation declined ${Math.round(S.wowDelta)}% WoW`;
               return (
-                <Card
-                  title="New ARR Mix — Net New vs Expansion vs Renewal"
-                  sub={period === "monthly" ? "Last 3 months, grouped per month" : "Last 13 weeks, grouped per week"}
-                >
-                  <div style={{ padding: "16px 20px" }}>
-                    <GroupedBarChart
-                      labels={mixWindow.map((m) => m.label)}
-                      series={[
-                        { label: "Net New", values: mixWindow.map((m) => m.newBusiness), color: C.navy },
-                        { label: "Expansion", values: mixWindow.map((m) => m.expansion), color: C.teal },
-                        { label: "Renewal", values: mixWindow.map((m) => m.renewals), color: C.coralDk },
-                      ]}
-                    />
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ background: C.navy, borderRadius: 14, padding: "18px 22px", marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", color: "#9FAAC6", marginBottom: 6 }}>
+                      Executive Summary · auto-generated from live data
+                    </div>
+                    <div style={{ fontSize: 16.5, lineHeight: 1.55, color: "#fff", fontWeight: 500 }}>
+                      ARR sits at <span style={{ color: "#9FD9A4", fontFamily: "var(--font-dm-mono)" }}>{fmt(S.arrNow)}</span> — {fmt(S.gap)} from the $10M milestone. Pipeline generation is{" "}
+                      <span style={{ color: S.genStatus.tone === "good" ? "#9FD9A4" : "#F0A99C" }}>
+                        {S.genStatus.tone === "good" ? "on pace" : "behind pace"}
+                      </span>{" "}
+                      at {S.genPct.toFixed(0)}% of the Q3 quota with {(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining{wowPhrase}.
+                    </div>
                   </div>
-                </Card>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                    <div style={{ background: C.card, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "12px 14px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", color: C.t3 }}>ARR Pace</span>
+                        <Pill2 s={S.arrStatus} />
+                      </div>
+                      <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 17, fontWeight: 600, color: C.t1 }}>{fmt(S.arrNow)}</div>
+                      <div style={{ fontSize: 11.5, color: C.t2, marginTop: 2 }}>
+                        {S.arrMoM != null ? pct(S.arrMoM) + " MoM" : "—"} · gap {fmt(S.gap)}
+                      </div>
+                    </div>
+                    <div style={{ background: C.card, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "12px 14px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", color: C.t3 }}>Pipe Gen Q3</span>
+                        <Pill2 s={S.genStatus} />
+                      </div>
+                      <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 17, fontWeight: 600, color: C.t1 }}>{fmt(S.gen)}</div>
+                      <div style={{ fontSize: 11.5, color: C.t2, marginTop: 2 }}>
+                        {S.genPct.toFixed(0)}% of {fmt(S.quota)} · {S.elapsedPct.toFixed(0)}% of Q gone
+                      </div>
+                    </div>
+                    <div style={{ background: C.card, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "12px 14px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", color: C.t3 }}>Churn</span>
+                        <Pill2 s={S.churnStatus} />
+                      </div>
+                      <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 17, fontWeight: 600, color: C.t1 }}>{fmt(S.churnLast)} / mo</div>
+                      <div style={{ fontSize: 11.5, color: C.t2, marginTop: 2 }}>{fmt(S.churn12)} cum. 12mo</div>
+                    </div>
+                    <div style={{ background: C.card, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "12px 14px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", color: C.t3 }}>Coverage</span>
+                        <Pill2 s={S.coverageStatus} />
+                      </div>
+                      <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 17, fontWeight: 600, color: C.t1 }}>{S.coverage.toFixed(2)}x</div>
+                      <div style={{ fontSize: 11.5, color: C.t2, marginTop: 2 }}>open pipe vs Q3 quota</div>
+                    </div>
+                  </div>
+                </div>
               );
             })()}
 
@@ -422,6 +540,36 @@ export default function Dashboard() {
                 })}
               </div>
             </Card>
+
+            <Card title="ARR Trend — Path to $10M" sub="Hover a point for details · dashed line = $10M milestone" accent={C.coral}>
+              <div style={{ padding: "16px 20px" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+                  <ChartPeriodToggle period={period} onChange={setPeriod} />
+                </div>
+                <ArrChart points={chartPoints} milestone={10000000} milestoneLabel="$10M Milestone" />
+              </div>
+            </Card>
+
+            {(() => {
+              const mixWindow = period === "monthly" ? chartPoints.slice(-3) : chartPoints.slice(-13);
+              return (
+                <Card
+                  title="New ARR Mix — Net New vs Expansion vs Renewal"
+                  sub={period === "monthly" ? "Last 3 months, grouped per month" : "Last 13 weeks, grouped per week"}
+                >
+                  <div style={{ padding: "16px 20px" }}>
+                    <GroupedBarChart
+                      labels={mixWindow.map((m) => m.label)}
+                      series={[
+                        { label: "Net New", values: mixWindow.map((m) => m.newBusiness), color: C.navy },
+                        { label: "Expansion", values: mixWindow.map((m) => m.expansion), color: C.teal },
+                        { label: "Renewal", values: mixWindow.map((m) => m.renewals), color: C.coralDk },
+                      ]}
+                    />
+                  </div>
+                </Card>
+              );
+            })()}
 
             <Card
               title="Team ARR Attainment — Cumulative"
