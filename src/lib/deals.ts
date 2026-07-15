@@ -272,3 +272,159 @@ export function computeAcvDistribution(closedDeals: ClosedDeal[]) {
   const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
   return { buckets, avg, median, count: sorted.length };
 }
+
+// ── Forecast tab: in-quarter per-AE potential, mirroring the original dashboard ──
+export type ForecastRow = {
+  name: string;
+  am: boolean;
+  openPipe: number;
+  quota: number | null;
+  closedWon: number;
+  potNB: number;
+  potExp: number;
+  potential: number;
+  variance: number | null;
+  attainP: number | null;
+};
+
+const isExpRt = (rt: string) => rt.includes("Expansion");
+const isRenewalRt = (rt: string) => rt.includes("Renewal");
+const isNBRt = (rt: string) => rt.includes("New Business");
+
+export function computeForecastTab(
+  openDeals: OpenDeal[],
+  closedDeals: ClosedDeal[],
+  roster: { name: string; short: string; quota: number | null; am: boolean }[],
+  qStartISO: string,
+  qEndISO: string,
+  currentLiveARR: number,
+  annualTarget: number
+) {
+  const rosterNames = new Set(roster.map((r) => r.name));
+
+  const cwByOwner: Record<string, { nb: number; exp: number }> = {};
+  for (const d of closedDeals) {
+    if (!d.isWon || !d.closeDate) continue;
+    const iso = d.closeDate.toISOString().slice(0, 10);
+    if (iso < qStartISO || iso >= qEndISO) continue;
+    if (!rosterNames.has(d.owner)) continue;
+    if (!cwByOwner[d.owner]) cwByOwner[d.owner] = { nb: 0, exp: 0 };
+    if (isExpRt(d.recordType)) cwByOwner[d.owner].exp += d.arr;
+    else if (isNBRt(d.recordType)) cwByOwner[d.owner].nb += d.arr;
+  }
+
+  const openByOwner: Record<string, { pipe: number; potNB: number; potExp: number }> = {};
+  for (const d of openDeals) {
+    if (!rosterNames.has(d.owner)) continue;
+    if (!openByOwner[d.owner]) openByOwner[d.owner] = { pipe: 0, potNB: 0, potExp: 0 };
+    openByOwner[d.owner].pipe += d.arr;
+    if (isRenewalRt(d.recordType)) continue;
+    if (isExpRt(d.recordType)) openByOwner[d.owner].potExp += d.expectedRevQ;
+    else if (isNBRt(d.recordType)) openByOwner[d.owner].potNB += d.expectedRevQ;
+  }
+
+  const rows: ForecastRow[] = roster.map((a) => {
+    const cw = (cwByOwner[a.name]?.nb ?? 0) + (cwByOwner[a.name]?.exp ?? 0);
+    const potNB = openByOwner[a.name]?.potNB ?? 0;
+    const potExp = openByOwner[a.name]?.potExp ?? 0;
+    const potential = cw + potNB + potExp;
+    return {
+      name: a.name,
+      am: a.am,
+      openPipe: openByOwner[a.name]?.pipe ?? 0,
+      quota: a.quota,
+      closedWon: cw,
+      potNB,
+      potExp,
+      potential,
+      variance: a.quota != null ? potential - a.quota : null,
+      attainP: a.quota ? potential / a.quota : null,
+    };
+  });
+
+  const sum = (rs: ForecastRow[]) => {
+    const s = (k: keyof ForecastRow) => rs.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+    const quota = s("quota");
+    const potential = s("potential");
+    return {
+      openPipe: s("openPipe"),
+      quota,
+      closedWon: s("closedWon"),
+      potNB: s("potNB"),
+      potExp: s("potExp"),
+      potential,
+      variance: potential - quota,
+      attainP: quota ? potential / quota : null,
+    };
+  };
+  const aeTeam = sum(rows.filter((r) => !r.am));
+  const totalInclAM = sum(rows);
+
+  const YE_WR = 0.25;
+  let rawAnnual = 0;
+  let weightedAnnual = 0;
+  const byStageW: Record<string, { raw: number; weighted: number }> = {};
+  for (const d of openDeals) {
+    rawAnnual += d.arr;
+    const w = d.arr * YE_WR;
+    weightedAnnual += w;
+    if (!byStageW[d.stage]) byStageW[d.stage] = { raw: 0, weighted: 0 };
+    byStageW[d.stage].raw += d.arr;
+    byStageW[d.stage].weighted += w;
+  }
+  const projYE = currentLiveARR + weightedAnnual;
+  const annualGap = annualTarget - projYE;
+
+  const now = new Date();
+  const qEnd = new Date(qEndISO).getTime();
+  const daysLeft = Math.max(0, Math.ceil((qEnd - now.getTime()) / 86400000));
+  const weeksLeft = Math.max(0, Math.ceil(daysLeft / 7));
+  const teamQuota = aeTeam.quota;
+  const teamActual = aeTeam.closedWon;
+  const quotaGap = Math.max(0, teamQuota - teamActual);
+  const quotaPerWeek = weeksLeft > 0 ? quotaGap / weeksLeft : 0;
+
+  let potOpenQ = 0;
+  for (const d of openDeals) {
+    if (!rosterNames.has(d.owner)) continue;
+    if (!isNBRt(d.recordType)) continue;
+    if (d.closeDate) {
+      const iso = d.closeDate.toISOString().slice(0, 10);
+      if (iso < qStartISO || iso >= qEndISO) continue;
+    }
+    potOpenQ += d.expectedRevQ;
+  }
+  const teamActualNB = roster.filter((r) => !r.am).reduce((s, a) => s + (cwByOwner[a.name]?.nb ?? 0), 0);
+  const potentialLanding = teamActualNB + potOpenQ;
+
+  const decideDeals = openDeals
+    .filter((d) => rosterNames.has(d.owner))
+    .map((d) => {
+      const ref = d.lastStageChangeDate ?? d.createdDate;
+      const ageDays = ref ? Math.floor((now.getTime() - ref.getTime()) / 86400000) : null;
+      return { name: d.name, owner: d.owner, stage: d.stage, arr: d.arr, ageDays };
+    })
+    .sort((a, b) => b.arr - a.arr)
+    .slice(0, 40);
+
+  return {
+    rows,
+    aeTeam,
+    totalInclAM,
+    teamProjected: aeTeam.potential,
+    teamQuota,
+    teamActual,
+    projYE,
+    annualGap,
+    annualTarget,
+    currentLiveARR,
+    weightedAnnual,
+    rawAnnual,
+    daysLeft,
+    weeksLeft,
+    quotaGap,
+    quotaPerWeek,
+    potentialLanding,
+    decideDeals,
+  };
+}

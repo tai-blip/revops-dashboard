@@ -14,13 +14,31 @@ import {
   rankOpenDeals,
   buildTrendEvents,
   computeForecast,
+  computeForecastTab,
   computeWinRateAndCycle,
   computeAcvDistribution,
 } from "@/lib/deals";
+import {
+  SALES_Q,
+  currentSalesQ,
+  AE_ROSTER,
+  ANNUAL_END_TARGET,
+  CURRENT_LIVE_ARR_FALLBACK,
+} from "@/lib/planConfig";
 
 export const dynamic = "force-dynamic";
 
+const DEMO_MODE =
+  !process.env.GOOGLE_SHEET_ID ||
+  !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
+  (!process.env.GOOGLE_PRIVATE_KEY && !process.env.GOOGLE_PRIVATE_KEY_B64);
+
 export async function GET() {
+  if (DEMO_MODE) {
+    // No Google credentials configured — serve the bundled anonymized snapshot.
+    const demo = (await import("@/data/demo-snapshot.json")).default;
+    return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
+  }
   try {
     const [arrRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows] =
       await Promise.all([
@@ -45,6 +63,26 @@ export async function GET() {
     const rankedDeals = rankOpenDeals(openDeals);
     const trendEvents = buildTrendEvents(openDeals, closedDeals);
     const forecast = computeForecast(openDeals, winRates.rates);
+
+    // Full Forecast-tab computation (in-quarter per-AE, remainder, decide board, year-end)
+    const q = currentSalesQ();
+    const qDef = SALES_Q[q];
+    const latestArr = arr.monthly[arr.monthly.length - 1]?.activeARR ?? CURRENT_LIVE_ARR_FALLBACK;
+    const roster = AE_ROSTER.map((a) => ({
+      name: a.name,
+      short: a.short,
+      quota: a.quotaQ3,
+      am: a.am,
+    }));
+    const forecastTab = computeForecastTab(
+      openDeals,
+      closedDeals,
+      roster,
+      qDef.start,
+      qDef.end,
+      latestArr,
+      ANNUAL_END_TARGET
+    );
     const currentYear = new Date().getUTCFullYear();
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
     const acv = computeAcvDistribution(closedDeals);
@@ -79,6 +117,8 @@ export async function GET() {
       rankedDeals,
       trendEvents,
       forecast,
+      forecastTab,
+      quarter: { key: q, label: qDef.label, start: qDef.start, end: qDef.end },
       winRates: { derived: winRates.derived, n: winRates.n, overall: winRates.overall },
       winRateYtd,
       acv,

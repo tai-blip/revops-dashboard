@@ -42,12 +42,25 @@ export function currentSalesQ(now = new Date()): string {
 }
 
 // Which calendar-month indices (0=Jan) fall in a given sales quarter.
+// AE roster with Q3 quotas + AM flag, ported from the original AE_PLAN.
+// quota null / am:true → Account Manager (shown separately, excluded from AE-team totals).
 export function monthsInQuarter(q: string): number[] {
   const map: Record<string, number[]> = {
-    Q1: [1, 2, 3], // Feb–Apr (fiscal Q1 spans Feb 1 – Apr 2)
-    Q2: [3, 4, 5], // Apr–Jun
-    Q3: [6, 7, 8], // Jul–Sep
-    Q4: [9, 10, 11], // Oct–Dec
+    Q1: [1, 2, 3],
+    Q2: [3, 4, 5],
+    Q3: [6, 7, 8],
+    Q4: [9, 10, 11],
   };
   return map[q] ?? [6, 7, 8];
 }
+
+export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; am: boolean }[] = [
+  { name: "James Burdick", short: "James", quotaQ3: 255000, am: false },
+  { name: "Dorsa Mahmoudnia", short: "Dorsa", quotaQ3: 250000, am: false },
+  { name: "Jed Rutstein", short: "Jed", quotaQ3: 250000, am: false },
+  { name: "Jill Bucci", short: "Jill", quotaQ3: 200000, am: false },
+  { name: "Mathias Berthelemot", short: "Mathias", quotaQ3: 250000, am: true },
+];
+
+export const CURRENT_LIVE_ARR_FALLBACK = 5690808;
+
