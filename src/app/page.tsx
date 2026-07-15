@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { C, fmt, pct, Card, KV, Bar, Pill, HeroStat, Th, Td } from "@/lib/ui";
+import { C, fmt, pct, Card, KV, Bar, Pill, Th, Td } from "@/lib/ui";
 import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
 import { GroupedBarChart } from "@/lib/GroupedBarChart";
 import { Sparkline, DeltaPill, wowDeltaPct, fmtMetricValue } from "@/lib/Sparkline";
+import { TabHeader } from "@/lib/TabHeader";
 import type { ArrPoint } from "@/lib/parse";
 
 type MetricRow = { metric: string; value: number; kind: "currency" | "count" | "percent" | "ratio" };
@@ -88,27 +89,6 @@ function formatMetric(row: MetricRow): string {
     default:
       return fmt(row.value);
   }
-}
-
-function ExecBanner({ text }: { text: string | null }) {
-  if (!text) return null;
-  return (
-    <div style={{ background: C.navy, borderRadius: 14, padding: "16px 22px", marginBottom: 18 }}>
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          letterSpacing: ".06em",
-          textTransform: "uppercase",
-          color: "#9FAAC6",
-          marginBottom: 6,
-        }}
-      >
-        Executive Summary · auto-generated from live data
-      </div>
-      <div style={{ fontSize: 15.5, lineHeight: 1.55, color: "#fff", fontWeight: 500 }}>{text}</div>
-    </div>
-  );
 }
 
 function ChartPeriodToggle({
@@ -334,11 +314,16 @@ export default function Dashboard() {
     const teamQuota = data.aeAttainment.reps.reduce((s, r) => s + r.quota, 0);
     const teamActual = data.aeAttainment.reps.reduce((s, r) => s + r.actual, 0);
     const teamPct = teamQuota > 0 ? (teamActual / teamQuota) * 100 : 0;
+    const below10 = reps.filter((r) => r.pctOfQuota < 0.1).length;
 
     const totalOpps =
       data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Opportunities")?.value ?? 0;
     const totalPipe =
       data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Pipeline (ARR)")?.value ?? 0;
+
+    const arrRow = wowMetrics.find((m) => m.metric.includes("New ARR"));
+    const arrClean = arrRow?.values.filter((v): v is number => v != null) ?? [];
+    const arrThisWeek = arrClean[arrClean.length - 1] ?? 0;
     const wowPhrase =
       S.wowDelta == null
         ? ""
@@ -356,17 +341,95 @@ export default function Dashboard() {
     const owners = Object.entries(data.whoDoesWhat).sort((a, b) => b[1].openArr - a[1].openArr);
     const topOwner = owners[0];
     const totalStaleArr = owners.reduce((s, [, v]) => s + v.staleArr, 0);
+    const totalOpenArr = owners.reduce((s, [, v]) => s + v.openArr, 0);
+    const totalOpenCount = owners.reduce((s, [, v]) => s + v.openCount, 0);
+    const flaggedOwners = owners.filter(([, v]) => v.staleCount > 0).length;
+
+    // Q3 ARR mix skew from last 3 months
+    const q3Win = months.slice(-3);
+    const nb = q3Win.reduce((s, m) => s + m.newBusiness, 0);
+    const mixTotal = q3Win.reduce((s, m) => s + m.newBusiness + m.expansion + m.renewals, 0);
+    const nbPct = mixTotal > 0 ? (nb / mixTotal) * 100 : 0;
+
+    const gp = (n: number | null | undefined) => (n != null ? pct(n) : "—");
 
     return {
-      targets: `New ARR added in ${latest?.label ?? "the latest month"}: ${fmt(latest?.newARR)}. The team sits at ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${pct(top.pctOfQuota)}` : ""}.`,
-      pipeline: `Q3 pipeline generation stands at ${fmt(S.gen)} — ${S.genPct.toFixed(0)}% of the ${fmt(S.quota)} quota with ${S.elapsedPct.toFixed(0)}% of the quarter gone (${S.genStatus.label.toLowerCase()}). Open pipeline totals ${fmt(totalPipe)} across ${totalOpps} opportunities at ${S.coverage.toFixed(1)}x coverage.${wowPhrase}`,
-      forecast: `Raw open pipeline of ${fmt(data.forecast.rawTotal)} weights down to ${fmt(data.forecast.weightedTotal)} after applying stage win rates${data.winRates.derived ? ` derived from ${data.winRates.n} closed deals (${data.winRates.overall != null ? pct(data.winRates.overall) : "—"} overall win rate)` : ""}.`,
-      health: `${fmt(staleArr)} of open pipeline (${staleCount} deals, ${stalePct.toFixed(0)}% of total) hasn't moved stages in 90+ days.${biggest ? ` Largest open deal: ${biggest.name} at ${fmt(biggest.arr)}${biggest.ageDays != null ? ` (${biggest.ageDays}d since last stage change)` : ""}.` : ""}`,
-      attainment: `Team attainment is ${teamPct.toFixed(1)}% of the Q3 quota (${fmt(teamActual)} of ${fmt(teamQuota)}).${top ? ` Top: ${top.name} at ${pct(top.pctOfQuota)}.` : ""}${bottom && bottom !== top ? ` Lowest: ${bottom.name} at ${pct(bottom.pctOfQuota)}.` : ""}`,
-      acv: `Average won deal is ${fmt(data.acv.avg)} (median ${fmt(data.acv.median)}) across ${data.acv.count} wins in 18 months. YTD win rate: ${data.winRateYtd.winRate != null ? pct(data.winRateYtd.winRate) : "—"} on ${data.winRateYtd.closedCount} closed New Business deals${data.winRateYtd.medianCycle != null ? `, median cycle ${data.winRateYtd.medianCycle}d SQL→close` : ""}.`,
-      actions: `${topOwner ? `${topOwner[0]} holds the most open pipeline (${fmt(topOwner[1].openArr)} across ${topOwner[1].openCount} deals). ` : ""}${fmt(totalStaleArr)} across all owners has been stale for 60+ days and needs action.`,
+      command: {
+        sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly ARR creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly ARR creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
+        stats: [
+          { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const },
+          { label: "New ARR (mo)", value: fmt(latest?.newARR) },
+          { label: "Churned (mo)", value: fmt(latest?.churnedARR), tone: "bad" as const },
+          { label: "MoM change", value: gp(S.arrMoM), tone: (S.arrMoM ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
+          { label: "Total pipeline", value: fmt(totalPipe) },
+          { label: "Coverage", value: S.coverage.toFixed(2) + "x", tone: S.coverage >= 3 ? ("good" as const) : ("warn" as const) },
+        ],
+      },
+      targets: {
+        sentence: `New ARR added in ${latest?.label ?? "the latest month"}: ${fmt(latest?.newARR)}. The team sits at ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` ARR mix this quarter skews ${nbPct.toFixed(0)}% Net New.` : ""}`,
+        stats: [
+          { label: "New ARR (latest mo)", value: fmt(latest?.newARR), sub: latest?.label },
+          { label: "Team actual Q3", value: fmt(teamActual), sub: "closed-won + live paying" },
+          { label: "Team quota Q3", value: fmt(teamQuota), sub: `across ${data.aeAttainment.reps.length} AEs` },
+          { label: "% of quota", value: teamPct.toFixed(1) + "%", sub: `${S.elapsedPct.toFixed(0)}% of quarter gone`, tone: teamPct >= S.elapsedPct ? ("good" as const) : ("bad" as const) },
+        ],
+      },
+      pipeline: {
+        sentence: `Q3 pipeline generation stands at ${fmt(S.gen)} — ${S.genPct.toFixed(0)}% of the ${fmt(S.quota)} quota with ${S.elapsedPct.toFixed(0)}% of the quarter gone (${S.genStatus.label.toLowerCase()}). Open pipeline totals ${fmt(totalPipe)} across ${totalOpps} opportunities at ${S.coverage.toFixed(1)}x coverage.${wowPhrase}`,
+        stats: [
+          { label: "Created in Q3", value: fmt(S.gen), sub: `${S.genPct.toFixed(0)}% of ${fmt(S.quota)} quota`, tone: S.genStatus.tone },
+          { label: "Open pipeline", value: fmt(totalPipe), sub: `${totalOpps} opportunities` },
+          { label: "New ARR this week", value: fmt(arrThisWeek), sub: S.wowDelta != null ? `${S.wowDelta >= 0 ? "+" : "−"}${Math.abs(Math.round(S.wowDelta))}% WoW` : undefined, tone: (S.wowDelta ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
+          { label: "Coverage", value: S.coverage.toFixed(2) + "x", sub: "open pipe vs Q3 quota", tone: S.coverage >= 3 ? ("good" as const) : ("warn" as const) },
+        ],
+      },
+      forecast: {
+        sentence: `Raw open pipeline of ${fmt(data.forecast.rawTotal)} weights down to ${fmt(data.forecast.weightedTotal)} after applying stage win rates${data.winRates.derived ? ` derived from ${data.winRates.n} closed deals (${data.winRates.overall != null ? pct(data.winRates.overall) : "—"} overall win rate)` : ""}.`,
+        stats: [
+          { label: "Raw pipeline", value: fmt(data.forecast.rawTotal) },
+          { label: "Weighted forecast", value: fmt(data.forecast.weightedTotal), tone: "good" as const },
+          { label: "Overall win rate", value: data.winRates.overall != null ? pct(data.winRates.overall) : "—" },
+          { label: "Deals in basis", value: String(data.winRates.n), sub: "closed, last 18mo" },
+        ],
+      },
+      health: {
+        sentence: `${fmt(staleArr)} of open pipeline (${staleCount} deals, ${stalePct.toFixed(0)}% of total) hasn't moved stages in 90+ days.${biggest ? ` Largest open deal: ${biggest.name} at ${fmt(biggest.arr)}${biggest.ageDays != null ? ` (${biggest.ageDays}d since last stage change)` : ""}.` : ""}`,
+        stats: [
+          { label: "Stale 90d+ ARR", value: fmt(staleArr), tone: "bad" as const },
+          { label: "Stale deals", value: String(staleCount), sub: "90+ days no movement" },
+          { label: "% of pipe stale", value: stalePct.toFixed(0) + "%", tone: stalePct > 40 ? ("bad" as const) : ("warn" as const) },
+          { label: "Largest open deal", value: biggest ? fmt(biggest.arr) : "—", sub: biggest?.name },
+        ],
+      },
+      attainment: {
+        sentence: `Team attainment is ${teamPct.toFixed(1)}% of the Q3 quota (${fmt(teamActual)} of ${fmt(teamQuota)}).${top ? ` Top: ${top.name} at ${gp(top.pctOfQuota)}.` : ""}${bottom && bottom !== top ? ` Lowest: ${bottom.name} at ${gp(bottom.pctOfQuota)}.` : ""}${below10 > 0 ? ` ${below10} of ${reps.length} AEs are below 10%.` : ""}`,
+        stats: [
+          { label: "Team actual", value: fmt(teamActual), sub: `of ${fmt(teamQuota)} quota` },
+          { label: "Team % of quota", value: teamPct.toFixed(1) + "%", sub: `${S.elapsedPct.toFixed(0)}% of quarter gone`, tone: teamPct >= S.elapsedPct ? ("good" as const) : ("bad" as const) },
+          { label: "Top AE", value: top ? gp(top.pctOfQuota) : "—", sub: top ? `${top.name} · ${fmt(top.actual)}` : undefined, tone: "good" as const },
+          { label: "Lowest AE", value: bottom ? gp(bottom.pctOfQuota) : "—", sub: bottom ? `${bottom.name} · ${fmt(bottom.actual)}` : undefined, tone: "bad" as const },
+        ],
+      },
+      acv: {
+        sentence: `Average won deal is ${fmt(data.acv.avg)} (median ${fmt(data.acv.median)}) across ${data.acv.count} wins in 18 months. YTD win rate: ${data.winRateYtd.winRate != null ? pct(data.winRateYtd.winRate) : "—"} on ${data.winRateYtd.closedCount} closed New Business deals${data.winRateYtd.medianCycle != null ? `, median cycle ${data.winRateYtd.medianCycle}d SQL→close` : ""}.`,
+        stats: [
+          { label: "Avg deal size", value: fmt(data.acv.avg), sub: "won, last 18mo" },
+          { label: "Median deal size", value: fmt(data.acv.median), sub: "less outlier skew" },
+          { label: "Win rate YTD", value: data.winRateYtd.winRate != null ? pct(data.winRateYtd.winRate) : "—", sub: `${data.winRateYtd.wonCount} of ${data.winRateYtd.closedCount} New Biz` },
+          { label: "Median cycle", value: data.winRateYtd.medianCycle != null ? `${data.winRateYtd.medianCycle}d` : "—", sub: "SQL → close" },
+        ],
+      },
+      actions: {
+        sentence: `${topOwner ? `${topOwner[0]} holds the most open pipeline (${fmt(topOwner[1].openArr)} across ${topOwner[1].openCount} deals). ` : ""}${fmt(totalStaleArr)} across all owners has been stale for 60+ days and needs action.`,
+        stats: [
+          { label: "Total open ARR", value: fmt(totalOpenArr) },
+          { label: "Open deals", value: String(totalOpenCount), sub: `across ${owners.length} owners` },
+          { label: "Stale 60d+ ARR", value: fmt(totalStaleArr), tone: "bad" as const },
+          { label: "Owners flagged", value: String(flaggedOwners), sub: "with stale deals" },
+        ],
+      },
     };
-  }, [data, execSummary]);
+  }, [data, execSummary, wowMetrics]);
 
   const pipelineTrend = useMemo(() => {
     if (!data) return { labels: [], values: [] };
@@ -450,116 +513,10 @@ export default function Dashboard() {
 
       {tab === "command" && (
         <div>
-          <div
-            style={{
-              background: `linear-gradient(160deg, ${C.navy} 0%, #16223D 100%)`,
-              padding: "26px 30px 30px",
-            }}
-          >
-            <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
-                  gap: 12,
-                }}
-              >
-                <HeroStat label="Live ARR" value={fmt(derived.latest?.activeARR)} tone="good" />
-                <HeroStat label="New ARR (Latest Month)" value={fmt(derived.latest?.newARR)} />
-                <HeroStat
-                  label="Churned ARR (Latest Month)"
-                  value={fmt(derived.latest?.churnedARR)}
-                  tone="bad"
-                />
-                <HeroStat
-                  label="MoM Change"
-                  value={pct(derived.latest?.changePct)}
-                  tone={(derived.latest?.changePct ?? 0) >= 0 ? "good" : "bad"}
-                />
-                <HeroStat label="Total Pipeline" value={fmt(derived.totalPipelineARR)} />
-                <HeroStat
-                  label="Pipeline Coverage"
-                  value={derived.coverageRatio.toFixed(2) + "x"}
-                  tone={derived.coverageRatio >= 3 ? "good" : "warn"}
-                />
-              </div>
-            </div>
-          </div>
-
           <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-            {execSummary && (() => {
-              const S = execSummary;
-              const toneMap = {
-                good: { bg: C.grnBg, fg: C.grn },
-                warn: { bg: C.ylwBg, fg: C.ylw },
-                bad: { bg: C.redBg, fg: C.red },
-              };
-              const Pill2 = ({ s }: { s: { label: string; tone: "good" | "warn" | "bad" } }) => (
-                <span style={{ background: toneMap[s.tone].bg, color: toneMap[s.tone].fg, fontSize: 10.5, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>
-                  {s.label}
-                </span>
-              );
-              const wowPhrase =
-                S.wowDelta == null
-                  ? ""
-                  : S.wowDelta >= 0
-                  ? ` while weekly ARR creation rebounded +${Math.round(S.wowDelta)}% WoW`
-                  : ` while weekly ARR creation declined ${Math.round(S.wowDelta)}% WoW`;
-              return (
-                <div style={{ marginBottom: 18 }}>
-                  <div style={{ background: C.navy, borderRadius: 14, padding: "18px 22px", marginBottom: 12 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", color: "#9FAAC6", marginBottom: 6 }}>
-                      Executive Summary · auto-generated from live data
-                    </div>
-                    <div style={{ fontSize: 16.5, lineHeight: 1.55, color: "#fff", fontWeight: 500 }}>
-                      ARR sits at <span style={{ color: "#9FD9A4", fontFamily: "var(--font-dm-mono)" }}>{fmt(S.arrNow)}</span> — {fmt(S.gap)} from the $10M milestone. Pipeline generation is{" "}
-                      <span style={{ color: S.genStatus.tone === "good" ? "#9FD9A4" : "#F0A99C" }}>
-                        {S.genStatus.tone === "good" ? "on pace" : "behind pace"}
-                      </span>{" "}
-                      at {S.genPct.toFixed(0)}% of the Q3 quota with {(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining{wowPhrase}.
-                    </div>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-                    <div style={{ background: C.card, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "12px 14px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", color: C.t3 }}>ARR Pace</span>
-                        <Pill2 s={S.arrStatus} />
-                      </div>
-                      <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 17, fontWeight: 600, color: C.t1 }}>{fmt(S.arrNow)}</div>
-                      <div style={{ fontSize: 11.5, color: C.t2, marginTop: 2 }}>
-                        {S.arrMoM != null ? pct(S.arrMoM) + " MoM" : "—"} · gap {fmt(S.gap)}
-                      </div>
-                    </div>
-                    <div style={{ background: C.card, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "12px 14px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", color: C.t3 }}>Pipe Gen Q3</span>
-                        <Pill2 s={S.genStatus} />
-                      </div>
-                      <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 17, fontWeight: 600, color: C.t1 }}>{fmt(S.gen)}</div>
-                      <div style={{ fontSize: 11.5, color: C.t2, marginTop: 2 }}>
-                        {S.genPct.toFixed(0)}% of {fmt(S.quota)} · {S.elapsedPct.toFixed(0)}% of Q gone
-                      </div>
-                    </div>
-                    <div style={{ background: C.card, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "12px 14px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", color: C.t3 }}>Churn</span>
-                        <Pill2 s={S.churnStatus} />
-                      </div>
-                      <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 17, fontWeight: 600, color: C.t1 }}>{fmt(S.churnLast)} / mo</div>
-                      <div style={{ fontSize: 11.5, color: C.t2, marginTop: 2 }}>{fmt(S.churn12)} cum. 12mo</div>
-                    </div>
-                    <div style={{ background: C.card, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "12px 14px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                        <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", color: C.t3 }}>Coverage</span>
-                        <Pill2 s={S.coverageStatus} />
-                      </div>
-                      <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 17, fontWeight: 600, color: C.t1 }}>{S.coverage.toFixed(2)}x</div>
-                      <div style={{ fontSize: 11.5, color: C.t2, marginTop: 2 }}>open pipe vs Q3 quota</div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
+            {tabSummaries && (
+              <TabHeader label="Command" sentence={tabSummaries.command.sentence} stats={tabSummaries.command.stats} />
+            )}
 
             <Card
               title="Pipeline Pulse — Week over Week"
@@ -685,7 +642,9 @@ export default function Dashboard() {
 
       {tab === "targets" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          <ExecBanner text={tabSummaries?.targets ?? null} />
+          {tabSummaries && (
+            <TabHeader label="Targets & Progress" sentence={tabSummaries.targets.sentence} stats={tabSummaries.targets.stats} />
+          )}
           <Card title="ARR Trend" sub="Hover a point for details" accent={C.coral}>
             <div style={{ padding: "16px 20px" }}>
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
@@ -815,7 +774,87 @@ export default function Dashboard() {
 
       {tab === "pipeline" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          <ExecBanner text={tabSummaries?.pipeline ?? null} />
+          {tabSummaries && (
+            <TabHeader label="Pipeline" sentence={tabSummaries.pipeline.sentence} stats={tabSummaries.pipeline.stats} />
+          )}
+          <Card
+            title="Pipeline Progression — Week over Week"
+            sub={`Filtered by: ${data.pipelineWow.filterRep} · pick a metric to chart it`}
+          >
+            {(() => {
+              const labels = data.pipelineWow.weekLabels;
+              const active = wowMetrics.find((m) => m.metric === activeWowMetric) ?? wowMetrics[0];
+              if (!active) return <div style={{ padding: 20, color: C.t3, fontSize: 13 }}>No data available.</div>;
+              return (
+                <div style={{ padding: "16px 20px" }}>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                    {wowMetrics.map((m) => (
+                      <button
+                        key={m.metric}
+                        onClick={() => setWowMetric(m.metric)}
+                        style={{
+                          padding: "5px 12px",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          borderRadius: 6,
+                          border: `1px solid ${C.bd}`,
+                          background: m.metric === active.metric ? C.navy : "#fff",
+                          color: m.metric === active.metric ? "#fff" : C.t2,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {m.metric}
+                      </button>
+                    ))}
+                  </div>
+
+                  <LineTrendChart
+                    labels={labels}
+                    series={[{ label: active.metric, values: active.values, color: C.navy }]}
+                    valueFormat={active.money ? "currency" : "number"}
+                  />
+
+                  <div style={{ overflowX: "auto", marginTop: 16 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                          <Th l>Metric</Th>
+                          {labels.map((w) => (
+                            <Th key={w}>{w}</Th>
+                          ))}
+                          <Th>WoW</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {wowMetrics.map((m) => (
+                          <tr
+                            key={m.metric}
+                            onClick={() => setWowMetric(m.metric)}
+                            style={{
+                              borderBottom: `1px solid ${C.s1}`,
+                              cursor: "pointer",
+                              background: m.metric === active.metric ? C.s1 : "transparent",
+                            }}
+                          >
+                            <Td l bold={m.metric === active.metric}>{m.metric}</Td>
+                            {m.values.map((v, i) => (
+                              <Td key={i} mono>
+                                {v == null ? "—" : fmtMetricValue(v, m.money)}
+                              </Td>
+                            ))}
+                            <td style={{ textAlign: "right", padding: "10px 16px" }}>
+                              <DeltaPill delta={wowDeltaPct(m.values)} />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+          </Card>
+
           <Card
             title="Pipeline Movement — Trend"
             sub="New pipeline created, closed-won, and closed-lost, over time — filter by AE and by what you want to see"
@@ -1020,89 +1059,14 @@ export default function Dashboard() {
             </table>
           </Card>
 
-          <Card
-            title="Pipeline Progression — Week over Week"
-            sub={`Filtered by: ${data.pipelineWow.filterRep} · pick a metric to chart it`}
-          >
-            {(() => {
-              const labels = data.pipelineWow.weekLabels;
-              const active = wowMetrics.find((m) => m.metric === activeWowMetric) ?? wowMetrics[0];
-              if (!active) return <div style={{ padding: 20, color: C.t3, fontSize: 13 }}>No data available.</div>;
-              return (
-                <div style={{ padding: "16px 20px" }}>
-                  <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-                    {wowMetrics.map((m) => (
-                      <button
-                        key={m.metric}
-                        onClick={() => setWowMetric(m.metric)}
-                        style={{
-                          padding: "5px 12px",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          borderRadius: 6,
-                          border: `1px solid ${C.bd}`,
-                          background: m.metric === active.metric ? C.navy : "#fff",
-                          color: m.metric === active.metric ? "#fff" : C.t2,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {m.metric}
-                      </button>
-                    ))}
-                  </div>
-
-                  <LineTrendChart
-                    labels={labels}
-                    series={[{ label: active.metric, values: active.values, color: C.navy }]}
-                    valueFormat={active.money ? "currency" : "number"}
-                  />
-
-                  <div style={{ overflowX: "auto", marginTop: 16 }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                          <Th l>Metric</Th>
-                          {labels.map((w) => (
-                            <Th key={w}>{w}</Th>
-                          ))}
-                          <Th>WoW</Th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {wowMetrics.map((m) => (
-                          <tr
-                            key={m.metric}
-                            onClick={() => setWowMetric(m.metric)}
-                            style={{
-                              borderBottom: `1px solid ${C.s1}`,
-                              cursor: "pointer",
-                              background: m.metric === active.metric ? C.s1 : "transparent",
-                            }}
-                          >
-                            <Td l bold={m.metric === active.metric}>{m.metric}</Td>
-                            {m.values.map((v, i) => (
-                              <Td key={i} mono>
-                                {v == null ? "—" : fmtMetricValue(v, m.money)}
-                              </Td>
-                            ))}
-                            <td style={{ textAlign: "right", padding: "10px 16px" }}>
-                              <DeltaPill delta={wowDeltaPct(m.values)} />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })()}
-          </Card>
         </div>
       )}
 
       {tab === "attainment" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          <ExecBanner text={tabSummaries?.attainment ?? null} />
+          {tabSummaries && (
+            <TabHeader label="AE Attainment" sentence={tabSummaries.attainment.sentence} stats={tabSummaries.attainment.stats} />
+          )}
           <Card title="AE Attainment — Q3 FY26">
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
@@ -1182,7 +1146,9 @@ export default function Dashboard() {
 
       {tab === "forecast" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          <ExecBanner text={tabSummaries?.forecast ?? null} />
+          {tabSummaries && (
+            <TabHeader label="Forecast" sentence={tabSummaries.forecast.sentence} stats={tabSummaries.forecast.stats} />
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 20 }}>
             <Card title="Raw Open Pipeline">
               <div style={{ padding: 20 }}>
@@ -1235,7 +1201,9 @@ export default function Dashboard() {
 
       {tab === "health" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          <ExecBanner text={tabSummaries?.health ?? null} />
+          {tabSummaries && (
+            <TabHeader label="Deal Health" sentence={tabSummaries.health.sentence} stats={tabSummaries.health.stats} />
+          )}
           <Card
             title="Pipeline Aging"
             sub="Open deals bucketed by days since last stage change — stale deals need attention"
@@ -1293,7 +1261,9 @@ export default function Dashboard() {
 
       {tab === "acv" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          <ExecBanner text={tabSummaries?.acv ?? null} />
+          {tabSummaries && (
+            <TabHeader label="ACV & Deal Size" sentence={tabSummaries.acv.sentence} stats={tabSummaries.acv.stats} />
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 20 }}>
             <Card title="Average Deal Size">
               <div style={{ padding: 20 }}>
@@ -1348,7 +1318,9 @@ export default function Dashboard() {
 
       {tab === "actions" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          <ExecBanner text={tabSummaries?.actions ?? null} />
+          {tabSummaries && (
+            <TabHeader label="Who Does What" sentence={tabSummaries.actions.sentence} stats={tabSummaries.actions.stats} />
+          )}
           <Card title="Who Does What — Open Pipeline by Owner" sub="Stale = no stage change in 60+ days">
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
