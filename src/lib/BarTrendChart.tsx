@@ -9,12 +9,14 @@ export function BarTrendChart({
   valueFormat = "number",
   targetLine,
   targetLabel,
+  barColor,
 }: {
   labels: string[];
   values: number[];
   valueFormat?: "number" | "currency";
   targetLine?: number;
   targetLabel?: string;
+  barColor?: string;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
@@ -75,7 +77,7 @@ export function BarTrendChart({
                 y={y(v)}
                 width={barW}
                 height={Math.max(barH, 1)}
-                fill={hoverIdx === i ? C.coralDk : C.navy}
+                fill={hoverIdx === i ? C.coralDk : (barColor ?? C.navy)}
                 rx={2}
               />
               <rect

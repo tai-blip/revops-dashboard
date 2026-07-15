@@ -5,6 +5,7 @@ import { C, fmt, pct, Card, KV, Bar, Pill, HeroStat, Th, Td } from "@/lib/ui";
 import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
+import { StackedBarChart } from "@/lib/StackedBarChart";
 import type { ArrPoint } from "@/lib/parse";
 
 type MetricRow = { metric: string; value: number; kind: "currency" | "count" | "percent" | "ratio" };
@@ -155,6 +156,14 @@ export default function Dashboard() {
     const coverageRatio =
       data.pipeline.metricSections["3. PIPELINE COVERAGE"]?.find((m) => m.metric === "Pipeline Coverage Ratio")?.value ?? 0;
 
+    // Cumulative team ARR attainment across months
+    const monthlyCumulative: { label: string; actual: number }[] = [];
+    let running = 0;
+    for (const m of data.aeAttainment.monthlyTeamActual) {
+      running += m.actual;
+      monthlyCumulative.push({ label: m.label, actual: running });
+    }
+
     return {
       latest,
       teamQuota,
@@ -162,6 +171,7 @@ export default function Dashboard() {
       teamPctOfQuota,
       totalPipelineARR,
       coverageRatio,
+      monthlyCumulative,
     };
   }, [data]);
 
@@ -297,23 +307,23 @@ export default function Dashboard() {
           </div>
 
           <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-            <Card title="ARR Trend" sub="Hover a point for details" accent={C.coral}>
+            <Card title="ARR Trend — Path to $10M" sub="Hover a point for details · dashed line = $10M milestone" accent={C.coral}>
               <div style={{ padding: "16px 20px" }}>
                 <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
                   <ChartPeriodToggle period={period} onChange={setPeriod} />
                 </div>
-                <ArrChart points={chartPoints} />
+                <ArrChart points={chartPoints} milestone={10000000} milestoneLabel="$10M Milestone" />
               </div>
             </Card>
 
             <Card
-              title="Team ARR Attainment — Monthly vs Q3 Quota"
-              sub="Column chart of closed-won + live-paying ARR by month, against the Q3 quota target"
+              title="Team ARR Attainment — Cumulative vs Q3 Quota"
+              sub="Running total of closed-won + live-paying ARR by month, against the Q3 quota target"
             >
               <div style={{ padding: "16px 20px" }}>
                 <BarTrendChart
-                  labels={data.aeAttainment.monthlyTeamActual.map((m) => m.label)}
-                  values={data.aeAttainment.monthlyTeamActual.map((m) => m.actual)}
+                  labels={derived.monthlyCumulative.map((m) => m.label)}
+                  values={derived.monthlyCumulative.map((m) => m.actual)}
                   valueFormat="currency"
                   targetLine={derived.teamQuota}
                   targetLabel="Q3 Quota"
@@ -327,6 +337,49 @@ export default function Dashboard() {
                     color={derived.teamPctOfQuota >= 1 ? C.grn : C.t1}
                   />
                 </div>
+              </div>
+            </Card>
+
+            <Card
+              title="Churned ARR by Month"
+              sub="Monthly churn from your ARR tab — lower is better"
+              accent={C.red}
+            >
+              <div style={{ padding: "16px 20px" }}>
+                <BarTrendChart
+                  labels={data.arr.monthly.slice(-12).map((m) => m.label)}
+                  values={data.arr.monthly.slice(-12).map((m) => m.churnedARR)}
+                  valueFormat="currency"
+                  barColor={C.red}
+                />
+              </div>
+            </Card>
+
+            <Card
+              title="New ARR Mix — Net New vs Expansion vs Renewal"
+              sub="Composition of new ARR added each month"
+            >
+              <div style={{ padding: "16px 20px" }}>
+                <StackedBarChart
+                  labels={data.arr.monthly.slice(-12).map((m) => m.label)}
+                  series={[
+                    {
+                      label: "Net New",
+                      values: data.arr.monthly.slice(-12).map((m) => m.newBusiness),
+                      color: C.navy,
+                    },
+                    {
+                      label: "Expansion",
+                      values: data.arr.monthly.slice(-12).map((m) => m.expansion),
+                      color: C.teal,
+                    },
+                    {
+                      label: "Renewal",
+                      values: data.arr.monthly.slice(-12).map((m) => m.renewals),
+                      color: C.coralDk,
+                    },
+                  ]}
+                />
               </div>
             </Card>
           </div>

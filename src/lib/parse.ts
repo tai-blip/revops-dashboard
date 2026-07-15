@@ -16,6 +16,9 @@ function sheetsSerialToISODate(v: unknown): string {
 export type ArrPoint = {
   label: string;
   newARR: number;
+  newBusiness: number;
+  expansion: number;
+  renewals: number;
   activeARR: number;
   churnedARR: number;
   changePct: number | null;
@@ -32,6 +35,9 @@ export function parseArrTab(rows: Row[]) {
       monthly.push({
         label: String(r[0]),
         newARR: Number(r[1] ?? 0), // New ARR Added ($)
+        newBusiness: Number(r[2] ?? 0), // - New Business ($)
+        expansion: Number(r[3] ?? 0), // - Biz Expansion ($)
+        renewals: Number(r[4] ?? 0), // - Renewals ($)
         activeARR: Number(r[5] ?? 0), // Active ARR Snapshot ($)
         churnedARR: Number(r[11] ?? 0), // Churned ARR ($)
         changePct: r[13] != null ? Number(r[13]) : null, // MoM Change (%)
@@ -52,6 +58,9 @@ export function parseArrTab(rows: Row[]) {
       weekly.push({
         label,
         newARR: Number(r[1] ?? 0),
+        newBusiness: Number(r[2] ?? 0),
+        expansion: Number(r[3] ?? 0),
+        renewals: Number(r[4] ?? 0),
         activeARR: Number(r[5] ?? 0),
         churnedARR: Number(r[11] ?? 0),
         changePct: r[13] != null ? Number(r[13]) : null, // WoW Change (%)

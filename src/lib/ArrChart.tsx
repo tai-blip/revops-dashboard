@@ -4,7 +4,15 @@ import { useState } from "react";
 import { C, fmt, pct } from "./ui";
 import type { ArrPoint } from "./parse";
 
-export function ArrChart({ points }: { points: ArrPoint[] }) {
+export function ArrChart({
+  points,
+  milestone,
+  milestoneLabel,
+}: {
+  points: ArrPoint[];
+  milestone?: number;
+  milestoneLabel?: string;
+}) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   if (points.length === 0) {
@@ -21,7 +29,7 @@ export function ArrChart({ points }: { points: ArrPoint[] }) {
   const innerH = H - padT - padB;
 
   const values = points.map((p) => p.activeARR);
-  const max = Math.max(...values) * 1.08;
+  const max = Math.max(...values, milestone ?? 0) * 1.08;
   const min = Math.min(0, Math.min(...values) * 0.95);
 
   const x = (i: number) =>
@@ -71,6 +79,32 @@ export function ArrChart({ points }: { points: ArrPoint[] }) {
         {/* area + line */}
         <path d={areaPath} fill={C.navy} opacity={0.08} />
         <path d={linePath} fill="none" stroke={C.navy} strokeWidth={2.5} />
+
+        {/* milestone target line */}
+        {milestone != null && (
+          <g>
+            <line
+              x1={padL}
+              x2={W - padR}
+              y1={y(milestone)}
+              y2={y(milestone)}
+              stroke={C.grn}
+              strokeWidth={1.5}
+              strokeDasharray="6,4"
+            />
+            <text
+              x={W - padR}
+              y={y(milestone) - 6}
+              textAnchor="end"
+              fontSize={11}
+              fontWeight={700}
+              fill={C.grn}
+            >
+              {milestoneLabel ?? "Milestone"}: {fmt(milestone)} · Gap:{" "}
+              {fmt(milestone - (points[points.length - 1]?.activeARR ?? 0))}
+            </text>
+          </g>
+        )}
 
         {/* points + hover targets */}
         {points.map((p, i) => (
