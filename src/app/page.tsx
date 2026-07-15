@@ -5,6 +5,7 @@ import { C, fmt, pct, Card, KV, Bar, Pill, HeroStat, Th, Td } from "@/lib/ui";
 import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
+import { GroupedBarChart } from "@/lib/GroupedBarChart";
 import type { ArrPoint } from "@/lib/parse";
 
 type MetricRow = { metric: string; value: number; kind: "currency" | "count" | "percent" | "ratio" };
@@ -328,26 +329,22 @@ export default function Dashboard() {
 
             {(() => {
               const mixWindow = period === "monthly" ? chartPoints.slice(-3) : chartPoints.slice(-13);
-              const mixCharts = [
-                { title: "Net New", key: "newBusiness" as const, color: C.navy },
-                { title: "Expansion", key: "expansion" as const, color: C.teal },
-                { title: "Renewal", key: "renewals" as const, color: C.coralDk },
-              ];
               return (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 18 }}>
-                  {mixCharts.map((mc) => (
-                    <Card key={mc.title} title={mc.title} sub={period === "monthly" ? "Last 3 months" : "Last 13 weeks"}>
-                      <div style={{ padding: "12px 14px" }}>
-                        <BarTrendChart
-                          labels={mixWindow.map((m) => m.label)}
-                          values={mixWindow.map((m) => m[mc.key])}
-                          valueFormat="currency"
-                          barColor={mc.color}
-                        />
-                      </div>
-                    </Card>
-                  ))}
-                </div>
+                <Card
+                  title="New ARR Mix — Net New vs Expansion vs Renewal"
+                  sub={period === "monthly" ? "Last 3 months, grouped per month" : "Last 13 weeks, grouped per week"}
+                >
+                  <div style={{ padding: "16px 20px" }}>
+                    <GroupedBarChart
+                      labels={mixWindow.map((m) => m.label)}
+                      series={[
+                        { label: "Net New", values: mixWindow.map((m) => m.newBusiness), color: C.navy },
+                        { label: "Expansion", values: mixWindow.map((m) => m.expansion), color: C.teal },
+                        { label: "Renewal", values: mixWindow.map((m) => m.renewals), color: C.coralDk },
+                      ]}
+                    />
+                  </div>
+                </Card>
               );
             })()}
 
@@ -430,6 +427,81 @@ export default function Dashboard() {
                 ))}
               </tbody>
             </table>
+          </Card>
+
+          <Card
+            title={`New ARR Mix — ${period === "monthly" ? "Last 3 Months" : "Last 3 Weeks"}`}
+            sub="Net New vs Expansion vs Renewal breakdown with period-over-period direction"
+          >
+            {(() => {
+              const win = chartPoints.slice(-3);
+              const types = [
+                { label: "Net New", key: "newBusiness" as const, color: C.navy },
+                { label: "Expansion", key: "expansion" as const, color: C.teal },
+                { label: "Renewal", key: "renewals" as const, color: C.coralDk },
+              ];
+              const totals = types.map((t) => win.reduce((s, p) => s + p[t.key], 0));
+              const grandTotal = totals.reduce((s, n) => s + n, 0);
+              return (
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      <Th l>Type</Th>
+                      {win.map((p) => (
+                        <Th key={p.label}>{p.label}</Th>
+                      ))}
+                      <Th>Total</Th>
+                      <Th>Mix %</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {types.map((t, ti) => (
+                      <tr key={t.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                        <td style={{ padding: "10px 16px", fontSize: 13 }}>
+                          <span
+                            style={{
+                              display: "inline-block",
+                              width: 9,
+                              height: 9,
+                              borderRadius: 2,
+                              background: t.color,
+                              marginRight: 8,
+                            }}
+                          />
+                          <span style={{ fontWeight: 600, color: C.t1 }}>{t.label}</span>
+                        </td>
+                        {win.map((p, i) => {
+                          const v = p[t.key];
+                          const prev = i > 0 ? win[i - 1][t.key] : null;
+                          const dir = prev == null ? null : v > prev ? "up" : v < prev ? "down" : "flat";
+                          return (
+                            <Td key={p.label} mono>
+                              {fmt(v)}{" "}
+                              {dir === "up" && <span style={{ color: C.grn }}>▲</span>}
+                              {dir === "down" && <span style={{ color: C.red }}>▼</span>}
+                            </Td>
+                          );
+                        })}
+                        <Td mono bold>{fmt(totals[ti])}</Td>
+                        <Td mono color={C.t2}>
+                          {grandTotal > 0 ? ((totals[ti] / grandTotal) * 100).toFixed(0) + "%" : "—"}
+                        </Td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: `2px solid ${C.navy}` }}>
+                      <Td l bold>Total</Td>
+                      {win.map((p) => (
+                        <Td key={p.label} mono bold>
+                          {fmt(p.newBusiness + p.expansion + p.renewals)}
+                        </Td>
+                      ))}
+                      <Td mono bold>{fmt(grandTotal)}</Td>
+                      <Td mono color={C.t2}>100%</Td>
+                    </tr>
+                  </tbody>
+                </table>
+              );
+            })()}
           </Card>
 
           <Card title="Rep Quota Progress — Q3 FY26">
