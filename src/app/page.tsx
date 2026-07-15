@@ -6,6 +6,7 @@ import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
 import { GroupedBarChart } from "@/lib/GroupedBarChart";
+import { Sparkline, DeltaPill, wowDeltaPct, fmtMetricValue } from "@/lib/Sparkline";
 import type { ArrPoint } from "@/lib/parse";
 
 type MetricRow = { metric: string; value: number; kind: "currency" | "count" | "percent" | "ratio" };
@@ -131,6 +132,7 @@ export default function Dashboard() {
     "created" | "createdCount" | "closedWon" | "closedLost"
   >("created");
   const [pipePeriod, setPipePeriod] = useState<"weekly" | "monthly">("weekly");
+  const [wowMetric, setWowMetric] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/dashboard")
@@ -211,6 +213,19 @@ export default function Dashboard() {
     d.setUTCDate(d.getUTCDate() + diff);
     return d.toISOString().slice(0, 10);
   }
+
+  const wowMetrics = useMemo(() => {
+    if (!data) return [];
+    return data.pipelineWow.weeks
+      .filter((w) => !w.metric.includes("Δ%"))
+      .map((w) => ({
+        metric: w.metric,
+        values: w.values,
+        money: w.metric.includes("($)"),
+      }));
+  }, [data]);
+
+  const activeWowMetric = wowMetric ?? wowMetrics[0]?.metric ?? null;
 
   const pipelineTrend = useMemo(() => {
     if (!data) return { labels: [], values: [] };
@@ -360,6 +375,53 @@ export default function Dashboard() {
                 </Card>
               );
             })()}
+
+            <Card
+              title="Pipeline Pulse — Week over Week"
+              sub="Last 8 weeks per metric · click a row for the full breakdown"
+            >
+              <div style={{ padding: "8px 20px 14px" }}>
+                {wowMetrics.map((m) => {
+                  const clean = m.values.filter((v): v is number => v != null);
+                  const last = clean[clean.length - 1];
+                  return (
+                    <div
+                      key={m.metric}
+                      onClick={() => {
+                        setWowMetric(m.metric);
+                        setTab("pipeline");
+                      }}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0,1fr) 190px 100px 70px",
+                        alignItems: "center",
+                        gap: 10,
+                        padding: "9px 0",
+                        borderBottom: `1px solid ${C.s1}`,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <span style={{ fontSize: 13, color: C.t1 }}>{m.metric}</span>
+                      <Sparkline data={clean} />
+                      <span
+                        style={{
+                          textAlign: "right",
+                          fontSize: 14,
+                          fontWeight: 600,
+                          fontFamily: "var(--font-dm-mono)",
+                          color: C.t1,
+                        }}
+                      >
+                        {last != null ? fmtMetricValue(last, m.money) : "—"}
+                      </span>
+                      <span style={{ textAlign: "right" }}>
+                        <DeltaPill delta={wowDeltaPct(m.values)} />
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
 
             <Card
               title="Team ARR Attainment — Cumulative"
@@ -609,36 +671,6 @@ export default function Dashboard() {
             </div>
           </Card>
 
-          <div style={{ marginBottom: 12 }}>
-            <Pill tone="blue">Stage/coverage snapshot filtered by: {data.pipeline.filterRep}</Pill>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
-            {Object.entries(data.pipeline.metricSections).map(([section, rows]) => (
-              <Card key={section} title={section}>
-                <div style={{ padding: 16 }}>
-                  {rows.map((row) => (
-                    <div
-                      key={row.metric}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        padding: "6px 0",
-                        borderBottom: `1px solid ${C.s1}`,
-                        fontSize: 13,
-                      }}
-                    >
-                      <span style={{ color: C.t2 }}>{row.metric}</span>
-                      <span style={{ fontFamily: "var(--font-dm-mono)", color: C.t1 }}>
-                        {formatMetric(row)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            ))}
-          </div>
-
           <Card
             title="AE Pipeline Generation — Q3 FY26"
             sub="Pipeline created within Q3 (Jul–Sep 2026) vs each AE's quarterly pipe-generation quota"
@@ -692,6 +724,37 @@ export default function Dashboard() {
             })()}
           </Card>
 
+          <div style={{ marginBottom: 12 }}>
+            <Pill tone="blue">Stage/coverage snapshot filtered by: {data.pipeline.filterRep}</Pill>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
+            {Object.entries(data.pipeline.metricSections).map(([section, rows]) => (
+              <Card key={section} title={section}>
+                <div style={{ padding: 16 }}>
+                  {rows.map((row) => (
+                    <div
+                      key={row.metric}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        padding: "6px 0",
+                        borderBottom: `1px solid ${C.s1}`,
+                        fontSize: 13,
+                      }}
+                    >
+                      <span style={{ color: C.t2 }}>{row.metric}</span>
+                      <span style={{ fontFamily: "var(--font-dm-mono)", color: C.t1 }}>
+                        {formatMetric(row)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            ))}
+          </div>
+
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, margin: "18px 0" }}>
             {Object.entries(data.pipeline.breakdownSections).map(([section, rows]) => (
               <Card key={section} title={section}>
@@ -742,81 +805,80 @@ export default function Dashboard() {
 
           <Card
             title="Pipeline Progression — Week over Week"
-            sub={`Filtered by: ${data.pipelineWow.filterRep}`}
+            sub={`Filtered by: ${data.pipelineWow.filterRep} · pick a metric to chart it`}
           >
             {(() => {
-              const weeks = data.pipelineWow.weeks;
               const labels = data.pipelineWow.weekLabels;
-              const findRow = (name: string) => weeks.find((w) => w.metric === name)?.values ?? [];
-
-              const countSeries = [
-                { label: "New Opps Entered (SQL)", values: findRow("New Opps Entered (SQL)"), color: C.navy },
-                { label: "Progressed to SAL", values: findRow("Progressed to SAL"), color: C.teal },
-                { label: "Progressed to SQO", values: findRow("Progressed to SQO"), color: C.purp },
-                { label: "Stage Movements (any)", values: findRow("Stage Movements (any)"), color: C.coralDk },
-              ].filter((s) => s.values.length > 0);
-
-              const arrSeries = [
-                { label: "New ARR pipeline Created ($)", values: findRow("New ARR pipeline Created ($)"), color: C.coralDk },
-              ].filter((s) => s.values.length > 0);
-
-              const pctSeries = [
-                { label: "New Opps WoW Δ%", values: findRow("New Opps WoW Δ%"), color: C.navy },
-                { label: "New ARR WoW Δ%", values: findRow("New ARR WoW Δ%"), color: C.coralDk },
-              ].filter((s) => s.values.length > 0);
-
+              const active = wowMetrics.find((m) => m.metric === activeWowMetric) ?? wowMetrics[0];
+              if (!active) return <div style={{ padding: 20, color: C.t3, fontSize: 13 }}>No data available.</div>;
               return (
-                <div style={{ padding: "16px 20px", display: "grid", gap: 24 }}>
-                  {countSeries.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 8 }}>
-                        Opp & Stage Movement Counts
-                      </div>
-                      <LineTrendChart labels={labels} series={countSeries} valueFormat="number" />
-                    </div>
-                  )}
-                  {arrSeries.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 8 }}>
-                        New ARR Pipeline Created
-                      </div>
-                      <LineTrendChart labels={labels} series={arrSeries} valueFormat="currency" />
-                    </div>
-                  )}
-                  {pctSeries.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 8 }}>
-                        WoW % Change
-                      </div>
-                      <LineTrendChart labels={labels} series={pctSeries} valueFormat="percent" />
-                    </div>
-                  )}
+                <div style={{ padding: "16px 20px" }}>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                    {wowMetrics.map((m) => (
+                      <button
+                        key={m.metric}
+                        onClick={() => setWowMetric(m.metric)}
+                        style={{
+                          padding: "5px 12px",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          borderRadius: 6,
+                          border: `1px solid ${C.bd}`,
+                          background: m.metric === active.metric ? C.navy : "#fff",
+                          color: m.metric === active.metric ? "#fff" : C.t2,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {m.metric}
+                      </button>
+                    ))}
+                  </div>
+
+                  <LineTrendChart
+                    labels={labels}
+                    series={[{ label: active.metric, values: active.values, color: C.navy }]}
+                    valueFormat={active.money ? "currency" : "number"}
+                  />
+
+                  <div style={{ overflowX: "auto", marginTop: 16 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                          <Th l>Metric</Th>
+                          {labels.map((w) => (
+                            <Th key={w}>{w}</Th>
+                          ))}
+                          <Th>WoW</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {wowMetrics.map((m) => (
+                          <tr
+                            key={m.metric}
+                            onClick={() => setWowMetric(m.metric)}
+                            style={{
+                              borderBottom: `1px solid ${C.s1}`,
+                              cursor: "pointer",
+                              background: m.metric === active.metric ? C.s1 : "transparent",
+                            }}
+                          >
+                            <Td l bold={m.metric === active.metric}>{m.metric}</Td>
+                            {m.values.map((v, i) => (
+                              <Td key={i} mono>
+                                {v == null ? "—" : fmtMetricValue(v, m.money)}
+                              </Td>
+                            ))}
+                            <td style={{ textAlign: "right", padding: "10px 16px" }}>
+                              <DeltaPill delta={wowDeltaPct(m.values)} />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               );
             })()}
-
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>Metric</Th>
-                    {data.pipelineWow.weekLabels.map((w) => (
-                      <Th key={w}>{w}</Th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.pipelineWow.weeks.map((row) => (
-                    <tr key={row.metric} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                      <Td l>{row.metric}</Td>
-                      {row.values.map((v, i) => (
-                        <Td key={i} mono>{v == null ? "—" : v}</Td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </Card>
         </div>
       )}
