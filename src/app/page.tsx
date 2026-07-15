@@ -7,7 +7,16 @@ import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
 import { GroupedBarChart } from "@/lib/GroupedBarChart";
 import { Sparkline, DeltaPill, wowDeltaPct, fmtMetricValue } from "@/lib/Sparkline";
+import { PlanChart } from "@/lib/PlanChart";
 import { TabHeader } from "@/lib/TabHeader";
+import {
+  TARGETS,
+  PLAN_MONTHS,
+  ANNUAL_END_TARGET,
+  SALES_Q,
+  currentSalesQ,
+  monthsInQuarter,
+} from "@/lib/planConfig";
 import type { ArrPoint } from "@/lib/parse";
 
 type MetricRow = { metric: string; value: number; kind: "currency" | "count" | "percent" | "ratio" };
@@ -17,6 +26,7 @@ type AeBreakdownRow = { name: string; quota: number | null; actual: number };
 
 type DashboardData = {
   updatedAt: string;
+  demo?: boolean;
   arr: {
     monthly: ArrPoint[];
     weekly: ArrPoint[];
@@ -431,6 +441,89 @@ export default function Dashboard() {
     };
   }, [data, execSummary, wowMetrics]);
 
+  const pathToPlan = useMemo(() => {
+    if (!data) return null;
+    const now = new Date();
+    const q = currentSalesQ(now);
+    const qDef = SALES_Q[q];
+    const qMonthIdxs = monthsInQuarter(q);
+
+    // Booked New ARR (New Business + Expansion, churn excluded) per calendar month, live from ARR tab.
+    // arr.monthly labels look like "2026-07"; map to calendar month index.
+    const bookedByMonth: (number | null)[] = PLAN_MONTHS.map(() => null);
+    for (const p of data.arr.monthly) {
+      const m = /^\d{4}-(\d{2})$/.exec(p.label);
+      if (!m) continue;
+      const idx = parseInt(m[1], 10) - 1;
+      if (p.label.startsWith("2026-")) {
+        bookedByMonth[idx] = (bookedByMonth[idx] ?? 0) + p.newBusiness + p.expansion;
+      }
+    }
+
+    // YTD booked = sum of booked months that have data
+    const ytdBooked = bookedByMonth.reduce((s: number, v) => s + (v ?? 0), 0);
+    const ytdTargetThroughNow = TARGETS.newARR
+      .slice(0, now.getUTCMonth() + 1)
+      .reduce((s, v) => s + v, 0);
+
+    // Q3 booked & target
+    const q3Booked = qMonthIdxs.reduce((s, i) => s + (bookedByMonth[i] ?? 0), 0);
+    const q3Target = qMonthIdxs.reduce((s, i) => s + TARGETS.newARR[i], 0);
+    const fy26NewArrTarget = TARGETS.newARR.reduce((s, v) => s + v, 0);
+
+    // Weeks left in quarter
+    const qEnd = new Date(qDef.end).getTime();
+    const weeksLeft = Math.max(0, Math.ceil((qEnd - now.getTime()) / (7 * 86400000)));
+
+    // Run-rate needed per week
+    const arrGap = Math.max(0, q3Target - q3Booked);
+    const arrPerWeek = weeksLeft > 0 ? arrGap / weeksLeft : 0;
+
+    // Pipeline: Q3 created vs quota, weekly run-rate
+    const pipeGen = Object.values(q3CreatedByOwner).reduce((s, n) => s + n, 0);
+    const pipeQuota = data.pipeline.aeBreakdown
+      .filter((r) => r.name !== "TOTAL")
+      .reduce((s, r) => s + (r.quota ?? 0), 0);
+    const pipeGap = Math.max(0, pipeQuota - pipeGen);
+    const pipePerWeek = weeksLeft > 0 ? pipeGap / weeksLeft : 0;
+
+    // Last week's ARR added + pipeline added (from weekly ARR tab + WoW)
+    const lastWeek = data.arr.weekly[data.arr.weekly.length - 1];
+    const arrAddedLastWeek = lastWeek?.newARR ?? 0;
+    const arrWeekLabel = lastWeek?.label ?? "";
+    const pipeRow = data.pipelineWow.weeks.find((w) => w.metric.includes("New ARR pipeline Created"));
+    const pipeClean = pipeRow?.values.filter((v): v is number => v != null) ?? [];
+    const pipeAddedLastWeek = pipeClean[pipeClean.length - 1] ?? 0;
+
+    // Chart series: booked vs target, with H2 rebased flag
+    const chart = PLAN_MONTHS.map((m, i) => ({
+      month: m,
+      target: TARGETS.newARR[i],
+      booked: bookedByMonth[i],
+      isH2: i >= 6,
+    }));
+
+    return {
+      q,
+      arrAddedLastWeek,
+      arrWeekLabel,
+      pipeAddedLastWeek,
+      weeksLeft,
+      arrPerWeek,
+      arrGap,
+      q3Target,
+      pipePerWeek,
+      pipeGap,
+      pipeQuota,
+      ytdTargetThroughNow,
+      ytdBooked,
+      q3Booked,
+      fy26NewArrTarget,
+      annualEnd: ANNUAL_END_TARGET,
+      chart,
+    };
+  }, [data, q3CreatedByOwner]);
+
   const pipelineTrend = useMemo(() => {
     if (!data) return { labels: [], values: [] };
     const filtered = data.trendEvents.filter(
@@ -481,9 +574,25 @@ export default function Dashboard() {
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 30px 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.navy }}>
-              Momos Forecast — Q3 FY26
+              {data.demo ? "Horizon Dining Group — Q3 FY26" : "Momos Forecast — Q3 FY26"}
             </div>
             <div style={{ fontSize: 12, color: C.t3 }}>
+              {data.demo && (
+                <span
+                  style={{
+                    background: C.ylwBg,
+                    color: C.ylw,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 10,
+                    marginRight: 8,
+                    letterSpacing: ".04em",
+                  }}
+                >
+                  DEMO DATA
+                </span>
+              )}
               Live · updated {new Date(data.updatedAt).toLocaleTimeString()}
             </div>
           </div>
@@ -645,6 +754,100 @@ export default function Dashboard() {
           {tabSummaries && (
             <TabHeader label="Targets & Progress" sentence={tabSummaries.targets.sentence} stats={tabSummaries.targets.stats} />
           )}
+
+          {pathToPlan && (() => {
+            const P = pathToPlan;
+            const tile = (bg: string) => ({
+              background: bg,
+              border: `1px solid ${C.bd}`,
+              borderRadius: 12,
+              padding: "13px 16px",
+            });
+            const lbl = { fontSize: 10.5, fontWeight: 600 as const, letterSpacing: ".05em", textTransform: "uppercase" as const, color: C.t3 };
+            const big = (color: string) => ({ fontSize: 24, fontWeight: 700 as const, color, fontFamily: "var(--font-dm-mono)", marginTop: 3 });
+            const sub = { fontSize: 11.5, color: C.t2, marginTop: 2 };
+            return (
+              <div style={{ marginBottom: 18 }}>
+                {/* run-rate hero row */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                  <div style={tile("linear-gradient(135deg,#FBEEE9,#FBF7F1)")}>
+                    <div style={lbl}>ARR added last week</div>
+                    <div style={big(C.coralDk)}>{fmt(P.arrAddedLastWeek)}</div>
+                    <div style={sub}>{P.arrWeekLabel && `week of ${P.arrWeekLabel}`}</div>
+                  </div>
+                  <div style={tile("linear-gradient(135deg,#EEEAF5,#FBF7F1)")}>
+                    <div style={lbl}>Pipeline added last week</div>
+                    <div style={big(C.purp)}>{fmt(P.pipeAddedLastWeek)}</div>
+                    <div style={sub}>{P.arrWeekLabel && `week of ${P.arrWeekLabel}`}</div>
+                  </div>
+                </div>
+
+                {/* run-rate-to-goal row */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
+                  <div style={tile("#fff")}>
+                    <div style={lbl}>Weeks left in {P.q}</div>
+                    <div style={big(C.t1)}>{P.weeksLeft}</div>
+                    <div style={sub}>calendar weeks remaining</div>
+                  </div>
+                  <div style={tile("#fff")}>
+                    <div style={lbl}>New ARR needed / wk — {P.q}</div>
+                    <div style={big(C.coralDk)}>{fmt(P.arrPerWeek)}</div>
+                    <div style={sub}>{fmt(P.arrGap)} left to {fmt(P.q3Target)} target</div>
+                  </div>
+                  <div style={tile("#fff")}>
+                    <div style={lbl}>Pipeline needed / wk — {P.q}</div>
+                    <div style={big(C.navy)}>{fmt(P.pipePerWeek)}</div>
+                    <div style={sub}>{fmt(P.pipeGap)} left to {fmt(P.pipeQuota)} goal</div>
+                  </div>
+                </div>
+
+                {/* plan targets row */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, marginBottom: 16 }}>
+                  <div style={tile("#fff")}>
+                    <div style={{ ...lbl, minHeight: 26 }}>YTD New ARR Target</div>
+                    <div style={{ ...big(C.t1), fontSize: 18 }}>{fmt(P.ytdTargetThroughNow)}</div>
+                    <div style={sub}>through this month</div>
+                  </div>
+                  <div style={tile("#fff")}>
+                    <div style={{ ...lbl, minHeight: 26 }}>YTD New ARR Booked</div>
+                    <div style={{ ...big(C.coralDk), fontSize: 18 }}>{fmt(P.ytdBooked)}</div>
+                    <div style={sub}>{P.ytdTargetThroughNow > 0 ? Math.round((P.ytdBooked / P.ytdTargetThroughNow) * 100) + "% of YTD target" : "—"}</div>
+                  </div>
+                  <div style={tile("#fff")}>
+                    <div style={{ ...lbl, minHeight: 26 }}>{P.q} New ARR Target</div>
+                    <div style={{ ...big(C.t1), fontSize: 18 }}>{fmt(P.q3Target)}</div>
+                    <div style={sub}>&nbsp;</div>
+                  </div>
+                  <div style={tile("#fff")}>
+                    <div style={{ ...lbl, minHeight: 26 }}>{P.q} New ARR Booked</div>
+                    <div style={{ ...big(C.coralDk), fontSize: 18 }}>{fmt(P.q3Booked)}</div>
+                    <div style={sub}>{P.q3Target > 0 ? Math.round((P.q3Booked / P.q3Target) * 100) + "% of target" : "—"}</div>
+                  </div>
+                  <div style={tile("#fff")}>
+                    <div style={{ ...lbl, minHeight: 26 }}>FY26 New ARR Target</div>
+                    <div style={{ ...big(C.t1), fontSize: 18 }}>{fmt(P.fy26NewArrTarget)}</div>
+                    <div style={sub}>&nbsp;</div>
+                  </div>
+                  <div style={tile("#fff")}>
+                    <div style={{ ...lbl, minHeight: 26 }}>FY26 Ending ARR Target</div>
+                    <div style={{ ...big(C.navy), fontSize: 18 }}>{fmt(P.annualEnd)}</div>
+                    <div style={sub}>&nbsp;</div>
+                  </div>
+                </div>
+
+                <Card
+                  title="New ARR booked vs target"
+                  sub="Monthly bookings (New Business + Expansion) against plan — churn excluded"
+                  accent={C.coral}
+                >
+                  <div style={{ padding: "16px 20px" }}>
+                    <PlanChart data={P.chart} />
+                  </div>
+                </Card>
+              </div>
+            );
+          })()}
+
           <Card title="ARR Trend" sub="Hover a point for details" accent={C.coral}>
             <div style={{ padding: "16px 20px" }}>
               <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
@@ -1011,7 +1214,7 @@ export default function Dashboard() {
           </div>
 
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, margin: "18px 0" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, margin: "18px 0", alignItems: "start" }}>
             {Object.entries(data.pipeline.breakdownSections).map(([section, rows]) => (
               <Card key={section} title={section}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -1034,31 +1237,30 @@ export default function Dashboard() {
                 </table>
               </Card>
             ))}
-          </div>
 
-          <Card title="9. Weighted Pipeline" sub="Stage probability weights as configured in your Pipeline tab">
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                  <Th l>Stage</Th>
-                  <Th>ARR</Th>
-                  <Th>Probability</Th>
-                  <Th>Weighted ARR</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.pipeline.stageWeights.map((row) => (
-                  <tr key={row.stage} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                    <Td l bold>{row.stage}</Td>
-                    <Td mono>{fmt(row.arr)}</Td>
-                    <Td mono>{pct(row.probability)}</Td>
-                    <Td mono color={C.purp}>{fmt(row.weighted)}</Td>
+            <Card title="9. WEIGHTED PIPELINE" sub="Stage probability weights from your Pipeline tab">
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                    <Th l>Stage</Th>
+                    <Th>ARR</Th>
+                    <Th>Prob.</Th>
+                    <Th>Weighted</Th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-
+                </thead>
+                <tbody>
+                  {data.pipeline.stageWeights.map((row) => (
+                    <tr key={row.stage} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                      <Td l bold>{row.stage}</Td>
+                      <Td mono>{fmt(row.arr)}</Td>
+                      <Td mono>{pct(row.probability)}</Td>
+                      <Td mono color={C.purp}>{fmt(row.weighted)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          </div>
         </div>
       )}
 
