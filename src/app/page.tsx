@@ -5,7 +5,6 @@ import { C, fmt, pct, Card, KV, Bar, Pill, HeroStat, Th, Td } from "@/lib/ui";
 import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
-import { StackedBarChart } from "@/lib/StackedBarChart";
 import type { ArrPoint } from "@/lib/parse";
 
 type MetricRow = { metric: string; value: number; kind: "currency" | "count" | "percent" | "ratio" };
@@ -164,6 +163,15 @@ export default function Dashboard() {
       monthlyCumulative.push({ label: m.label, actual: running });
     }
 
+    // Cumulative churned ARR (last 12 months window)
+    const churnWindow = data.arr.monthly.slice(-12);
+    const churnCumulative: number[] = [];
+    let churnRunning = 0;
+    for (const m of churnWindow) {
+      churnRunning += m.churnedARR;
+      churnCumulative.push(churnRunning);
+    }
+
     return {
       latest,
       teamQuota,
@@ -172,6 +180,8 @@ export default function Dashboard() {
       totalPipelineARR,
       coverageRatio,
       monthlyCumulative,
+      churnWindow,
+      churnCumulative,
     };
   }, [data]);
 
@@ -316,17 +326,40 @@ export default function Dashboard() {
               </div>
             </Card>
 
+            {(() => {
+              const mixWindow = period === "monthly" ? chartPoints.slice(-3) : chartPoints.slice(-13);
+              const mixCharts = [
+                { title: "Net New", key: "newBusiness" as const, color: C.navy },
+                { title: "Expansion", key: "expansion" as const, color: C.teal },
+                { title: "Renewal", key: "renewals" as const, color: C.coralDk },
+              ];
+              return (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 18 }}>
+                  {mixCharts.map((mc) => (
+                    <Card key={mc.title} title={mc.title} sub={period === "monthly" ? "Last 3 months" : "Last 13 weeks"}>
+                      <div style={{ padding: "12px 14px" }}>
+                        <BarTrendChart
+                          labels={mixWindow.map((m) => m.label)}
+                          values={mixWindow.map((m) => m[mc.key])}
+                          valueFormat="currency"
+                          barColor={mc.color}
+                        />
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              );
+            })()}
+
             <Card
-              title="Team ARR Attainment — Cumulative vs Q3 Quota"
-              sub="Running total of closed-won + live-paying ARR by month, against the Q3 quota target"
+              title="Team ARR Attainment — Cumulative"
+              sub="Running total of closed-won + live-paying ARR by month"
             >
               <div style={{ padding: "16px 20px" }}>
                 <BarTrendChart
                   labels={derived.monthlyCumulative.map((m) => m.label)}
                   values={derived.monthlyCumulative.map((m) => m.actual)}
                   valueFormat="currency"
-                  targetLine={derived.teamQuota}
-                  targetLabel="Q3 Quota"
                 />
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
                   <KV label="Actual (Q3)" v={fmt(derived.teamActual)} />
@@ -341,44 +374,21 @@ export default function Dashboard() {
             </Card>
 
             <Card
-              title="Churned ARR by Month"
-              sub="Monthly churn from your ARR tab — lower is better"
+              title="Churned ARR — Cumulative vs Monthly"
+              sub="Columns = cumulative churn over the last 12 months · line = churn in each month"
               accent={C.red}
             >
               <div style={{ padding: "16px 20px" }}>
                 <BarTrendChart
-                  labels={data.arr.monthly.slice(-12).map((m) => m.label)}
-                  values={data.arr.monthly.slice(-12).map((m) => m.churnedARR)}
+                  labels={derived.churnWindow.map((m) => m.label)}
+                  values={derived.churnCumulative}
                   valueFormat="currency"
                   barColor={C.red}
-                />
-              </div>
-            </Card>
-
-            <Card
-              title="New ARR Mix — Net New vs Expansion vs Renewal"
-              sub="Composition of new ARR added each month"
-            >
-              <div style={{ padding: "16px 20px" }}>
-                <StackedBarChart
-                  labels={data.arr.monthly.slice(-12).map((m) => m.label)}
-                  series={[
-                    {
-                      label: "Net New",
-                      values: data.arr.monthly.slice(-12).map((m) => m.newBusiness),
-                      color: C.navy,
-                    },
-                    {
-                      label: "Expansion",
-                      values: data.arr.monthly.slice(-12).map((m) => m.expansion),
-                      color: C.teal,
-                    },
-                    {
-                      label: "Renewal",
-                      values: data.arr.monthly.slice(-12).map((m) => m.renewals),
-                      color: C.coralDk,
-                    },
-                  ]}
+                  lineOverlay={{
+                    label: "Monthly Churn",
+                    values: derived.churnWindow.map((m) => m.churnedARR),
+                    color: C.navy,
+                  }}
                 />
               </div>
             </Card>

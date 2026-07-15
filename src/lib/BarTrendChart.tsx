@@ -10,6 +10,7 @@ export function BarTrendChart({
   targetLine,
   targetLabel,
   barColor,
+  lineOverlay,
 }: {
   labels: string[];
   values: number[];
@@ -17,6 +18,7 @@ export function BarTrendChart({
   targetLine?: number;
   targetLabel?: string;
   barColor?: string;
+  lineOverlay?: { label: string; values: number[]; color: string };
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
@@ -33,7 +35,7 @@ export function BarTrendChart({
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
-  const max = Math.max(...values, targetLine ?? 0, 1) * 1.1;
+  const max = Math.max(...values, ...(lineOverlay?.values ?? []), targetLine ?? 0, 1) * 1.1;
   const barW = (innerW / labels.length) * 0.65;
   const gap = innerW / labels.length;
 
@@ -103,6 +105,28 @@ export function BarTrendChart({
             </g>
           );
         })}
+
+        {lineOverlay && (
+          <g>
+            <polyline
+              points={lineOverlay.values
+                .map((v, i) => `${(padL + i * gap + gap / 2).toFixed(1)},${y(v).toFixed(1)}`)
+                .join(" ")}
+              fill="none"
+              stroke={lineOverlay.color}
+              strokeWidth={2}
+            />
+            {lineOverlay.values.map((v, i) => (
+              <circle
+                key={i}
+                cx={padL + i * gap + gap / 2}
+                cy={y(v)}
+                r={hoverIdx === i ? 4.5 : 3}
+                fill={lineOverlay.color}
+              />
+            ))}
+          </g>
+        )}
       </svg>
       {hovered && (
         <div
@@ -118,7 +142,24 @@ export function BarTrendChart({
             pointerEvents: "none",
           }}
         >
-          <strong>{hovered.label}</strong>: {fmtVal(hovered.value)}
+          <div style={{ fontWeight: 700, marginBottom: lineOverlay ? 4 : 0 }}>
+            {hovered.label}
+            {!lineOverlay && <>: {fmtVal(hovered.value)}</>}
+          </div>
+          {lineOverlay && hoverIdx != null && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <span style={{ color: "#C7D0E0" }}>Cumulative</span>
+                <span style={{ fontFamily: "var(--font-dm-mono)" }}>{fmtVal(hovered.value)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <span style={{ color: "#C7D0E0" }}>{lineOverlay.label}</span>
+                <span style={{ fontFamily: "var(--font-dm-mono)" }}>
+                  {fmtVal(lineOverlay.values[hoverIdx] ?? 0)}
+                </span>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
