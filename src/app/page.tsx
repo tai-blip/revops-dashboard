@@ -191,6 +191,19 @@ export default function Dashboard() {
     return Array.from(new Set(data.trendEvents.map((e) => e.owner))).sort();
   }, [data]);
 
+  // Pipeline created within Q3 FY26 (Jul 1 – Sep 30, 2026), per AE
+  const q3CreatedByOwner = useMemo(() => {
+    if (!data) return {} as Record<string, number>;
+    const out: Record<string, number> = {};
+    for (const e of data.trendEvents) {
+      if (e.type !== "created") continue;
+      if (e.date >= "2026-07-01" && e.date <= "2026-09-30") {
+        out[e.owner] = (out[e.owner] ?? 0) + e.arr;
+      }
+    }
+    return out;
+  }, [data]);
+
   function getWeekStart(dateStr: string): string {
     const d = new Date(dateStr + "T00:00:00Z");
     const day = d.getUTCDay();
@@ -626,33 +639,57 @@ export default function Dashboard() {
             ))}
           </div>
 
-          <Card title="AE Pipeline Breakdown — Q3 FY26" sub="Quota vs actual open pipeline per AE, from your Pipeline tab">
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                  <Th l>AE</Th>
-                  <Th>Q3 Pipe Quota</Th>
-                  <Th>Actual Pipeline</Th>
-                  <Th l>Progress</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.pipeline.aeBreakdown.map((row) => (
-                  <tr key={row.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                    <Td l bold>{row.name}</Td>
-                    <Td mono>{row.quota != null ? fmt(row.quota) : "—"}</Td>
-                    <Td mono color={C.purp}>{fmt(row.actual)}</Td>
-                    <td style={{ padding: "10px 16px", width: 160 }}>
-                      {row.quota != null && row.quota > 0 ? (
-                        <Bar value={row.actual} target={row.quota} />
-                      ) : (
-                        <span style={{ fontSize: 12, color: C.t3 }}>no quota</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <Card
+            title="AE Pipeline Generation — Q3 FY26"
+            sub="Pipeline created within Q3 (Jul–Sep 2026) vs each AE's quarterly pipe-generation quota"
+          >
+            {(() => {
+              const rows = data.pipeline.aeBreakdown.filter((r) => r.name !== "TOTAL");
+              const totalQuota = rows.reduce((s, r) => s + (r.quota ?? 0), 0);
+              const totalCreated = rows.reduce(
+                (s, r) => s + (q3CreatedByOwner[r.name] ?? 0),
+                0
+              );
+              return (
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      <Th l>AE</Th>
+                      <Th>Q3 Pipe Quota</Th>
+                      <Th>Created in Q3</Th>
+                      <Th l>Progress</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => {
+                      const created = q3CreatedByOwner[row.name] ?? 0;
+                      return (
+                        <tr key={row.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <Td l bold>{row.name}</Td>
+                          <Td mono>{row.quota != null && row.quota > 0 ? fmt(row.quota) : "—"}</Td>
+                          <Td mono color={C.purp}>{fmt(created)}</Td>
+                          <td style={{ padding: "10px 16px", width: 160 }}>
+                            {row.quota != null && row.quota > 0 ? (
+                              <Bar value={created} target={row.quota} />
+                            ) : (
+                              <span style={{ fontSize: 12, color: C.t3 }}>no quota</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ borderTop: `2px solid ${C.navy}` }}>
+                      <Td l bold>TOTAL</Td>
+                      <Td mono bold>{fmt(totalQuota)}</Td>
+                      <Td mono bold color={C.purp}>{fmt(totalCreated)}</Td>
+                      <td style={{ padding: "10px 16px", width: 160 }}>
+                        <Bar value={totalCreated} target={totalQuota} />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              );
+            })()}
           </Card>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, margin: "18px 0" }}>
