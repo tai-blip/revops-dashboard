@@ -107,6 +107,7 @@ const TABS = [
   ["health", "Deal Health"],
   ["attainment", "AE Attainment"],
   ["acv", "ACV & Deal Size"],
+  ["productarr", "Product ARR"],
   ["actions", "Who Does What"],
 ] as const;
 
@@ -1711,6 +1712,149 @@ export default function Dashboard() {
           </Card>
         </div>
       )}
+
+      {tab === "productarr" && (() => {
+        const monthly = data.arr.monthly.filter((p) => p.label.startsWith("2026-"));
+        const weekly = data.arr.weekly.slice(-6);
+        const wLabels = weekly.map((p) => p.label.slice(5));
+        const mWin = monthly.slice(-6);
+        const mLabels = mWin.map((p) => p.label.slice(5));
+
+        const PRODUCTS = [
+          { key: "alfie" as const, name: "Alfie", color: C.purp, target: "alfieTarget" as const },
+          { key: "managedServices" as const, name: "Managed Services", color: C.teal, target: "msTarget" as const },
+          { key: "coreExisting" as const, name: "Core Existing", color: C.navy, target: null },
+        ];
+
+        const wowPill = (series: number[]) => {
+          const clean = series.filter((v) => v != null);
+          if (clean.length < 2) return <DeltaPill delta={null} />;
+          const last = clean[clean.length - 1], prev = clean[clean.length - 2];
+          return <DeltaPill delta={prev === 0 ? null : ((last - prev) / Math.abs(prev)) * 100} />;
+        };
+
+        // exec summary line
+        const latest = monthly[monthly.length - 1];
+        const summ = `Product ARR: Core Existing ${fmt(latest?.coreExisting ?? 0)}, Managed Services ${fmt(latest?.managedServices ?? 0)}, Alfie ${fmt(latest?.alfie ?? 0)}.`;
+
+        const captureHTML = () => {
+          const el = document.getElementById("productArrCapture");
+          if (!el) return "";
+          return `<!doctype html><html><head><meta charset="utf-8"><title>Product ARR — Momos</title></head><body style="font-family:system-ui;background:#FBF7F1;padding:20px;">${el.innerHTML}</body></html>`;
+        };
+        const downloadHTML = () => {
+          const blob = new Blob([captureHTML()], { type: "text/html" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `product-arr-${new Date().toISOString().slice(0, 10)}.html`;
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+        const emailIt = () => {
+          downloadHTML();
+          const subject = encodeURIComponent("Product ARR snapshot");
+          const body = encodeURIComponent("Product ARR snapshot attached (downloaded to your device — attach the HTML file to this email before sending).");
+          window.location.href = `mailto:tai@momos.com?subject=${subject}&body=${body}`;
+        };
+
+        return (
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 20, color: C.navy }}>Product ARR</div>
+              <div style={{ fontSize: 12.5, color: C.t2 }}>Weekly & monthly ARR movement by product line</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={downloadHTML} style={{ background: "#fff", color: C.navy, border: `1px solid ${C.bd}`, borderRadius: 8, padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>⬇ Download HTML</button>
+              <button onClick={emailIt} style={{ background: C.navy, color: "#fff", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>✉ Email to tai@momos.com</button>
+            </div>
+          </div>
+
+          <div id="productArrCapture">
+            <div style={{ background: C.navy, borderRadius: 14, padding: "16px 22px", marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", color: "#9FAAC6", marginBottom: 6 }}>Product ARR · Executive Summary</div>
+              <div style={{ fontSize: 15.5, lineHeight: 1.55, color: "#fff", fontWeight: 500 }}>{summ}</div>
+            </div>
+
+            {/* 1. weekly grouped columns */}
+            <Card title="Weekly ARR by Product — last 6 weeks" sub="Grouped columns per product line, week over week" accent={C.coral}>
+              <div style={{ padding: "16px 20px" }}>
+                <GroupedBarChart
+                  labels={wLabels}
+                  series={PRODUCTS.map((p) => ({ label: p.name, values: weekly.map((w) => w[p.key]), color: p.color }))}
+                />
+              </div>
+            </Card>
+
+            {/* 2. WoW table by product */}
+            <Card title="Week over week by product">
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      <Th l>Product</Th>
+                      {wLabels.map((w) => <Th key={w}>{w}</Th>)}
+                      <Th>WoW</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {PRODUCTS.map((p) => (
+                      <tr key={p.key} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                        <td style={{ padding: "10px 16px", fontSize: 13 }}>
+                          <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: p.color, marginRight: 8 }} />
+                          <span style={{ fontWeight: 600, color: C.t1 }}>{p.name}</span>
+                        </td>
+                        {weekly.map((w, i) => <Td key={i} mono>{fmt(w[p.key])}</Td>)}
+                        <td style={{ textAlign: "right", padding: "10px 16px" }}>{wowPill(weekly.map((w) => w[p.key]))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            {/* 3. monthly grouped columns w/ target on hover */}
+            <Card title="Monthly ARR by Product — vs target" sub="Grouped columns per product; hover a bar to see that product's monthly target and attainment" accent={C.navy}>
+              <div style={{ padding: "16px 20px" }}>
+                <GroupedBarChart
+                  labels={mLabels}
+                  series={PRODUCTS.map((p) => ({ label: p.name, values: mWin.map((m) => m[p.key]), color: p.color }))}
+                  targets={PRODUCTS.map((p) => (p.target ? mWin.map((m) => m[p.target]) : mWin.map(() => 0)))}
+                />
+              </div>
+            </Card>
+
+            {/* monthly summary table */}
+            <Card title="Month over month by product">
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      <Th l>Product</Th>
+                      {mLabels.map((m) => <Th key={m}>{m}</Th>)}
+                      <Th>MoM</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {PRODUCTS.map((p) => (
+                      <tr key={p.key} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                        <td style={{ padding: "10px 16px", fontSize: 13 }}>
+                          <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: p.color, marginRight: 8 }} />
+                          <span style={{ fontWeight: 600, color: C.t1 }}>{p.name}</span>
+                        </td>
+                        {mWin.map((m, i) => <Td key={i} mono>{fmt(m[p.key])}</Td>)}
+                        <td style={{ textAlign: "right", padding: "10px 16px" }}>{wowPill(mWin.map((m) => m[p.key]))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+        </div>
+        );
+      })()}
 
       {tab === "actions" && (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>

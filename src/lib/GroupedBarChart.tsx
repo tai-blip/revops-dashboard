@@ -8,9 +8,11 @@ type GroupSeries = { label: string; values: number[]; color: string };
 export function GroupedBarChart({
   labels,
   series,
+  targets,
 }: {
   labels: string[];
   series: GroupSeries[];
+  targets?: number[][];
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
@@ -132,12 +134,22 @@ export function GroupedBarChart({
           }}
         >
           <div style={{ fontWeight: 700, marginBottom: 4 }}>{labels[hoverIdx]}</div>
-          {series.map((s) => (
-            <div key={s.label} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-              <span style={{ color: "#C7D0E0" }}>{s.label}</span>
-              <span style={{ fontFamily: "var(--font-dm-mono)" }}>{fmt(s.values[hoverIdx] ?? 0)}</span>
-            </div>
-          ))}
+          {series.map((s, si) => {
+            const tgt = targets?.[si]?.[hoverIdx];
+            return (
+              <div key={s.label} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                <span style={{ color: "#C7D0E0" }}>{s.label}</span>
+                <span style={{ fontFamily: "var(--font-dm-mono)" }}>
+                  {fmt(s.values[hoverIdx] ?? 0)}
+                  {tgt != null && tgt > 0 && (
+                    <span style={{ color: "#9FAAC6" }}>
+                      {" / "}{fmt(tgt)} ({Math.round(((s.values[hoverIdx] ?? 0) / tgt) * 100)}%)
+                    </span>
+                  )}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

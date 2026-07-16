@@ -120,6 +120,8 @@ for (const list of [arr.monthly, arr.weekly]) {
     p.alfie = jmMild(p.alfie);
     p.managedServices = jmMild(p.managedServices);
     p.coreExisting = jmMild(p.coreExisting);
+    p.alfieTarget = jmMild(p.alfieTarget);
+    p.msTarget = jmMild(p.msTarget);
     p.changePct = prev != null && prev > 0 ? (p.activeARR - prev) / prev : null;
     prev = p.activeARR;
   }

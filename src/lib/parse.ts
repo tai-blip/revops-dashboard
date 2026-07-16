@@ -25,6 +25,8 @@ export type ArrPoint = {
   alfie: number;
   managedServices: number;
   coreExisting: number;
+  alfieTarget: number;
+  msTarget: number;
 };
 
 export function parseArrTab(rows: Row[]) {
@@ -43,10 +45,12 @@ export function parseArrTab(rows: Row[]) {
         renewals: Number(r[4] ?? 0), // - Renewals ($)
         activeARR: Number(r[5] ?? 0), // Active ARR Snapshot ($)
         churnedARR: Number(r[11] ?? 0), // Churned ARR ($)
-        changePct: r[18] != null ? Number(r[18]) : null, // MoM Change (%)
-        alfie: Number(r[12] ?? 0), // Chat Agent Alfie ($)
-        managedServices: Number(r[13] ?? 0), // Managed Services ($)
-        coreExisting: Number(r[14] ?? 0), // Core Existing Features ($)
+        changePct: r[22] != null ? Number(r[22]) : null, // MoM Change (%)
+        alfie: Number(r[12] ?? 0), // Chat Agent Alfie ($) = M
+        managedServices: Number(r[14] ?? 0), // Managed Services ($) = O
+        coreExisting: Number(r[16] ?? 0), // Core Existing Features ($) = Q
+        alfieTarget: Number(r[13] ?? 0), // Monthly Target (Agent) = N
+        msTarget: Number(r[15] ?? 0), // Monthly Target (Managed Service) = P
       });
     }
   }
@@ -69,10 +73,12 @@ export function parseArrTab(rows: Row[]) {
         renewals: Number(r[4] ?? 0),
         activeARR: Number(r[5] ?? 0),
         churnedARR: Number(r[11] ?? 0),
-        changePct: r[18] != null ? Number(r[18]) : null, // WoW Change (%)
+        changePct: r[22] != null ? Number(r[22]) : null, // WoW Change (%)
         alfie: Number(r[12] ?? 0),
-        managedServices: Number(r[13] ?? 0),
-        coreExisting: Number(r[14] ?? 0),
+        managedServices: Number(r[14] ?? 0),
+        coreExisting: Number(r[16] ?? 0),
+        alfieTarget: Number(r[13] ?? 0),
+        msTarget: Number(r[15] ?? 0),
       });
     }
   }
