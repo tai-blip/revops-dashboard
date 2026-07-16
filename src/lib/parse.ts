@@ -22,6 +22,9 @@ export type ArrPoint = {
   activeARR: number;
   churnedARR: number;
   changePct: number | null;
+  alfie: number;
+  managedServices: number;
+  coreExisting: number;
 };
 
 export function parseArrTab(rows: Row[]) {
@@ -40,7 +43,10 @@ export function parseArrTab(rows: Row[]) {
         renewals: Number(r[4] ?? 0), // - Renewals ($)
         activeARR: Number(r[5] ?? 0), // Active ARR Snapshot ($)
         churnedARR: Number(r[11] ?? 0), // Churned ARR ($)
-        changePct: r[13] != null ? Number(r[13]) : null, // MoM Change (%)
+        changePct: r[18] != null ? Number(r[18]) : null, // MoM Change (%)
+        alfie: Number(r[12] ?? 0), // Chat Agent Alfie ($)
+        managedServices: Number(r[13] ?? 0), // Managed Services ($)
+        coreExisting: Number(r[14] ?? 0), // Core Existing Features ($)
       });
     }
   }
@@ -63,7 +69,10 @@ export function parseArrTab(rows: Row[]) {
         renewals: Number(r[4] ?? 0),
         activeARR: Number(r[5] ?? 0),
         churnedARR: Number(r[11] ?? 0),
-        changePct: r[13] != null ? Number(r[13]) : null, // WoW Change (%)
+        changePct: r[18] != null ? Number(r[18]) : null, // WoW Change (%)
+        alfie: Number(r[12] ?? 0),
+        managedServices: Number(r[13] ?? 0),
+        coreExisting: Number(r[14] ?? 0),
       });
     }
   }

@@ -117,6 +117,9 @@ for (const list of [arr.monthly, arr.weekly]) {
     p.newARR = p.newBusiness + p.expansion + p.renewals;
     p.activeARR = jmMild(p.activeARR);
     p.churnedARR = jm(p.churnedARR);
+    p.alfie = jmMild(p.alfie);
+    p.managedServices = jmMild(p.managedServices);
+    p.coreExisting = jmMild(p.coreExisting);
     p.changePct = prev != null && prev > 0 ? (p.activeARR - prev) / prev : null;
     prev = p.activeARR;
   }

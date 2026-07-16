@@ -8,6 +8,7 @@ import { LineTrendChart } from "@/lib/LineTrendChart";
 import { GroupedBarChart } from "@/lib/GroupedBarChart";
 import { Sparkline, DeltaPill, wowDeltaPct, fmtMetricValue } from "@/lib/Sparkline";
 import { PlanChart } from "@/lib/PlanChart";
+import { ProductLineSection } from "@/lib/ProductLineChart";
 import { TabHeader } from "@/lib/TabHeader";
 import {
   TARGETS,
@@ -868,6 +869,41 @@ export default function Dashboard() {
                   </div>
                 </Card>
               </div>
+            );
+          })()}
+
+          {(() => {
+            const win = data.arr.monthly.filter((p) => p.label.startsWith("2026-")).slice(-12);
+            const labels = win.map((p) => p.label.slice(5));
+            const linesCfg = [
+              { name: "Chat Agent Alfie", color: C.purp, data: win.map((p) => p.alfie), target: 150000 },
+              { name: "Managed Services", color: C.teal, data: win.map((p) => p.managedServices), target: 400000 },
+              { name: "Core Existing Features", color: C.navy, data: win.map((p) => p.coreExisting), target: 5500000 },
+            ];
+            const latest = win[win.length - 1];
+            const alf = latest?.alfie ?? 0;
+            const ms = latest?.managedServices ?? 0;
+            const core = latest?.coreExisting ?? 0;
+            const summary = `Product-line ARR: Core Existing Features leads at ${fmt(core)}, Managed Services ${fmt(ms)}, and Chat Agent Alfie ${fmt(alf)}. Set a target on any line below to track live gap and attainment.`;
+            return (
+              <>
+                <div style={{ background: C.navy, borderRadius: 14, padding: "16px 22px", marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", color: "#9FAAC6", marginBottom: 6 }}>
+                    ARR by Product Line · Executive Summary
+                  </div>
+                  <div style={{ fontSize: 15.5, lineHeight: 1.55, color: "#fff", fontWeight: 500 }}>{summary}</div>
+                </div>
+                {linesCfg.map((l) => (
+                  <ProductLineSection
+                    key={l.name}
+                    name={l.name}
+                    color={l.color}
+                    labels={labels}
+                    data={l.data}
+                    defaultTarget={l.target}
+                  />
+                ))}
+              </>
             );
           })()}
 
