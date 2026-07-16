@@ -71,17 +71,27 @@ export function GroupedBarChart({
               {series.map((s, si) => {
                 const v = s.values[i] ?? 0;
                 const barH = innerH - (y(v) - padT);
+                const tgt = targets?.[si]?.[i];
+                const hasTgt = tgt != null && tgt > 0;
+                const labelColor = !hasTgt ? C.t2 : v >= tgt ? C.grn : C.red;
+                const bx = groupX + si * barW + 1 + (barW - 2) / 2;
                 return (
-                  <rect
-                    key={s.label}
-                    x={groupX + si * barW + 1}
-                    y={y(v)}
-                    width={barW - 2}
-                    height={Math.max(barH, 1)}
-                    fill={s.color}
-                    opacity={hoverIdx === null || hoverIdx === i ? 1 : 0.45}
-                    rx={2}
-                  />
+                  <g key={s.label}>
+                    <rect
+                      x={groupX + si * barW + 1}
+                      y={y(v)}
+                      width={barW - 2}
+                      height={Math.max(barH, 1)}
+                      fill={s.color}
+                      opacity={hoverIdx === null || hoverIdx === i ? 1 : 0.45}
+                      rx={2}
+                    />
+                    {v > 0 && (
+                      <text x={bx} y={y(v) - 4} textAnchor="middle" fontSize={8.5} fontWeight={700} fill={labelColor}>
+                        {fmt(v)}
+                      </text>
+                    )}
+                  </g>
                 );
               })}
               <rect
@@ -124,29 +134,30 @@ export function GroupedBarChart({
             position: "absolute",
             top: 4,
             right: 4,
-            background: C.navy,
+            background: "#33302B",
             color: "#fff",
             borderRadius: 8,
             padding: "8px 12px",
             fontSize: 12,
             pointerEvents: "none",
-            minWidth: 150,
+            minWidth: 170,
           }}
         >
           <div style={{ fontWeight: 700, marginBottom: 4 }}>{labels[hoverIdx]}</div>
           {series.map((s, si) => {
+            const val = s.values[hoverIdx] ?? 0;
             const tgt = targets?.[si]?.[hoverIdx];
+            const hasTgt = tgt != null && tgt > 0;
+            const attain = hasTgt ? Math.round((val / tgt) * 100) : null;
             return (
-              <div key={s.label} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                <span style={{ color: "#C7D0E0" }}>{s.label}</span>
-                <span style={{ fontFamily: "var(--font-dm-mono)" }}>
-                  {fmt(s.values[hoverIdx] ?? 0)}
-                  {tgt != null && tgt > 0 && (
-                    <span style={{ color: "#9FAAC6" }}>
-                      {" / "}{fmt(tgt)} ({Math.round(((s.values[hoverIdx] ?? 0) / tgt) * 100)}%)
-                    </span>
-                  )}
-                </span>
+              <div key={s.label} style={{ marginBottom: 2 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <span style={{ color: "#C9C3BA" }}>{s.label}</span>
+                  <span style={{ fontFamily: "var(--font-dm-mono)" }}>{fmt(val)}</span>
+                </div>
+                <div style={{ fontSize: 10.5, color: hasTgt ? (val >= tgt ? "#9FD9A4" : "#F0A99C") : "#9A938A", textAlign: "right" }}>
+                  {hasTgt ? `Target ${fmt(tgt)} · ${attain}% ${val >= tgt ? "✓" : "under"}` : "No target set"}
+                </div>
               </div>
             );
           })}
