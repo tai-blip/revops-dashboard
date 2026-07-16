@@ -30,7 +30,8 @@ export function GroupedBarChart({
   const innerH = H - padT - padB;
 
   const allValues = series.flatMap((s) => s.values);
-  const max = Math.max(...allValues, 1) * 1.1;
+  const allTargets = targets ? targets.flat().filter((v): v is number => v != null) : [];
+  const max = Math.max(...allValues, ...allTargets, 1) * 1.1;
 
   const groupGap = innerW / labels.length;
   const barW = Math.min(42, (groupGap * 0.7) / series.length);
@@ -73,10 +74,23 @@ export function GroupedBarChart({
                 const barH = innerH - (y(v) - padT);
                 const tgt = targets?.[si]?.[i];
                 const hasTgt = tgt != null && tgt > 0;
-                const labelColor = !hasTgt ? C.t2 : v >= tgt ? C.grn : C.red;
+                const met = hasTgt && v >= tgt;
+                const labelColor = !hasTgt ? C.t2 : met ? C.grn : C.red;
                 const bx = groupX + si * barW + 1 + (barW - 2) / 2;
                 return (
                   <g key={s.label}>
+                    {/* gap-to-target segment: same product color, soft tint, sits above the actual bar */}
+                    {hasTgt && !met && (
+                      <rect
+                        x={groupX + si * barW + 1}
+                        y={y(tgt!)}
+                        width={barW - 2}
+                        height={Math.max(y(v) - y(tgt!), 1)}
+                        fill={s.color}
+                        opacity={0.18}
+                        rx={2}
+                      />
+                    )}
                     <rect
                       x={groupX + si * barW + 1}
                       y={y(v)}
