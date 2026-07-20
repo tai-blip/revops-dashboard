@@ -369,6 +369,61 @@ const isExpRt = (rt: string) => rt.includes("Expansion");
 const isRenewalRt = (rt: string) => rt.includes("Renewal");
 const isNBRt = (rt: string) => rt.includes("New Business");
 
+// ── Forecasting tab (data-warehouse): read the pre-computed QoQ block ──
+// Layout: after the "QoQ Progression" title row comes a header row with the
+// quarter labels (Q1 2026 … Q4 2026), each spanning a 4-col block
+// [Closed Won | Potential ARR | Quota | Vs Quota]. Open Pipeline / Pot New Biz /
+// Pot Expansion are snapshots in cols B/C/D. We read the block for `quarterKey`.
+export type ForecastingSheetRow = {
+  openPipe: number;
+  potNB: number;
+  potExp: number;
+  closedWon: number;
+  potential: number;
+};
+export function parseForecastingQoQ(
+  rows: Row[],
+  quarterKey: string
+): Record<string, ForecastingSheetRow> {
+  const out: Record<string, ForecastingSheetRow> = {};
+  const titleIdx = rows.findIndex((r) =>
+    r.some((c) => typeof c === "string" && c.includes("QoQ Progression"))
+  );
+  if (titleIdx === -1) return out;
+
+  const qHeader = rows[titleIdx + 1] ?? [];
+  const key = quarterKey.toUpperCase();
+  let qCol = -1;
+  for (let c = 0; c < qHeader.length; c++) {
+    const v = qHeader[c];
+    if (typeof v === "string" && v.toUpperCase().replace(/\s+/g, "").includes(key)) {
+      qCol = c; // Closed Won column for that quarter; Potential ARR is qCol+1
+      break;
+    }
+  }
+  if (qCol === -1) return out;
+
+  const num = (x: unknown): number => {
+    const n = Number(String(x ?? "").replace(/[^0-9.\-]/g, ""));
+    return isFinite(n) ? n : 0;
+  };
+
+  // Data rows start after the title + quarter-header + sub-header (3 rows).
+  for (let i = titleIdx + 3; i < rows.length; i++) {
+    const name = String(cell(rows[i], 0) ?? "").trim();
+    if (!name) break; // blank line ends the block
+    if (name.toUpperCase().startsWith("AE TEAM")) continue; // summary recomputed downstream
+    out[name] = {
+      openPipe: num(cell(rows[i], 1)),
+      potNB: num(cell(rows[i], 2)),
+      potExp: num(cell(rows[i], 3)),
+      closedWon: num(cell(rows[i], qCol)),
+      potential: num(cell(rows[i], qCol + 1)),
+    };
+  }
+  return out;
+}
+
 export function computeForecastTab(
   openDeals: OpenDeal[],
   closedDeals: ClosedDeal[],
@@ -378,7 +433,11 @@ export function computeForecastTab(
   currentLiveARR: number,
   annualTarget: number,
   rates: Record<string, number>,
-  nextQ: { label: string; startISO: string; endISO: string; quota: number }
+  nextQ: { label: string; startISO: string; endISO: string; quota: number },
+  sheetRows?: Record<
+    string,
+    { openPipe: number; potNB: number; potExp: number; closedWon: number; potential: number }
+  >
 ) {
   const rosterNames = new Set(roster.map((r) => r.name));
 
@@ -404,14 +463,16 @@ export function computeForecastTab(
   }
 
   const rows: ForecastRow[] = roster.map((a) => {
-    const cw = (cwByOwner[a.name]?.nb ?? 0) + (cwByOwner[a.name]?.exp ?? 0);
-    const potNB = openByOwner[a.name]?.potNB ?? 0;
-    const potExp = openByOwner[a.name]?.potExp ?? 0;
-    const potential = cw + potNB + potExp;
+    const s = sheetRows?.[a.name];
+    const cw = s ? s.closedWon : (cwByOwner[a.name]?.nb ?? 0) + (cwByOwner[a.name]?.exp ?? 0);
+    const potNB = s ? s.potNB : openByOwner[a.name]?.potNB ?? 0;
+    const potExp = s ? s.potExp : openByOwner[a.name]?.potExp ?? 0;
+    const openPipe = s ? s.openPipe : openByOwner[a.name]?.pipe ?? 0;
+    const potential = s ? s.potential : cw + potNB + potExp;
     return {
       name: a.name,
       am: a.am,
-      openPipe: openByOwner[a.name]?.pipe ?? 0,
+      openPipe,
       quota: a.quota,
       closedWon: cw,
       potNB,

@@ -15,6 +15,7 @@ import {
   buildTrendEvents,
   computeForecast,
   computeForecastTab,
+  parseForecastingQoQ,
   computeWinRateAndCycle,
   computeAcvDistribution,
 } from "@/lib/deals";
@@ -42,7 +43,7 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [arrRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows] =
+    const [arrRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows] =
       await Promise.all([
         getSheetValues("ARR & recurring revenue"),
         getSheetValues("AE attainment"),
@@ -50,6 +51,7 @@ export async function GET() {
         getSheetValues("Pipeline - WoW"),
         getSheetValues("Query 1", "A1:Z1000"),
         getSheetValues("Query 2", "A1:Z2000"),
+        getSheetValues("Forecasting", "A1:T40"),
       ]);
 
     const arr = parseArrTab(arrRows);
@@ -88,6 +90,16 @@ export async function GET() {
       endISO: nextQDef.end,
       quota: nextQuota,
     };
+    // Read pre-computed per-AE forecast straight from the Forecasting tab
+    // (the warehouse) for the current quarter's QoQ block; map the sheet's short
+    // names onto roster full names. This is the single source of truth for the
+    // in-quarter table (incl. Closed Won) — no recompute.
+    const qoqByShort = parseForecastingQoQ(forecastingRows, q);
+    const forecastSheetRows: typeof qoqByShort = {};
+    for (const a of AE_ROSTER) {
+      const s = qoqByShort[a.short] ?? qoqByShort[a.name];
+      if (s) forecastSheetRows[a.name] = s;
+    }
     const forecastTab = computeForecastTab(
       openDeals,
       closedDeals,
@@ -97,7 +109,8 @@ export async function GET() {
       latestArr,
       ANNUAL_END_TARGET,
       winRates.rates,
-      nextQ
+      nextQ,
+      forecastSheetRows
     );
     const currentYear = new Date().getUTCFullYear();
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
