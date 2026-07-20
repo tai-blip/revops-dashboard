@@ -268,10 +268,15 @@ export default function Dashboard() {
 
   const wowMetrics = useMemo(() => {
     if (!data) return [];
+    // "New ARR pipeline Created" is pipeline generation, NOT booked ARR. Relabel it
+    // for display so the Pipeline tab reads consistently; keep `raw` for lookups.
+    const relabel = (m: string) =>
+      m.replace(/New ARR pipeline Created/i, "New Pipeline Created");
     return data.pipelineWow.weeks
       .filter((w) => !w.metric.includes("Δ%"))
       .map((w) => ({
-        metric: w.metric,
+        metric: relabel(w.metric),
+        raw: w.metric,
         values: w.values,
         money: w.metric.includes("($)"),
       }));
@@ -312,7 +317,7 @@ export default function Dashboard() {
         : { label: "Behind", tone: "bad" as const };
 
     // Weekly ARR creation WoW
-    const arrRow = wowMetrics.find((m) => m.metric.includes("New ARR"));
+    const arrRow = wowMetrics.find((m) => m.raw.includes("New ARR pipeline Created"));
     const wowDelta = arrRow ? wowDeltaPct(arrRow.values) : null;
 
     // Churn: latest month vs prior 3-month average
@@ -382,7 +387,7 @@ export default function Dashboard() {
     const totalPipe =
       data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Pipeline (ARR)")?.value ?? 0;
 
-    const arrRow = wowMetrics.find((m) => m.metric.includes("New ARR"));
+    const arrRow = wowMetrics.find((m) => m.raw.includes("New ARR pipeline Created"));
     const arrClean = arrRow?.values.filter((v): v is number => v != null) ?? [];
     const arrThisWeek = arrClean[arrClean.length - 1] ?? 0;
     const wowPhrase =
@@ -1634,6 +1639,127 @@ export default function Dashboard() {
             </Card>
           </div>
 
+          {/* in-quarter table */}
+          <Card title={`In-quarter forecast — ${Q.label}`} sub="Per AE (incl. AM). Potential = Closed Won + Pot. New Biz + Pot. Expansion (open-deal quarter-expected revenue; Closed Won excluded from weighting).">
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed Won</Th><Th>Pot. New Biz</Th><Th>Pot. Expansion</Th><Th>Potential</Th><Th>vs Quota</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roster.map((r) => (
+                    <tr key={r.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                      <Td l bold>{short(r.name)}{r.am && <span style={{ color: C.t3, fontWeight: 400, fontSize: 11 }}> · AM</span>}</Td>
+                      <Td mono color={C.blue}>{fmt(r.openPipe)}</Td>
+                      <Td mono color={C.t2}>{r.quota != null && r.quota > 0 ? fmt(r.quota) : "\u2014"}</Td>
+                      <Td mono color={r.closedWon > 0 ? C.coralDk : C.t1}>{fmt(r.closedWon)}</Td>
+                      <Td mono color={C.coralDk}>{fmt(r.potNB)}</Td>
+                      <Td mono color={C.purp}>{fmt(r.potExp)}</Td>
+                      <Td mono bold>{fmt(r.potential)}</Td>
+                      <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(r.attainP, r.variance)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
+                    <Td l bold>AE team</Td>
+                    <Td mono>{fmt(F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono>{fmt(F.aeTeam.closedWon)}</Td>
+                    <Td mono color={C.coralDk}>{fmt(F.aeTeam.potNB)}</Td><Td mono color={C.purp}>{fmt(F.aeTeam.potExp)}</Td><Td mono bold>{fmt(F.aeTeam.potential)}</Td>
+                    <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(F.aeTeam.attainP, F.aeTeam.variance)}</td>
+                  </tr>
+                  <tr style={{ background: "#EEF2F8", fontWeight: 700 }}>
+                    <Td l bold>Total · incl AM</Td>
+                    <Td mono>{fmt(F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono>{fmt(F.totalInclAM.closedWon)}</Td>
+                    <Td mono color={C.coralDk}>{fmt(F.totalInclAM.potNB)}</Td><Td mono color={C.purp}>{fmt(F.totalInclAM.potExp)}</Td><Td mono bold>{fmt(F.totalInclAM.potential)}</Td>
+                    <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(F.totalInclAM.attainP, null)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          {/* remainder of quarter */}
+          <Card title={`Remainder of ${Q.label} — ${F.daysLeft} days, ${F.weeksLeft} week${F.weeksLeft === 1 ? "" : "s"} left`} sub="What still has to close to reach quota, the weekly run-rate that implies, and where Potential ARR projects the quarter to land." accent={C.coral}>
+            <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Still to close (to quota)</div>
+                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.quotaGap > 0 ? C.coralDk : C.grn }}>{F.quotaGap > 0 ? fmt(F.quotaGap) : "met"}</div>
+                <div style={{ fontSize: 12, color: C.t2 }}>{fmt(F.teamActual)} of {fmt(F.teamQuota)} quota closed</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>ARR needed / week left</div>
+                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.navy }}>{F.quotaGap > 0 ? fmt(F.quotaPerWeek) : "\u2014"}</div>
+                <div style={{ fontSize: 12, color: C.t2 }}>across {F.weeksLeft} week{F.weeksLeft === 1 ? "" : "s"} remaining</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Quarter landing (Potential ARR)</div>
+                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.potentialLanding >= F.teamQuota ? C.grn : C.coralDk }}>{fmt(F.potentialLanding)}</div>
+                <div style={{ fontSize: 12, color: C.t2 }}>{pct(F.teamQuota ? F.potentialLanding / F.teamQuota : 0)} of quota · NB CW + NB open</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Surplus / shortfall vs quota</div>
+                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.potentialLanding >= F.teamQuota ? C.grn : C.red }}>{F.potentialLanding >= F.teamQuota ? "+" + fmt(F.potentialLanding - F.teamQuota) : fmt(F.potentialLanding - F.teamQuota)}</div>
+                <div style={{ fontSize: 12, color: C.t2 }}>if open expected lands as forecast</div>
+              </div>
+            </div>
+          </Card>
+
+          {/* deals that decide */}
+          <Card title={`Deals that decide ${Q.label}`} sub={`Biggest open deals by ARR${decideAE === "all" ? "" : " · " + short(decideAE)}. Filter by AE to work rep-by-rep. Top ${decideView.length} by ARR · ${fmt(decideView.reduce((s, d) => s + d.arr, 0))} in view.`} accent={C.coral}>
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                {decideOwners.map((o) => (
+                  <button key={o} onClick={() => setDecideAE(o)} style={{ padding: "5px 13px", fontSize: 12, fontWeight: 600, borderRadius: 20, border: `1px solid ${o === decideAE ? C.coral : C.bd}`, background: o === decideAE ? C.coralSoft : "#fff", color: o === decideAE ? C.coralDk : C.t2, cursor: "pointer" }}>
+                    {o === "all" ? "All" : short(o)}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Committed (ARR)</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.grn }}>{fmt(committed)}</div>
+                  <div style={{ fontSize: 11.5, color: C.t2 }}>{committedCount} deals committed · {fmt(committed + F.teamActual - F.teamQuota)} vs quota incl. CW</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Commit + best case</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.navy }}>{fmt(commitBest)}</div>
+                  <div style={{ fontSize: 11.5, color: C.t2 }}>upside if best-case lands</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Landing incl. CW</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk }}>{fmt(landingInclCW)}</div>
+                  <div style={{ fontSize: 11.5, color: C.t2 }}>{pct(F.teamQuota ? landingInclCW / F.teamQuota : 0)} of {fmt(F.teamQuota)} quota</div>
+                </div>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      <Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th>Age</Th><Th>ARR</Th><Th>Call</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {decideView.map((d, i) => (
+                      <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                        <Td l bold>{d.name}</Td>
+                        <Td l>{short(d.owner)}</Td>
+                        <Td l><Pill tone="blue">{d.stage}</Pill></Td>
+                        <Td mono color={(d.ageDays ?? 0) > 90 ? C.red : C.t2}>{d.ageDays != null ? d.ageDays + "d" : "\u2014"}</Td>
+                        <Td mono bold color={C.coralDk}>{fmt(d.arr)}</Td>
+                        <td style={{ textAlign: "center", padding: "8px 10px", whiteSpace: "nowrap" }}>
+                          {callBtn(d.name, "commit", "Commit", C.grn)}
+                          {callBtn(d.name, "best", "Best case", C.navy)}
+                          {callBtn(d.name, "pipeline", "Pipeline", C.blue)}
+                          {callBtn(d.name, "omit", "Omit", C.t3)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Card>
+
           {/* ── Next quarter at a glance ── */}
           {(() => {
             const NQ = F.nextQuarter;
@@ -1782,127 +1908,6 @@ export default function Dashboard() {
               </Card>
             );
           })()}
-
-          {/* in-quarter table */}
-          <Card title={`In-quarter forecast — ${Q.label}`} sub="Per AE (incl. AM). Potential = Closed Won + Pot. New Biz + Pot. Expansion (open-deal quarter-expected revenue; Closed Won excluded from weighting).">
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed Won</Th><Th>Pot. New Biz</Th><Th>Pot. Expansion</Th><Th>Potential</Th><Th>vs Quota</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {roster.map((r) => (
-                    <tr key={r.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                      <Td l bold>{short(r.name)}{r.am && <span style={{ color: C.t3, fontWeight: 400, fontSize: 11 }}> · AM</span>}</Td>
-                      <Td mono color={C.blue}>{fmt(r.openPipe)}</Td>
-                      <Td mono color={C.t2}>{r.quota != null && r.quota > 0 ? fmt(r.quota) : "\u2014"}</Td>
-                      <Td mono color={r.closedWon > 0 ? C.coralDk : C.t1}>{fmt(r.closedWon)}</Td>
-                      <Td mono color={C.coralDk}>{fmt(r.potNB)}</Td>
-                      <Td mono color={C.purp}>{fmt(r.potExp)}</Td>
-                      <Td mono bold>{fmt(r.potential)}</Td>
-                      <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(r.attainP, r.variance)}</td>
-                    </tr>
-                  ))}
-                  <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
-                    <Td l bold>AE team</Td>
-                    <Td mono>{fmt(F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono>{fmt(F.aeTeam.closedWon)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(F.aeTeam.potNB)}</Td><Td mono color={C.purp}>{fmt(F.aeTeam.potExp)}</Td><Td mono bold>{fmt(F.aeTeam.potential)}</Td>
-                    <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(F.aeTeam.attainP, F.aeTeam.variance)}</td>
-                  </tr>
-                  <tr style={{ background: "#EEF2F8", fontWeight: 700 }}>
-                    <Td l bold>Total · incl AM</Td>
-                    <Td mono>{fmt(F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono>{fmt(F.totalInclAM.closedWon)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(F.totalInclAM.potNB)}</Td><Td mono color={C.purp}>{fmt(F.totalInclAM.potExp)}</Td><Td mono bold>{fmt(F.totalInclAM.potential)}</Td>
-                    <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(F.totalInclAM.attainP, null)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          {/* remainder of quarter */}
-          <Card title={`Remainder of ${Q.label} — ${F.daysLeft} days, ${F.weeksLeft} week${F.weeksLeft === 1 ? "" : "s"} left`} sub="What still has to close to reach quota, the weekly run-rate that implies, and where Potential ARR projects the quarter to land." accent={C.coral}>
-            <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-              <div>
-                <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Still to close (to quota)</div>
-                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.quotaGap > 0 ? C.coralDk : C.grn }}>{F.quotaGap > 0 ? fmt(F.quotaGap) : "met"}</div>
-                <div style={{ fontSize: 12, color: C.t2 }}>{fmt(F.teamActual)} of {fmt(F.teamQuota)} quota closed</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>ARR needed / week left</div>
-                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.navy }}>{F.quotaGap > 0 ? fmt(F.quotaPerWeek) : "\u2014"}</div>
-                <div style={{ fontSize: 12, color: C.t2 }}>across {F.weeksLeft} week{F.weeksLeft === 1 ? "" : "s"} remaining</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Quarter landing (Potential ARR)</div>
-                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.potentialLanding >= F.teamQuota ? C.grn : C.coralDk }}>{fmt(F.potentialLanding)}</div>
-                <div style={{ fontSize: 12, color: C.t2 }}>{pct(F.teamQuota ? F.potentialLanding / F.teamQuota : 0)} of quota · NB CW + NB open</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Surplus / shortfall vs quota</div>
-                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.potentialLanding >= F.teamQuota ? C.grn : C.red }}>{F.potentialLanding >= F.teamQuota ? "+" + fmt(F.potentialLanding - F.teamQuota) : fmt(F.potentialLanding - F.teamQuota)}</div>
-                <div style={{ fontSize: 12, color: C.t2 }}>if open expected lands as forecast</div>
-              </div>
-            </div>
-          </Card>
-
-          {/* deals that decide */}
-          <Card title={`Deals that decide ${Q.label}`} sub={`Biggest open deals by ARR${decideAE === "all" ? "" : " · " + short(decideAE)}. Filter by AE to work rep-by-rep. Top ${decideView.length} by ARR · ${fmt(decideView.reduce((s, d) => s + d.arr, 0))} in view.`} accent={C.coral}>
-            <div style={{ padding: "16px 20px" }}>
-              <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-                {decideOwners.map((o) => (
-                  <button key={o} onClick={() => setDecideAE(o)} style={{ padding: "5px 13px", fontSize: 12, fontWeight: 600, borderRadius: 20, border: `1px solid ${o === decideAE ? C.coral : C.bd}`, background: o === decideAE ? C.coralSoft : "#fff", color: o === decideAE ? C.coralDk : C.t2, cursor: "pointer" }}>
-                    {o === "all" ? "All" : short(o)}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 14 }}>
-                <div>
-                  <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Committed (ARR)</div>
-                  <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.grn }}>{fmt(committed)}</div>
-                  <div style={{ fontSize: 11.5, color: C.t2 }}>{committedCount} deals committed · {fmt(committed + F.teamActual - F.teamQuota)} vs quota incl. CW</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Commit + best case</div>
-                  <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.navy }}>{fmt(commitBest)}</div>
-                  <div style={{ fontSize: 11.5, color: C.t2 }}>upside if best-case lands</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Landing incl. CW</div>
-                  <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk }}>{fmt(landingInclCW)}</div>
-                  <div style={{ fontSize: 11.5, color: C.t2 }}>{pct(F.teamQuota ? landingInclCW / F.teamQuota : 0)} of {fmt(F.teamQuota)} quota</div>
-                </div>
-              </div>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                      <Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th>Age</Th><Th>ARR</Th><Th>Call</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {decideView.map((d, i) => (
-                      <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                        <Td l bold>{d.name}</Td>
-                        <Td l>{short(d.owner)}</Td>
-                        <Td l><Pill tone="blue">{d.stage}</Pill></Td>
-                        <Td mono color={(d.ageDays ?? 0) > 90 ? C.red : C.t2}>{d.ageDays != null ? d.ageDays + "d" : "\u2014"}</Td>
-                        <Td mono bold color={C.coralDk}>{fmt(d.arr)}</Td>
-                        <td style={{ textAlign: "center", padding: "8px 10px", whiteSpace: "nowrap" }}>
-                          {callBtn(d.name, "commit", "Commit", C.grn)}
-                          {callBtn(d.name, "best", "Best case", C.navy)}
-                          {callBtn(d.name, "pipeline", "Pipeline", C.blue)}
-                          {callBtn(d.name, "omit", "Omit", C.t3)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </Card>
         </div>
         );
       })()}
