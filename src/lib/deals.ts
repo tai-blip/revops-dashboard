@@ -376,7 +376,9 @@ export function computeForecastTab(
   qStartISO: string,
   qEndISO: string,
   currentLiveARR: number,
-  annualTarget: number
+  annualTarget: number,
+  rates: Record<string, number>,
+  nextQ: { label: string; startISO: string; endISO: string; quota: number }
 ) {
   const rosterNames = new Set(roster.map((r) => r.name));
 
@@ -438,13 +440,17 @@ export function computeForecastTab(
   const aeTeam = sum(rows.filter((r) => !r.am));
   const totalInclAM = sum(rows);
 
-  const YE_WR = 0.25;
+  // ── Year-end projection: per-stage weighted contributions (derived win rates) ──
+  const YE_WR = 0.25; // flat rate kept for the gap-coverage "pipeline needed" math
   let rawAnnual = 0;
-  let weightedAnnual = 0;
+  let weightedAnnualFlat = 0;
+  let weightedAnnual = 0; // per-stage weighted (drives the waterfall + projection)
   const byStageW: Record<string, { raw: number; weighted: number }> = {};
   for (const d of openDeals) {
     rawAnnual += d.arr;
-    const w = d.arr * YE_WR;
+    weightedAnnualFlat += d.arr * YE_WR;
+    const rate = rates[d.stage] ?? 0.1;
+    const w = d.arr * rate;
     weightedAnnual += w;
     if (!byStageW[d.stage]) byStageW[d.stage] = { raw: 0, weighted: 0 };
     byStageW[d.stage].raw += d.arr;
@@ -452,6 +458,54 @@ export function computeForecastTab(
   }
   const projYE = currentLiveARR + weightedAnnual;
   const annualGap = annualTarget - projYE;
+  // Net-new pipeline needed to cover the gap at the flat close rate.
+  const pipelineNeededForGap = annualGap > 0 && YE_WR > 0 ? annualGap / YE_WR : 0;
+
+  // Waterfall steps in STAGE_ORDER: each stage's weighted contribution ("of raw").
+  const yeWaterfall = STAGE_ORDER.filter((s) => (byStageW[s]?.raw ?? 0) > 0).map((s) => ({
+    stage: s,
+    raw: byStageW[s].raw,
+    weighted: byStageW[s].weighted,
+  }));
+
+  // ── Next quarter at a glance: open deals dated to close in the NEXT quarter ──
+  const nqByStage: Record<string, { count: number; raw: number; aeExpected: number; weighted: number }> = {};
+  let nqRaw = 0, nqWeighted = 0, nqCount = 0;
+  for (const d of openDeals) {
+    if (!rosterNames.has(d.owner)) continue;
+    if (!d.closeDate) continue;
+    const iso = d.closeDate.toISOString().slice(0, 10);
+    if (iso < nextQ.startISO || iso >= nextQ.endISO) continue;
+    const rate = rates[d.stage] ?? 0.1;
+    const w = d.arr * rate;
+    if (!nqByStage[d.stage]) nqByStage[d.stage] = { count: 0, raw: 0, aeExpected: 0, weighted: 0 };
+    nqByStage[d.stage].count += 1;
+    nqByStage[d.stage].raw += d.arr;
+    nqByStage[d.stage].aeExpected += d.expectedRevQ;
+    nqByStage[d.stage].weighted += w;
+    nqRaw += d.arr;
+    nqWeighted += w;
+    nqCount += 1;
+  }
+  const nextQuarter = {
+    label: nextQ.label,
+    startISO: nextQ.startISO,
+    quota: nextQ.quota,
+    raw: nqRaw,
+    realistic: nqWeighted,
+    count: nqCount,
+    gap: Math.max(0, nextQ.quota - nqWeighted),
+    coversPct: nextQ.quota > 0 ? nqWeighted / nextQ.quota : 0,
+    // late-stage (SQO and beyond) share of raw, for the "read it this way" line
+    lateStageRaw: STAGE_ORDER.slice(STAGE_ORDER.indexOf("SQO")).reduce((s, st) => s + (nqByStage[st]?.raw ?? 0), 0),
+    byStage: STAGE_ORDER.filter((s) => (nqByStage[s]?.count ?? 0) > 0).map((s) => ({
+      stage: s,
+      count: nqByStage[s].count,
+      raw: nqByStage[s].raw,
+      aeExpected: nqByStage[s].aeExpected,
+      survivesPct: nqByStage[s].raw > 0 ? nqByStage[s].weighted / nqByStage[s].raw : 0,
+    })),
+  };
 
   const now = new Date();
   const qEnd = new Date(qEndISO).getTime();
@@ -497,7 +551,11 @@ export function computeForecastTab(
     annualTarget,
     currentLiveARR,
     weightedAnnual,
+    weightedAnnualFlat,
     rawAnnual,
+    pipelineNeededForGap,
+    yeWaterfall,
+    nextQuarter,
     daysLeft,
     weeksLeft,
     quotaGap,

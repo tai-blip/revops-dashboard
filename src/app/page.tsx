@@ -70,7 +70,22 @@ type DashboardData = {
     annualTarget: number;
     currentLiveARR: number;
     weightedAnnual: number;
+    weightedAnnualFlat: number;
     rawAnnual: number;
+    pipelineNeededForGap: number;
+    yeWaterfall: { stage: string; raw: number; weighted: number }[];
+    nextQuarter: {
+      label: string;
+      startISO: string;
+      quota: number;
+      raw: number;
+      realistic: number;
+      count: number;
+      gap: number;
+      coversPct: number;
+      lateStageRaw: number;
+      byStage: { stage: string; count: number; raw: number; aeExpected: number; survivesPct: number }[];
+    };
     daysLeft: number;
     weeksLeft: number;
     quotaGap: number;
@@ -168,6 +183,7 @@ export default function Dashboard() {
   const [pipePeriod, setPipePeriod] = useState<"weekly" | "monthly">("weekly");
   const [wowMetric, setWowMetric] = useState<string | null>(null);
   const [decideAE, setDecideAE] = useState<string>("all");
+  const [excludeRenewal, setExcludeRenewal] = useState<boolean>(false);
   const [dealCalls, setDealCalls] = useState<Record<string, "commit" | "best" | "pipeline" | "omit">>({});
 
   useEffect(() => {
@@ -267,6 +283,15 @@ export default function Dashboard() {
     if (!data) return null;
     const months = data.arr.monthly;
     const latest = months[months.length - 1];
+    // "Current month" = the row matching today's YYYY-MM, else the latest row that
+    // isn't in the future. Fixes New/Churned ARR showing a future month (e.g. Sep)
+    // with near-zero data instead of the actual current month.
+    const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+    const notFuture = months.filter((m) => m.label <= nowKey);
+    const currentMonth =
+      months.find((m) => m.label === nowKey) ??
+      notFuture[notFuture.length - 1] ??
+      latest;
     const arrNow = latest?.activeARR ?? 0;
     const gap = 10000000 - arrNow;
 
@@ -334,6 +359,7 @@ export default function Dashboard() {
       coverage,
       coverageStatus,
       arrStatus,
+      currentMonth,
     };
   }, [data, q3CreatedByOwner, wowMetrics]);
 
@@ -363,8 +389,8 @@ export default function Dashboard() {
       S.wowDelta == null
         ? ""
         : S.wowDelta >= 0
-        ? ` New ARR creation is up ${Math.round(S.wowDelta)}% WoW.`
-        : ` New ARR creation is down ${Math.abs(Math.round(S.wowDelta))}% WoW.`;
+        ? ` New pipeline creation is up ${Math.round(S.wowDelta)}% WoW.`
+        : ` New pipeline creation is down ${Math.abs(Math.round(S.wowDelta))}% WoW.`;
 
     const staleBuckets = data.dealHealth.filter((b) => b.min >= 91);
     const staleArr = staleBuckets.reduce((s, b) => s + b.arr, 0);
@@ -390,20 +416,20 @@ export default function Dashboard() {
 
     return {
       command: {
-        sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly ARR creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly ARR creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
+        sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
         stats: [
           { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const },
-          { label: "New ARR (mo)", value: fmt(latest?.newARR) },
-          { label: "Churned (mo)", value: fmt(latest?.churnedARR), tone: "bad" as const },
+          { label: "New ARR (mo)", value: fmt(S.currentMonth?.newARR), sub: S.currentMonth?.label },
+          { label: "Churned (mo)", value: fmt(S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
           { label: "MoM change", value: gp(S.arrMoM), tone: (S.arrMoM ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
           { label: "Total pipeline", value: fmt(totalPipe) },
           { label: "Coverage", value: S.coverage.toFixed(2) + "x", tone: S.coverage >= 3 ? ("good" as const) : ("warn" as const) },
         ],
       },
       targets: {
-        sentence: `New ARR added in ${latest?.label ?? "the latest month"}: ${fmt(latest?.newARR)}. The team sits at ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` ARR mix this quarter skews ${nbPct.toFixed(0)}% Net New.` : ""}`,
+        sentence: `New ARR added in ${S.currentMonth?.label ?? "the latest month"}: ${fmt(S.currentMonth?.newARR)}. The team sits at ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` ARR mix this quarter skews ${nbPct.toFixed(0)}% Net New.` : ""}`,
         stats: [
-          { label: "New ARR (latest mo)", value: fmt(latest?.newARR), sub: latest?.label },
+          { label: "New ARR (current mo)", value: fmt(S.currentMonth?.newARR), sub: S.currentMonth?.label },
           { label: "Team actual Q3", value: fmt(teamActual), sub: "closed-won + live paying" },
           { label: "Team quota Q3", value: fmt(teamQuota), sub: `across ${data.aeAttainment.reps.length} AEs` },
           { label: "% of quota", value: teamPct.toFixed(1) + "%", sub: `${S.elapsedPct.toFixed(0)}% of quarter gone`, tone: teamPct >= S.elapsedPct ? ("good" as const) : ("bad" as const) },
@@ -414,7 +440,7 @@ export default function Dashboard() {
         stats: [
           { label: "Created in Q3", value: fmt(S.gen), sub: `${S.genPct.toFixed(0)}% of ${fmt(S.quota)} quota`, tone: S.genStatus.tone },
           { label: "Open pipeline", value: fmt(totalPipe), sub: `${totalOpps} opportunities` },
-          { label: "New ARR this week", value: fmt(arrThisWeek), sub: S.wowDelta != null ? `${S.wowDelta >= 0 ? "+" : "−"}${Math.abs(Math.round(S.wowDelta))}% WoW` : undefined, tone: (S.wowDelta ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
+          { label: "New Pipeline this week", value: fmt(arrThisWeek), sub: S.wowDelta != null ? `${S.wowDelta >= 0 ? "+" : "−"}${Math.abs(Math.round(S.wowDelta))}% WoW` : undefined, tone: (S.wowDelta ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
           { label: "Coverage", value: S.coverage.toFixed(2) + "x", sub: "open pipe vs Q3 quota", tone: S.coverage >= 3 ? ("good" as const) : ("warn" as const) },
         ],
       },
@@ -831,12 +857,20 @@ export default function Dashboard() {
                   sub={period === "monthly" ? "Last 3 months, grouped per month" : "Last 13 weeks, grouped per week"}
                 >
                   <div style={{ padding: "16px 20px" }}>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+                      <button
+                        onClick={() => setExcludeRenewal((v) => !v)}
+                        style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, borderRadius: 20, border: `1px solid ${excludeRenewal ? C.coral : C.bd}`, background: excludeRenewal ? C.coralSoft : "#fff", color: excludeRenewal ? C.coralDk : C.t2, cursor: "pointer" }}
+                      >
+                        {excludeRenewal ? "Renewal excluded" : "Exclude Renewal"}
+                      </button>
+                    </div>
                     <GroupedBarChart
                       labels={mixWindow.map((m) => m.label)}
                       series={[
                         { label: "Net New", values: mixWindow.map((m) => m.newBusiness), color: C.navy },
                         { label: "Expansion", values: mixWindow.map((m) => m.expansion), color: C.teal },
-                        { label: "Renewal", values: mixWindow.map((m) => m.renewals), color: C.coralDk },
+                        ...(excludeRenewal ? [] : [{ label: "Renewal", values: mixWindow.map((m) => m.renewals), color: C.coralDk }]),
                       ]}
                     />
                   </div>
@@ -1063,14 +1097,26 @@ export default function Dashboard() {
           >
             {(() => {
               const win = chartPoints.slice(-3);
-              const types = [
+              const allTypes = [
                 { label: "Net New", key: "newBusiness" as const, color: C.navy },
                 { label: "Expansion", key: "expansion" as const, color: C.teal },
                 { label: "Renewal", key: "renewals" as const, color: C.coralDk },
               ];
+              const types = excludeRenewal ? allTypes.filter((t) => t.key !== "renewals") : allTypes;
+              const rowTotal = (p: (typeof win)[number]) =>
+                types.reduce((s, t) => s + p[t.key], 0);
               const totals = types.map((t) => win.reduce((s, p) => s + p[t.key], 0));
               const grandTotal = totals.reduce((s, n) => s + n, 0);
               return (
+                <>
+                <div style={{ padding: "12px 16px 0", display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    onClick={() => setExcludeRenewal((v) => !v)}
+                    style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, borderRadius: 20, border: `1px solid ${excludeRenewal ? C.coral : C.bd}`, background: excludeRenewal ? C.coralSoft : "#fff", color: excludeRenewal ? C.coralDk : C.t2, cursor: "pointer" }}
+                  >
+                    {excludeRenewal ? "Renewal excluded" : "Exclude Renewal"}
+                  </button>
+                </div>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
@@ -1120,7 +1166,7 @@ export default function Dashboard() {
                       <Td l bold>Total</Td>
                       {win.map((p) => (
                         <Td key={p.label} mono bold>
-                          {fmt(p.newBusiness + p.expansion + p.renewals)}
+                          {fmt(rowTotal(p))}
                         </Td>
                       ))}
                       <Td mono bold>{fmt(grandTotal)}</Td>
@@ -1128,6 +1174,7 @@ export default function Dashboard() {
                     </tr>
                   </tbody>
                 </table>
+                </>
               );
             })()}
           </Card>
@@ -1473,7 +1520,7 @@ export default function Dashboard() {
 
           <Card
             title="Pipe Generation History — Monthly"
-            sub="New ARR created and new opps entered SQL, by rep, since Jan-25"
+            sub="New pipeline created and new opps entered SQL, by rep, since Jan-25"
           >
             <div style={{ padding: "16px 20px" }}>
               <div style={{ marginBottom: 16 }}>
@@ -1498,7 +1545,7 @@ export default function Dashboard() {
               </div>
 
               <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 6 }}>
-                New ARR Created ($)
+                New Pipeline Created ($)
               </div>
               <div style={{ marginBottom: 24 }}>
                 <BarTrendChart
@@ -1586,6 +1633,155 @@ export default function Dashboard() {
               </div>
             </Card>
           </div>
+
+          {/* ── Next quarter at a glance ── */}
+          {(() => {
+            const NQ = F.nextQuarter;
+            const fk = (n: number) => {
+              const a = Math.abs(n); const s = n < 0 ? "−" : "";
+              if (a >= 1e6) return s + "$" + (a / 1e6).toFixed(2) + "M";
+              if (a >= 1e3) return s + "$" + Math.round(a / 1e3) + "k";
+              return s + "$" + Math.round(a);
+            };
+            return (
+              <Card
+                title={`Next quarter at a glance — ${NQ.label}`}
+                sub={`How ${NQ.label} is shaping up. The pipeline dated to close in ${NQ.label.split(" ")[0]} is mostly early-stage right now, so its raw value (${fk(NQ.raw)}) and its realistic AE-weighted value (${fk(NQ.realistic)}) are far apart. The table shows where that gap comes from. Quarter starts ${NQ.startISO}.`}
+                accent={C.coral}
+              >
+                <div style={{ padding: "16px 20px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 28, paddingBottom: 16, borderBottom: `1px solid ${C.s1}`, marginBottom: 16 }}>
+                    <div>
+                      <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>{NQ.label.split(" ")[0]} Team Quota</div>
+                      <div style={{ fontSize: 30, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.navy, marginTop: 5 }}>{fk(NQ.quota)}</div>
+                      <div style={{ fontSize: 12, color: C.t2, marginTop: 6 }}>New ARR target — what we need to close</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Realistic from Current Pipe</div>
+                      <div style={{ fontSize: 30, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.coralDk, marginTop: 5 }}>{fk(NQ.realistic)}</div>
+                      <div style={{ fontSize: 12, color: C.t2, marginTop: 6 }}>AE-weighted · covers {pct(NQ.coversPct)} of quota</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Gap to Source / Advance</div>
+                      <div style={{ fontSize: 30, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.coralDk, marginTop: 5 }}>{fk(NQ.gap)}</div>
+                      <div style={{ fontSize: 12, color: C.t2, marginTop: 6 }}>quota minus realistic pipe</div>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Where the {fk(NQ.raw)} raw pipeline stands — and why it weights down to {fk(NQ.realistic)}</div>
+                  {NQ.byStage.length === 0 ? (
+                    <div style={{ fontSize: 13, color: C.t3, padding: "10px 0" }}>No open deals are dated to close in {NQ.label} yet.</div>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                          <Th l>Stage</Th><Th>Deals</Th><Th>Raw ARR</Th><Th>AE Expected</Th><Th l>How much survives weighting</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {NQ.byStage.map((s) => (
+                          <tr key={s.stage} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                            <Td l><Pill tone="blue">{s.stage}</Pill></Td>
+                            <Td mono>{s.count}</Td>
+                            <Td mono color={C.blue}>{fk(s.raw)}</Td>
+                            <Td mono color={C.coralDk}>{fk(s.aeExpected)}</Td>
+                            <td style={{ padding: "10px 16px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <div style={{ flex: 1, maxWidth: 220, height: 7, background: C.s2, borderRadius: 4, overflow: "hidden" }}>
+                                  <div style={{ width: `${Math.max(2, Math.round(s.survivesPct * 100))}%`, height: "100%", background: C.coral, borderRadius: 4 }} />
+                                </div>
+                                <span style={{ fontSize: 11, color: C.t2 }}>{pct(s.survivesPct)}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
+                          <Td l bold>Total</Td>
+                          <Td mono>{NQ.count}</Td>
+                          <Td mono color={C.blue}>{fk(NQ.raw)}</Td>
+                          <Td mono color={C.coralDk}>{fk(NQ.realistic)}</Td>
+                          <td style={{ padding: "10px 16px", fontSize: 12, color: C.t2, fontWeight: 400 }}>{fk(NQ.lateStageRaw)} of raw is late-stage (SQO+)</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  )}
+
+                  <div style={{ background: "#FAEEDA", borderRadius: 12, padding: "14px 16px", marginTop: 16, fontSize: 13.5, color: "#6b5320", lineHeight: 1.55 }}>
+                    Read it this way: {NQ.label.split(" ")[0]} quota is <b>{fk(NQ.quota)}</b>. The pipeline already dated for {NQ.label.split(" ")[0]} would be worth <b>{fk(NQ.raw)}</b> if every deal closed at full value, but most of it is sitting in early stages where deals rarely convert — so the AE-weighted realistic figure is <b>{fk(NQ.realistic)}</b>, about <b>{pct(NQ.coversPct)}</b> of quota. The team needs to source or advance roughly <b>{fk(NQ.gap)}</b> more of weighted pipeline before {NQ.label.split(" ")[0]} starts to be on track.
+                  </div>
+                </div>
+              </Card>
+            );
+          })()}
+
+          {/* ── Year-end projection vs annual target (per-stage waterfall) ── */}
+          {(() => {
+            const fk = (n: number) => {
+              const a = Math.abs(n); const s = n < 0 ? "−" : "";
+              if (a >= 1e6) return s + "$" + (a / 1e6).toFixed(2) + "M";
+              if (a >= 1e3) return s + "$" + Math.round(a / 1e3) + "k";
+              return s + "$" + Math.round(a);
+            };
+            const PLOT = 300;
+            const maxV = Math.max(F.annualTarget, F.projYE) * 1.05;
+            const yPx = (v: number) => (v / maxV) * PLOT;
+            type Step = { label: string; type: "base" | "inc" | "gap" | "target"; value: number; of?: string; from?: number };
+            const steps: Step[] = [
+              { label: "Current live ARR", type: "base", value: F.currentLiveARR },
+              ...F.yeWaterfall.map((w) => ({ label: w.stage, type: "inc" as const, value: w.weighted, of: `of ${fk(w.raw)}` })),
+              { label: "Gap to target", type: "gap", value: Math.max(0, F.annualGap), from: F.projYE },
+              { label: "FY26 target", type: "target", value: F.annualTarget },
+            ];
+            const n = steps.length;
+            let running = 0;
+            return (
+              <Card title="Year-end projection vs annual target" sub="Current ARR plus all open pipeline weighted at the derived per-stage close rates, versus the FY26 ending-ARR target." accent={C.navy}>
+                <div style={{ padding: "16px 20px" }}>
+                  <div style={{ position: "relative", height: PLOT, borderBottom: `1px solid ${C.bd}` }}>
+                    {steps.map((s, i) => {
+                      const leftPct = (i / n) * 100;
+                      const colW = (1 / n) * 100;
+                      let bottomV = 0, heightV = s.value, color = C.navy, capColor = C.t1;
+                      let cap: React.ReactNode = fk(s.value);
+                      if (s.type === "base") { bottomV = 0; running = s.value; color = C.navy; }
+                      else if (s.type === "inc") { bottomV = running; color = "#7FA8D0"; capColor = C.blue; running += s.value; cap = (<><span style={{ color: C.t3, fontWeight: 600 }}>{s.of}</span><br />+{fk(s.value)}</>); }
+                      else if (s.type === "gap") { bottomV = s.from ?? 0; color = "#C0524A"; capColor = C.red; }
+                      else { bottomV = 0; color = C.grn; capColor = C.grn; }
+                      const bPx = yPx(bottomV);
+                      const hPx = Math.max(yPx(heightV), s.type === "inc" ? 2 : 3);
+                      return (
+                        <div key={i} style={{ position: "absolute", top: 0, bottom: 0, left: `${leftPct}%`, width: `${colW}%` }}>
+                          <div style={{ position: "absolute", left: "14%", width: "72%", bottom: bPx, height: hPx, background: color, borderRadius: "3px 3px 0 0" }} />
+                          <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: bPx + hPx + 4, fontSize: 9.5, fontWeight: 700, color: capColor, whiteSpace: "nowrap", textAlign: "center", lineHeight: 1.25 }}>{cap}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ position: "relative", height: 34, marginTop: 6 }}>
+                    {steps.map((s, i) => (
+                      <div key={i} style={{ position: "absolute", left: `${(i / n) * 100}%`, width: `${(1 / n) * 100}%`, textAlign: "center", fontSize: 9.5, color: C.t2, lineHeight: 1.15 }}>{s.label}</div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginTop: 18 }}>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Current Live ARR</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(F.currentLiveARR)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Weighted Open Pipe</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.blue }}>{fk(F.weightedAnnual)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>from {fk(F.rawAnnual)} raw</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Projected Year-End</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk }}>{fk(F.projYE)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Annual Target</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(F.annualTarget)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Gap</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.annualGap > 0 ? C.red : C.grn }}>{fk(F.annualGap)}</div></div>
+                  </div>
+
+                  <div style={{ background: "#FAEEDA", borderRadius: 12, padding: "14px 16px", marginTop: 16, fontSize: 13.5, color: "#6b5320", lineHeight: 1.55 }}>
+                    {F.annualGap > 0 ? (
+                      <>To cover the <b>{fk(F.annualGap)}</b> shortfall at the assumed <b>25%</b> close rate, the team needs to create roughly <b style={{ color: C.coralDk }}>{fk(F.pipelineNeededForGap)}</b> of net-new pipeline beyond what's already open.</>
+                    ) : (
+                      <>Projected year-end of <b>{fk(F.projYE)}</b> is on track to meet or exceed the <b>{fk(F.annualTarget)}</b> target.</>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            );
+          })()}
 
           {/* in-quarter table */}
           <Card title={`In-quarter forecast — ${Q.label}`} sub="Per AE (incl. AM). Potential = Closed Won + Pot. New Biz + Pot. Expansion (open-deal quarter-expected revenue; Closed Won excluded from weighting).">

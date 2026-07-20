@@ -24,6 +24,8 @@ import {
   AE_ROSTER,
   ANNUAL_END_TARGET,
   CURRENT_LIVE_ARR_FALLBACK,
+  TARGETS,
+  monthsInQuarter,
 } from "@/lib/planConfig";
 
 export const dynamic = "force-dynamic";
@@ -74,6 +76,18 @@ export async function GET() {
       quota: a.quotaQ3,
       am: a.am,
     }));
+    // Next quarter (for the "Next quarter at a glance" section). Quota derived from
+    // the plan's New-ARR targets for that quarter's months — stays live, no hardcoding.
+    const qOrder = ["Q1", "Q2", "Q3", "Q4"];
+    const nextQKey = qOrder[(qOrder.indexOf(q) + 1) % 4];
+    const nextQDef = SALES_Q[nextQKey];
+    const nextQuota = monthsInQuarter(nextQKey).reduce((s, i) => s + TARGETS.newARR[i], 0);
+    const nextQ = {
+      label: nextQDef.label,
+      startISO: nextQDef.start,
+      endISO: nextQDef.end,
+      quota: nextQuota,
+    };
     const forecastTab = computeForecastTab(
       openDeals,
       closedDeals,
@@ -81,7 +95,9 @@ export async function GET() {
       qDef.start,
       qDef.end,
       latestArr,
-      ANNUAL_END_TARGET
+      ANNUAL_END_TARGET,
+      winRates.rates,
+      nextQ
     );
     const currentYear = new Date().getUTCFullYear();
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
