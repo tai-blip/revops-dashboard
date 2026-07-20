@@ -14,6 +14,52 @@ function sheetsSerialToDate(v: unknown): Date | null {
   return null;
 }
 
+// --- Header-based column resolution -------------------------------------------
+// The Salesforce → Coefficient export can reorder/insert columns, which silently
+// breaks fixed-index parsing (e.g. reading a date column as the deal Owner).
+// We resolve each field by matching the header cell TEXT instead, so the parser
+// self-corrects no matter where a column lands.
+
+function normHeader(v: unknown): string {
+  return String(v ?? "")
+    .toLowerCase()
+    .replace(/__c$/g, "")   // drop Salesforce custom-field suffix
+    .replace(/[^a-z0-9]/g, ""); // strip dots, spaces, underscores, etc.
+}
+
+// Build a map of normalized-header -> column index from a header row.
+function headerIndexMap(headerRow: Row): Map<string, number> {
+  const m = new Map<string, number>();
+  headerRow.forEach((cell, i) => {
+    const key = normHeader(cell);
+    if (key && !m.has(key)) m.set(key, i);
+  });
+  return m;
+}
+
+// Find the column index for a field given a list of accepted header aliases.
+// Falls back to a fixed index if provided and no header matched (defensive).
+function colIdx(
+  map: Map<string, number>,
+  aliases: string[],
+  fallback = -1
+): number {
+  for (const a of aliases) {
+    const key = normHeader(a);
+    if (map.has(key)) return map.get(key)!;
+  }
+  // partial contains-match as a last resort (e.g. "ownername" contains "owner")
+  for (const [k, idx] of map) {
+    if (aliases.some((a) => k.includes(normHeader(a)))) return idx;
+  }
+  return fallback;
+}
+
+// Cell getter that returns null for an unresolved (-1) column.
+function cell(r: Row, idx: number): unknown {
+  return idx >= 0 ? r[idx] : null;
+}
+
 export type OpenDeal = {
   id: string;
   name: string;
@@ -32,23 +78,40 @@ export type OpenDeal = {
 export function parseQuery1(rows: Row[]): OpenDeal[] {
   const headerIdx = rows.findIndex((r) => r[0] === "Id");
   if (headerIdx === -1) return [];
+  const H = headerIndexMap(rows[headerIdx]);
+
+  // Resolve each field by header text (with fixed-index fallbacks matching the
+  // canonical Query 1 layout, in case a header ever goes missing).
+  const cId = colIdx(H, ["Id"], 0);
+  const cName = colIdx(H, ["Name"], 1);
+  const cStage = colIdx(H, ["StageName", "Stage"], 2);
+  const cArr = colIdx(H, ["Annual_Contract_Value_ARR_Formula__c", "AnnualContractValueARR", "ARR"], 3);
+  const cExpQ = colIdx(H, ["Expected_Revenue_Quarter_AE__c", "ExpectedRevenueQuarterAE", "ExpectedRevenue"], 4);
+  const cClose = colIdx(H, ["CloseDate"], 5);
+  const cCreated = colIdx(H, ["CreatedDate"], 6);
+  const cSql = colIdx(H, ["Date_Reached_SQL__c", "DateReachedSQL"], -1);
+  const cChannel = colIdx(H, ["ChannelofContact__c", "ChannelofContact", "Channel"], -1);
+  const cOwner = colIdx(H, ["Owner.Name", "OwnerName", "Owner"], 7);
+  const cRecord = colIdx(H, ["RecordType.Name", "RecordTypeName", "RecordType"], 8);
+  const cLastStage = colIdx(H, ["LastStageChangeDate", "Last_Stage_Change_Date__c"], -1);
+
   const deals: OpenDeal[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i];
-    if (!r[0]) continue;
+    if (!cell(r, cId)) continue;
     deals.push({
-      id: String(r[0]),
-      name: String(r[1] ?? ""),
-      stage: String(r[2] ?? ""),
-      arr: Number(r[3] ?? 0),
-      expectedRevQ: Number(r[4] ?? 0),
-      closeDate: sheetsSerialToDate(r[5]),
-      createdDate: sheetsSerialToDate(r[6]),
-      owner: String(r[7] ?? "Unassigned"),
-      recordType: String(r[8] ?? ""),
-      dateReachedSQL: sheetsSerialToDate(r[9]),
-      channel: String(r[10] ?? ""),
-      lastStageChangeDate: sheetsSerialToDate(r[11]),
+      id: String(cell(r, cId)),
+      name: String(cell(r, cName) ?? ""),
+      stage: String(cell(r, cStage) ?? ""),
+      arr: Number(cell(r, cArr) ?? 0),
+      expectedRevQ: Number(cell(r, cExpQ) ?? 0),
+      closeDate: sheetsSerialToDate(cell(r, cClose)),
+      createdDate: sheetsSerialToDate(cell(r, cCreated)),
+      owner: String(cell(r, cOwner) ?? "Unassigned"),
+      recordType: String(cell(r, cRecord) ?? ""),
+      dateReachedSQL: sheetsSerialToDate(cell(r, cSql)),
+      channel: String(cell(r, cChannel) ?? ""),
+      lastStageChangeDate: sheetsSerialToDate(cell(r, cLastStage)),
     });
   }
   return deals;
@@ -71,22 +134,37 @@ export type ClosedDeal = {
 export function parseQuery2(rows: Row[]): ClosedDeal[] {
   const headerIdx = rows.findIndex((r) => r[0] === "Id");
   if (headerIdx === -1) return [];
+  const H = headerIndexMap(rows[headerIdx]);
+
+  const cId = colIdx(H, ["Id"], 0);
+  const cName = colIdx(H, ["Name"], 1);
+  const cStage = colIdx(H, ["StageName", "Stage"], 2);
+  const cWon = colIdx(H, ["IsWon", "Won"], 3);
+  const cArr = colIdx(H, ["Annual_Contract_Value_ARR_Formula__c", "AnnualContractValueARR", "ARR"], 4);
+  const cCreated = colIdx(H, ["CreatedDate"], 5);
+  const cClose = colIdx(H, ["CloseDate"], 6);
+  const cSql = colIdx(H, ["Date_Reached_SQL__c", "DateReachedSQL"], 7);
+  const cOwner = colIdx(H, ["Owner.Name", "OwnerName", "Owner"], 8);
+  const cRecord = colIdx(H, ["RecordType.Name", "RecordTypeName", "RecordType"], 9);
+  const cLive = colIdx(H, ["ContractLiveDate", "Contract_Live_Date__c", "ContractStartDate"], 10);
+
   const deals: ClosedDeal[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i];
-    if (!r[0]) continue;
+    if (!cell(r, cId)) continue;
+    const wonRaw = cell(r, cWon);
     deals.push({
-      id: String(r[0]),
-      name: String(r[1] ?? ""),
-      stage: String(r[2] ?? ""),
-      isWon: r[3] === true || r[3] === "true" || r[3] === "TRUE",
-      arr: Number(r[4] ?? 0),
-      createdDate: sheetsSerialToDate(r[5]),
-      closeDate: sheetsSerialToDate(r[6]),
-      dateReachedSQL: sheetsSerialToDate(r[7]),
-      owner: String(r[8] ?? "Unassigned"),
-      recordType: String(r[9] ?? ""),
-      contractLiveDate: sheetsSerialToDate(r[10]),
+      id: String(cell(r, cId)),
+      name: String(cell(r, cName) ?? ""),
+      stage: String(cell(r, cStage) ?? ""),
+      isWon: wonRaw === true || wonRaw === "true" || wonRaw === "TRUE" || wonRaw === 1,
+      arr: Number(cell(r, cArr) ?? 0),
+      createdDate: sheetsSerialToDate(cell(r, cCreated)),
+      closeDate: sheetsSerialToDate(cell(r, cClose)),
+      dateReachedSQL: sheetsSerialToDate(cell(r, cSql)),
+      owner: String(cell(r, cOwner) ?? "Unassigned"),
+      recordType: String(cell(r, cRecord) ?? ""),
+      contractLiveDate: sheetsSerialToDate(cell(r, cLive)),
     });
   }
   return deals;

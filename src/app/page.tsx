@@ -528,8 +528,27 @@ export default function Dashboard() {
       isH2: i >= 6,
     }));
 
+    // --- Command "gap to target" + "last week vs pace" card fields ----------
+    const qStart = new Date(qDef.start).getTime();
+    const qEndMs = new Date(qDef.end).getTime();
+    const daysLeft = Math.max(0, Math.ceil((qEndMs - now.getTime()) / 86400000));
+    const totalQuarterWeeks = (qEndMs - qStart) / (7 * 86400000);
+
+    // Elapsed-month QTD target: sum of this quarter's monthly targets whose month
+    // has already started (e.g. mid-July → only July's target counts).
+    const nowMonth = now.getUTCMonth();
+    const qtdArrTarget = qMonthIdxs
+      .filter((i) => i <= nowMonth)
+      .reduce((s, i) => s + TARGETS.newARR[i], 0);
+
+    // Pace = the flat weekly run-rate implied by the full-quarter target.
+    const arrPace = totalQuarterWeeks > 0 ? q3Target / totalQuarterWeeks : 0;
+    const pipePace = totalQuarterWeeks > 0 ? pipeQuota / totalQuarterWeeks : 0;
+
     return {
       q,
+      qEnd: qDef.end,
+      daysLeft,
       arrAddedLastWeek,
       arrWeekLabel,
       pipeAddedLastWeek,
@@ -537,9 +556,13 @@ export default function Dashboard() {
       arrPerWeek,
       arrGap,
       q3Target,
+      pipeGen,
       pipePerWeek,
       pipeGap,
       pipeQuota,
+      qtdArrTarget,
+      arrPace,
+      pipePace,
       ytdTargetThroughNow,
       ytdBooked,
       q3Booked,
@@ -651,6 +674,98 @@ export default function Dashboard() {
             {tabSummaries && (
               <TabHeader label="Command" sentence={tabSummaries.command.sentence} stats={tabSummaries.command.stats} />
             )}
+
+            {pathToPlan && (() => {
+              const P = pathToPlan;
+              // whole-k / M formatter matching the card design (no decimal on k)
+              const fk = (n: number) => {
+                const a = Math.abs(n);
+                const s = n < 0 ? "−" : "";
+                if (a >= 1e6) return s + "$" + (a / 1e6).toFixed(2) + "M";
+                if (a >= 1e3) return s + "$" + Math.round(a / 1e3) + "k";
+                return s + "$" + Math.round(a);
+              };
+              const gridWrap = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px 40px", padding: "20px" } as const;
+              const lbl = { fontSize: 11, fontWeight: 700 as const, letterSpacing: ".06em", textTransform: "uppercase" as const, color: C.t3 };
+              const bigN = (color: string, sm = false) => ({ fontSize: sm ? 34 : 38, fontWeight: 800 as const, color, lineHeight: 1, marginTop: 6, fontFamily: "var(--font-dm-mono)" });
+              const subN = { fontSize: 13, color: C.t2, marginTop: 8 };
+              const subWarn = { fontSize: 13, color: C.red, marginTop: 8 };
+
+              const arrAtt = P.q3Target > 0 ? Math.round((P.q3Booked / P.q3Target) * 100) : 0;
+              const arrQtdAtt = P.qtdArrTarget > 0 ? Math.round((P.q3Booked / P.qtdArrTarget) * 100) : 0;
+              const pipeAtt = P.pipeQuota > 0 ? Math.round((P.pipeGen / P.pipeQuota) * 100) : 0;
+              const arrBehind = P.arrAddedLastWeek < P.arrPace;
+              const pipeBehind = P.pipeAddedLastWeek < P.pipePace;
+              const wk = P.arrWeekLabel ? P.arrWeekLabel.replace(/^\d{4}-/, "").replace("-", "/") : "";
+
+              return (
+                <>
+                  {/* Card 1 — days left / gap to target */}
+                  <Card
+                    title={`${P.daysLeft} days left in ${P.q} · gap to target`}
+                    sub={`${P.weeksLeft} weeks remaining (quarter ends ${P.qEnd}). What's still needed — or banked — on ARR and pipeline.`}
+                    accent={C.coral}
+                  >
+                    <div style={gridWrap}>
+                      <div>
+                        <div style={lbl}>New ARR — Gap to Target</div>
+                        <div style={bigN(C.coralDk)}>{fk(P.arrGap)}</div>
+                        <div style={subN}>{fk(P.q3Booked)} booked of {fk(P.q3Target)} {P.q} target</div>
+                      </div>
+                      <div>
+                        <div style={lbl}>ARR Needed / Week Left</div>
+                        <div style={bigN(C.navy)}>{fk(P.arrPerWeek)}</div>
+                        <div style={subN}>across {P.weeksLeft} weeks to close</div>
+                      </div>
+                      <div>
+                        <div style={lbl}>Pipeline — Gap to Target</div>
+                        <div style={bigN(C.purp)}>{fk(P.pipeGap)}</div>
+                        <div style={subN}>{fk(P.pipeGen)} created of {fk(P.pipeQuota)} target</div>
+                      </div>
+                      <div>
+                        <div style={lbl}>Pipeline Needed / Week Left</div>
+                        <div style={bigN(C.navy)}>{fk(P.pipePerWeek)}</div>
+                        <div style={subN}>across {P.weeksLeft} weeks to close</div>
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* Card 2 — last week vs pace / QTD vs target */}
+                  <Card
+                    title={`Last week vs pace · ${P.q} QTD vs target`}
+                    sub="Weekly run-rate against pace, and quarter-to-date booking against the elapsed-months target. Pipeline pace is the catch-up run-rate."
+                    accent={C.purp}
+                  >
+                    <div style={gridWrap}>
+                      <div>
+                        <div style={lbl}>ARR Booked — Last Week</div>
+                        <div style={bigN(C.coralDk, true)}>{fk(P.arrAddedLastWeek)}</div>
+                        <div style={arrBehind ? subWarn : subN}>
+                          {arrBehind ? `behind pace (${fk(P.arrPace)}/wk)` : `at/above pace (${fk(P.arrPace)}/wk)`}{wk ? ` · wk of ${wk}` : ""}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={lbl}>Pipeline Created — Last Week</div>
+                        <div style={bigN(C.purp, true)}>{fk(P.pipeAddedLastWeek)}</div>
+                        <div style={pipeBehind ? subWarn : subN}>
+                          {pipeBehind ? `behind pace (${fk(P.pipePace)} needed)` : `at/above pace (${fk(P.pipePace)}/wk)`}{wk ? ` · wk of ${wk}` : ""}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={lbl}>{P.q} New ARR — QTD</div>
+                        <div style={bigN(C.navy, true)}>{fk(P.q3Booked)}</div>
+                        <div style={subN}>{arrQtdAtt}% of QTD target ({fk(P.qtdArrTarget)})</div>
+                      </div>
+                      <div>
+                        <div style={lbl}>{P.q} Pipeline — QTD</div>
+                        <div style={bigN(C.purp, true)}>{fk(P.pipeGen)}</div>
+                        <div style={subN}>{pipeAtt}% of {fk(P.pipeQuota)} target</div>
+                      </div>
+                    </div>
+                  </Card>
+                </>
+              );
+            })()}
 
             <Card
               title="Pipeline Pulse — Week over Week"
