@@ -16,6 +16,7 @@ import {
   computeForecast,
   computeForecastTab,
   parseForecastingQoQ,
+  parseForecastingStages,
   computeWinRateAndCycle,
   computeAcvDistribution,
 } from "@/lib/deals";
@@ -51,7 +52,7 @@ export async function GET() {
         getSheetValues("Pipeline - WoW"),
         getSheetValues("Query 1", "A1:Z1000"),
         getSheetValues("Query 2", "A1:Z2000"),
-        getSheetValues("Forecasting", "A1:T40"),
+        getSheetValues("Forecasting", "A1:T45"),
       ]);
 
     const arr = parseArrTab(arrRows);
@@ -100,6 +101,9 @@ export async function GET() {
       const s = qoqByShort[a.short] ?? qoqByShort[a.name];
       if (s) forecastSheetRows[a.name] = s;
     }
+    // Year-end projection uses the sheet's "Weighted Pipeline by Deal Stage"
+    // (Potential ARR) so the projection + gap match the warehouse.
+    const forecastStageRows = parseForecastingStages(forecastingRows);
     const forecastTab = computeForecastTab(
       openDeals,
       closedDeals,
@@ -110,7 +114,8 @@ export async function GET() {
       ANNUAL_END_TARGET,
       winRates.rates,
       nextQ,
-      forecastSheetRows
+      forecastSheetRows,
+      forecastStageRows
     );
     const currentYear = new Date().getUTCFullYear();
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);

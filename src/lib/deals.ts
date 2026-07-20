@@ -424,6 +424,46 @@ export function parseForecastingQoQ(
   return out;
 }
 
+// Reads the "Weighted Pipeline by Deal Stage (All AEs)" block from the
+// Forecasting tab: Stage | Open Pipeline | Pot New Biz | Pot Expansion |
+// Potential ARR | Probability % | Weighted Open Pipeline.
+export type ForecastingStageRow = {
+  stage: string;
+  openPipe: number;
+  potNB: number;
+  potExp: number;
+  potentialARR: number;
+  probability: number;
+  weighted: number;
+};
+export function parseForecastingStages(rows: Row[]): ForecastingStageRow[] {
+  const titleIdx = rows.findIndex((r) =>
+    r.some((c) => typeof c === "string" && c.includes("Weighted Pipeline by Deal Stage"))
+  );
+  if (titleIdx === -1) return [];
+  const num = (x: unknown): number => {
+    const n = Number(String(x ?? "").replace(/[^0-9.\-]/g, ""));
+    return isFinite(n) ? n : 0;
+  };
+  const out: ForecastingStageRow[] = [];
+  // header is at titleIdx + 1; data rows follow until a blank row or "TOTAL".
+  for (let i = titleIdx + 2; i < rows.length; i++) {
+    const stage = String(cell(rows[i], 0) ?? "").trim();
+    if (!stage) break;
+    if (stage.toUpperCase() === "TOTAL") break;
+    out.push({
+      stage,
+      openPipe: num(cell(rows[i], 1)),
+      potNB: num(cell(rows[i], 2)),
+      potExp: num(cell(rows[i], 3)),
+      potentialARR: num(cell(rows[i], 4)),
+      probability: num(cell(rows[i], 5)),
+      weighted: num(cell(rows[i], 6)),
+    });
+  }
+  return out;
+}
+
 export function computeForecastTab(
   openDeals: OpenDeal[],
   closedDeals: ClosedDeal[],
@@ -437,7 +477,8 @@ export function computeForecastTab(
   sheetRows?: Record<
     string,
     { openPipe: number; potNB: number; potExp: number; closedWon: number; potential: number }
-  >
+  >,
+  stageRows?: ForecastingStageRow[]
 ) {
   const rosterNames = new Set(roster.map((r) => r.name));
 
@@ -501,33 +542,46 @@ export function computeForecastTab(
   const aeTeam = sum(rows.filter((r) => !r.am));
   const totalInclAM = sum(rows);
 
-  // ── Year-end projection: per-stage weighted contributions (derived win rates) ──
+  // ── Year-end projection: per-stage weighted contributions ──
   const YE_WR = 0.25; // flat rate kept for the gap-coverage "pipeline needed" math
   let rawAnnual = 0;
   let weightedAnnualFlat = 0;
   let weightedAnnual = 0; // per-stage weighted (drives the waterfall + projection)
-  const byStageW: Record<string, { raw: number; weighted: number }> = {};
-  for (const d of openDeals) {
-    rawAnnual += d.arr;
-    weightedAnnualFlat += d.arr * YE_WR;
-    const rate = rates[d.stage] ?? 0.1;
-    const w = d.arr * rate;
-    weightedAnnual += w;
-    if (!byStageW[d.stage]) byStageW[d.stage] = { raw: 0, weighted: 0 };
-    byStageW[d.stage].raw += d.arr;
-    byStageW[d.stage].weighted += w;
+  let yeWaterfall: { stage: string; raw: number; weighted: number }[] = [];
+  if (stageRows && stageRows.length) {
+    // Single source of truth: the Forecasting tab's "Weighted Pipeline by Deal
+    // Stage" block. Potential ARR is the weighted contribution; Open Pipeline is
+    // the raw. Projection + gap follow from these, matching the sheet.
+    for (const s of stageRows) {
+      rawAnnual += s.openPipe;
+      weightedAnnual += s.potentialARR;
+      weightedAnnualFlat += s.openPipe * YE_WR;
+    }
+    yeWaterfall = stageRows
+      .filter((s) => s.potentialARR > 0)
+      .map((s) => ({ stage: s.stage, raw: s.openPipe, weighted: s.potentialARR }));
+  } else {
+    const byStageW: Record<string, { raw: number; weighted: number }> = {};
+    for (const d of openDeals) {
+      rawAnnual += d.arr;
+      weightedAnnualFlat += d.arr * YE_WR;
+      const rate = rates[d.stage] ?? 0.1;
+      const w = d.arr * rate;
+      weightedAnnual += w;
+      if (!byStageW[d.stage]) byStageW[d.stage] = { raw: 0, weighted: 0 };
+      byStageW[d.stage].raw += d.arr;
+      byStageW[d.stage].weighted += w;
+    }
+    yeWaterfall = STAGE_ORDER.filter((s) => (byStageW[s]?.raw ?? 0) > 0).map((s) => ({
+      stage: s,
+      raw: byStageW[s].raw,
+      weighted: byStageW[s].weighted,
+    }));
   }
   const projYE = currentLiveARR + weightedAnnual;
   const annualGap = annualTarget - projYE;
   // Net-new pipeline needed to cover the gap at the flat close rate.
   const pipelineNeededForGap = annualGap > 0 && YE_WR > 0 ? annualGap / YE_WR : 0;
-
-  // Waterfall steps in STAGE_ORDER: each stage's weighted contribution ("of raw").
-  const yeWaterfall = STAGE_ORDER.filter((s) => (byStageW[s]?.raw ?? 0) > 0).map((s) => ({
-    stage: s,
-    raw: byStageW[s].raw,
-    weighted: byStageW[s].weighted,
-  }));
 
   // ── Next quarter at a glance: open deals dated to close in the NEXT quarter ──
   const nqByStage: Record<string, { count: number; raw: number; aeExpected: number; weighted: number }> = {};
