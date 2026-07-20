@@ -18,7 +18,7 @@ import {
   computeWinRateAndCycle,
   computeAcvDistribution,
 } from "../src/lib/deals";
-import { SALES_Q, currentSalesQ, AE_ROSTER, ANNUAL_END_TARGET, CURRENT_LIVE_ARR_FALLBACK } from "../src/lib/planConfig";
+import { SALES_Q, currentSalesQ, AE_ROSTER, ANNUAL_END_TARGET, CURRENT_LIVE_ARR_FALLBACK, TARGETS, monthsInQuarter } from "../src/lib/planConfig";
 
 const raw = JSON.parse(fs.readFileSync(path.join(__dirname, "../../raw-rows.json"), "utf-8"));
 
@@ -186,11 +186,24 @@ const demoRoster = AE_ROSTER.map((a) => ({
   quota: a.quotaQ3,
   am: a.am,
 }));
-const forecastTab = computeForecastTab(openDeals, closedDeals, demoRoster, qDef.start, qDef.end, latestArr, ANNUAL_END_TARGET);
+const winRates = computeWinRates(closedDeals);
+// Next quarter (for the "Next quarter at a glance" section); quota derived from the plan.
+const qOrder = ["Q1", "Q2", "Q3", "Q4"];
+const nextQKey = qOrder[(qOrder.indexOf(q) + 1) % 4];
+const nextQDef = SALES_Q[nextQKey];
+const nextQ = {
+  label: nextQDef.label,
+  startISO: nextQDef.start,
+  endISO: nextQDef.end,
+  quota: monthsInQuarter(nextQKey).reduce((s, i) => s + TARGETS.newARR[i], 0),
+};
+const forecastTab = computeForecastTab(openDeals, closedDeals, demoRoster, qDef.start, qDef.end, latestArr, ANNUAL_END_TARGET, winRates.rates, nextQ);
 // rename stages inside decide board + byStage already handled by stage() where needed
 forecastTab.decideDeals = forecastTab.decideDeals.map((d) => ({ ...d, stage: stage(d.stage), name: d.name }));
+// rename stages in the new year-end waterfall + next-quarter stage table
+forecastTab.yeWaterfall = forecastTab.yeWaterfall.map((w) => ({ ...w, stage: stage(w.stage) }));
+forecastTab.nextQuarter.byStage = forecastTab.nextQuarter.byStage.map((s) => ({ ...s, stage: stage(s.stage) }));
 
-const winRates = computeWinRates(closedDeals);
 const dealHealth = computeAgingBuckets(openDeals);
 const rankedDeals = rankOpenDeals(openDeals).map((d) => ({ ...d, stage: stage(d.stage) }));
 const trendEvents = buildTrendEvents(openDeals, closedDeals);
