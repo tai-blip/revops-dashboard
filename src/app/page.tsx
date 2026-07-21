@@ -343,14 +343,14 @@ export default function Dashboard() {
         : { label: "Low", tone: "bad" as const };
 
     const arrStatus =
-      (latest?.changePct ?? 0) >= 0
+      (currentMonth?.changePct ?? 0) >= 0
         ? { label: "On track", tone: "good" as const }
         : { label: "Declining", tone: "bad" as const };
 
     return {
       arrNow,
       gap,
-      arrMoM: latest?.changePct ?? null,
+      arrMoM: currentMonth?.changePct ?? null,
       gen,
       quota,
       genPct,
@@ -425,7 +425,7 @@ export default function Dashboard() {
         sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
         stats: [
           { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const },
-          { label: "New ARR (mo)", value: fmt(S.currentMonth?.newARR), sub: S.currentMonth?.label },
+          { label: "New ARR (mo)", value: fmt(S.currentMonth?.newARR), sub: `New Biz + Expansion${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
           { label: "Churned (mo)", value: fmt(S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
           { label: "MoM change", value: gp(S.arrMoM), tone: (S.arrMoM ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
           { label: "Total pipeline", value: fmt(totalPipe) },
@@ -565,6 +565,8 @@ export default function Dashboard() {
     const qEndMs = new Date(qDef.end).getTime();
     const daysLeft = Math.max(0, Math.ceil((qEndMs - now.getTime()) / 86400000));
     const totalQuarterWeeks = (qEndMs - qStart) / (7 * 86400000);
+    const elapsedPct =
+      qEndMs > qStart ? Math.min(100, Math.max(0, ((now.getTime() - qStart) / (qEndMs - qStart)) * 100)) : 0;
 
     // Elapsed-month QTD target: sum of this quarter's monthly targets whose month
     // has already started (e.g. mid-July → only July's target counts).
@@ -581,6 +583,7 @@ export default function Dashboard() {
       q,
       qEnd: qDef.end,
       daysLeft,
+      elapsedPct,
       arrAddedLastWeek,
       arrWeekLabel,
       pipeAddedLastWeek,
@@ -724,6 +727,7 @@ export default function Dashboard() {
               const subWarn = { fontSize: 13, color: C.red, marginTop: 8 };
 
               const arrAtt = P.q3Target > 0 ? Math.round((P.q3Booked / P.q3Target) * 100) : 0;
+              const arrGapPct = P.q3Target > 0 ? Math.round((P.arrGap / P.q3Target) * 100) : 0;
               const arrQtdAtt = P.qtdArrTarget > 0 ? Math.round((P.q3Booked / P.qtdArrTarget) * 100) : 0;
               const pipeAtt = P.pipeQuota > 0 ? Math.round((P.pipeGen / P.pipeQuota) * 100) : 0;
               const arrBehind = P.arrAddedLastWeek < P.arrPace;
@@ -735,14 +739,14 @@ export default function Dashboard() {
                   {/* Card 1 — days left / gap to target */}
                   <Card
                     title={`${P.daysLeft} days left in ${P.q} · gap to target`}
-                    sub={`${P.weeksLeft} weeks remaining (quarter ends ${P.qEnd}). What's still needed — or banked — on ARR and pipeline.`}
+                    sub={`${P.weeksLeft} weeks remaining (quarter ends ${P.qEnd}) · ${arrGapPct}% of ${P.q} target still left. What's still needed — or banked — on ARR and pipeline.`}
                     accent={C.coral}
                   >
                     <div style={gridWrap}>
                       <div>
                         <div style={lbl}>New ARR — Gap to Target</div>
                         <div style={bigN(C.coralDk)}>{fk(P.arrGap)}</div>
-                        <div style={subN}>{fk(P.q3Booked)} booked of {fk(P.q3Target)} {P.q} target</div>
+                        <div style={subN}>{fk(P.q3Booked)} booked of {fk(P.q3Target)} {P.q} target · {arrGapPct}% left</div>
                       </div>
                       <div>
                         <div style={lbl}>ARR Needed / Week Left</div>
@@ -765,7 +769,7 @@ export default function Dashboard() {
                   {/* Card 2 — last week vs pace / QTD vs target */}
                   <Card
                     title={`Last week vs pace · ${P.q} QTD vs target`}
-                    sub="Weekly run-rate against pace, and quarter-to-date booking against the elapsed-months target. Pipeline pace is the catch-up run-rate."
+                    sub={`Weekly run-rate against pace, and quarter-to-date booking against the elapsed-months target · ${Math.round(P.elapsedPct)}% of ${P.q} elapsed. Pipeline pace is the catch-up run-rate.`}
                     accent={C.purp}
                   >
                     <div style={gridWrap}>
