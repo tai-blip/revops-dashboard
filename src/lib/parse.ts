@@ -39,7 +39,7 @@ export function parseArrTab(rows: Row[]) {
       if (!r[0] || typeof r[0] !== "string" || !/^\d{4}-\d{2}$/.test(r[0])) break;
       monthly.push({
         label: String(r[0]),
-        newARR: Number(r[1] ?? 0), // New ARR Added ($)
+        newARR: Number(r[2] ?? 0) + Number(r[3] ?? 0), // New ARR = New Business + Expansion (renewals excluded; sheet col r[1] "New ARR Added" bundles renewals in)
         newBusiness: Number(r[2] ?? 0), // - New Business ($)
         expansion: Number(r[3] ?? 0), // - Biz Expansion ($)
         renewals: Number(r[4] ?? 0), // - Renewals ($)
@@ -67,7 +67,7 @@ export function parseArrTab(rows: Row[]) {
       const label = sheetsSerialToISODate(rawLabel);
       weekly.push({
         label,
-        newARR: Number(r[1] ?? 0),
+        newARR: Number(r[2] ?? 0) + Number(r[3] ?? 0), // New ARR = New Business + Expansion (renewals excluded)
         newBusiness: Number(r[2] ?? 0),
         expansion: Number(r[3] ?? 0),
         renewals: Number(r[4] ?? 0),

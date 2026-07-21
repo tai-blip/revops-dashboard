@@ -183,7 +183,6 @@ export default function Dashboard() {
   const [pipePeriod, setPipePeriod] = useState<"weekly" | "monthly">("weekly");
   const [wowMetric, setWowMetric] = useState<string | null>(null);
   const [decideAE, setDecideAE] = useState<string>("all");
-  const [excludeRenewal, setExcludeRenewal] = useState<boolean>(false);
   const [dealCalls, setDealCalls] = useState<Record<string, "commit" | "best" | "pipeline" | "omit">>({});
 
   useEffect(() => {
@@ -305,8 +304,8 @@ export default function Dashboard() {
     const quota = aeRows.reduce((s, r) => s + (r.quota ?? 0), 0);
     const gen = Object.values(q3CreatedByOwner).reduce((s, n) => s + n, 0);
     const genPct = quota > 0 ? (gen / quota) * 100 : 0;
-    const qStart = new Date("2026-07-01").getTime();
-    const qEnd = new Date("2026-09-30").getTime();
+    const qStart = new Date("2026-07-02").getTime();
+    const qEnd = new Date("2026-10-01").getTime();
     const elapsedPct = Math.min(100, Math.max(0, ((Date.now() - qStart) / (qEnd - qStart)) * 100));
     const paceRatio = elapsedPct > 0 ? genPct / elapsedPct : 0;
     const genStatus =
@@ -414,7 +413,9 @@ export default function Dashboard() {
     // Q3 ARR mix skew from last 3 months
     const q3Win = months.slice(-3);
     const nb = q3Win.reduce((s, m) => s + m.newBusiness, 0);
-    const mixTotal = q3Win.reduce((s, m) => s + m.newBusiness + m.expansion + m.renewals, 0);
+    const exp = q3Win.reduce((s, m) => s + m.expansion, 0);
+    const newArrNbExp = nb + exp; // New ARR = Net New + Expansion (renewals excluded)
+    const mixTotal = nb + exp;
     const nbPct = mixTotal > 0 ? (nb / mixTotal) * 100 : 0;
 
     const gp = (n: number | null | undefined) => (n != null ? pct(n) : "—");
@@ -432,12 +433,12 @@ export default function Dashboard() {
         ],
       },
       targets: {
-        sentence: `Quarter-to-date the team has booked ${fmt(teamActual)} — ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` ARR mix this quarter skews ${nbPct.toFixed(0)}% Net New.` : ""}`,
+        sentence: `Quarter-to-date the team has attained ${fmt(teamActual)} — ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` New ARR (Net New + Expansion) is ${fmt(newArrNbExp)}, skewing ${nbPct.toFixed(0)}% Net New.` : ""}`,
         stats: [
-          { label: "New ARR (current mo)", value: fmt(teamActual), sub: S.currentMonth?.label },
-          { label: "Team actual Q3", value: fmt(teamActual), sub: "closed-won + live paying" },
+          { label: "New ARR (current mo)", value: fmt(newArrNbExp), sub: "Net New + Expansion" },
+          { label: "Team New ARR Q3", value: fmt(newArrNbExp), sub: "Net New + Expansion" },
           { label: "Team quota Q3", value: fmt(teamQuota), sub: `across ${data.aeAttainment.reps.length} AEs` },
-          { label: "% of quota", value: teamPct.toFixed(1) + "%", sub: `${S.elapsedPct.toFixed(0)}% of quarter gone`, tone: teamPct >= S.elapsedPct ? ("good" as const) : ("bad" as const) },
+          { label: "% of quota", value: teamPct.toFixed(1) + "%", sub: `attainment ${fmt(teamActual)} · ${S.elapsedPct.toFixed(0)}% of quarter gone`, tone: teamPct >= S.elapsedPct ? ("good" as const) : ("bad" as const) },
         ],
       },
       pipeline: {
@@ -858,24 +859,15 @@ export default function Dashboard() {
               const mixWindow = period === "monthly" ? chartPoints.slice(-3) : chartPoints.slice(-13);
               return (
                 <Card
-                  title="New ARR Mix — Net New vs Expansion vs Renewal"
-                  sub={period === "monthly" ? "Last 3 months, grouped per month" : "Last 13 weeks, grouped per week"}
+                  title="New ARR Mix — Net New vs Expansion"
+                  sub={period === "monthly" ? "Last 3 months, grouped per month · New ARR = Net New + Expansion" : "Last 13 weeks, grouped per week · New ARR = Net New + Expansion"}
                 >
                   <div style={{ padding: "16px 20px" }}>
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-                      <button
-                        onClick={() => setExcludeRenewal((v) => !v)}
-                        style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, borderRadius: 20, border: `1px solid ${excludeRenewal ? C.coral : C.bd}`, background: excludeRenewal ? C.coralSoft : "#fff", color: excludeRenewal ? C.coralDk : C.t2, cursor: "pointer" }}
-                      >
-                        {excludeRenewal ? "Renewal excluded" : "Exclude Renewal"}
-                      </button>
-                    </div>
                     <GroupedBarChart
                       labels={mixWindow.map((m) => m.label)}
                       series={[
                         { label: "Net New", values: mixWindow.map((m) => m.newBusiness), color: C.navy },
                         { label: "Expansion", values: mixWindow.map((m) => m.expansion), color: C.teal },
-                        ...(excludeRenewal ? [] : [{ label: "Renewal", values: mixWindow.map((m) => m.renewals), color: C.coralDk }]),
                       ]}
                     />
                   </div>
@@ -1098,30 +1090,20 @@ export default function Dashboard() {
 
           <Card
             title={`New ARR Mix — ${period === "monthly" ? "Last 3 Months" : "Last 3 Weeks"}`}
-            sub="Net New vs Expansion vs Renewal breakdown with period-over-period direction"
+            sub="Net New + Expansion breakdown with period-over-period direction · Total = New ARR"
           >
             {(() => {
               const win = chartPoints.slice(-3);
-              const allTypes = [
+              const types = [
                 { label: "Net New", key: "newBusiness" as const, color: C.navy },
                 { label: "Expansion", key: "expansion" as const, color: C.teal },
-                { label: "Renewal", key: "renewals" as const, color: C.coralDk },
               ];
-              const types = excludeRenewal ? allTypes.filter((t) => t.key !== "renewals") : allTypes;
               const rowTotal = (p: (typeof win)[number]) =>
                 types.reduce((s, t) => s + p[t.key], 0);
               const totals = types.map((t) => win.reduce((s, p) => s + p[t.key], 0));
               const grandTotal = totals.reduce((s, n) => s + n, 0);
               return (
                 <>
-                <div style={{ padding: "12px 16px 0", display: "flex", justifyContent: "flex-end" }}>
-                  <button
-                    onClick={() => setExcludeRenewal((v) => !v)}
-                    style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, borderRadius: 20, border: `1px solid ${excludeRenewal ? C.coral : C.bd}`, background: excludeRenewal ? C.coralSoft : "#fff", color: excludeRenewal ? C.coralDk : C.t2, cursor: "pointer" }}
-                  >
-                    {excludeRenewal ? "Renewal excluded" : "Exclude Renewal"}
-                  </button>
-                </div>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
@@ -1168,7 +1150,7 @@ export default function Dashboard() {
                       </tr>
                     ))}
                     <tr style={{ borderTop: `2px solid ${C.navy}` }}>
-                      <Td l bold>Total</Td>
+                      <Td l bold>New ARR</Td>
                       {win.map((p) => (
                         <Td key={p.label} mono bold>
                           {fmt(rowTotal(p))}

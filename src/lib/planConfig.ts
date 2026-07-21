@@ -29,8 +29,8 @@ export const ANNUAL_END_TARGET = endARR[11]; // ~ $11.0M gross; rebased path lan
 export const SALES_Q: Record<string, { label: string; start: string; end: string }> = {
   Q1: { label: "Q1 FY26", start: "2026-02-01", end: "2026-04-02" },
   Q2: { label: "Q2 FY26", start: "2026-04-02", end: "2026-07-02" },
-  Q3: { label: "Q3 FY26", start: "2026-07-02", end: "2026-10-02" },
-  Q4: { label: "Q4 FY26", start: "2026-10-02", end: "2027-01-02" },
+  Q3: { label: "Q3 FY26", start: "2026-07-02", end: "2026-10-01" },
+  Q4: { label: "Q4 FY26", start: "2026-10-01", end: "2027-01-02" },
 };
 
 export function currentSalesQ(now = new Date()): string {
