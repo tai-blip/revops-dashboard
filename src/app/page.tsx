@@ -1023,168 +1023,137 @@ export default function Dashboard() {
             );
           })()}
 
-          {(() => {
-            const win = data.arr.monthly.filter((p) => p.label.startsWith("2026-")).slice(-12);
-            const labels = win.map((p) => p.label.slice(5));
-            const linesCfg = [
-              { name: "Chat Agent Alfie", color: C.purp, data: win.map((p) => p.alfie), target: 150000 },
-              { name: "Managed Services", color: C.teal, data: win.map((p) => p.managedServices), target: 400000 },
-              { name: "Core Existing Features", color: C.navy, data: win.map((p) => p.coreExisting), target: 5500000 },
-            ];
-            const latest = win[win.length - 1];
-            const alf = latest?.alfie ?? 0;
-            const ms = latest?.managedServices ?? 0;
-            const core = latest?.coreExisting ?? 0;
-            const summary = `Product-line ARR: Core Existing Features leads at ${fmt(core)}, Managed Services ${fmt(ms)}, and Chat Agent Alfie ${fmt(alf)}. Set a target on any line below to track live gap and attainment.`;
-            return (
-              <>
-                <div style={{ background: C.navy, borderRadius: 14, padding: "16px 22px", marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: ".06em", textTransform: "uppercase", color: "#9FAAC6", marginBottom: 6 }}>
-                    ARR by Product Line · Executive Summary
-                  </div>
-                  <div style={{ fontSize: 15.5, lineHeight: 1.55, color: "#fff", fontWeight: 500 }}>{summary}</div>
+          {pathToPlan && (() => {
+            const P = pathToPlan;
+            const nowMonth = new Date().getUTCMonth(); // 0 = Jan … 6 = Jul
+            const money = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
+            const kM = (n: number) => {
+              const a = Math.abs(n);
+              return "$" + (a >= 1e6 ? (a / 1e6).toFixed(2) + "M" : a >= 1e3 ? Math.round(a / 1e3) + "k" : String(Math.round(a)));
+            };
+            const dlt = (n: number) => (n < 0 ? "−" : "") + kM(n);
+            const H2_BG = "#EAF0FB";
+            const attColor = (p: number) => (p >= 100 ? C.grn : p >= 75 ? C.ylw : p >= 40 ? C.coral : C.red);
+            const attBg = (p: number) => (p >= 100 ? C.grnBg : p >= 75 ? C.ylwBg : p >= 40 ? C.coralSoft : C.redBg);
+
+            const attCell = (att: number | null, withBar: boolean) => {
+              if (att == null) return <span style={{ color: C.t3 }}>—</span>;
+              const col = attColor(att);
+              return (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: withBar ? "flex-start" : "flex-end", gap: 8 }}>
+                  {withBar && (
+                    <div style={{ flex: 1, maxWidth: 120, height: 7, borderRadius: 4, background: C.s1, overflow: "hidden" }}>
+                      <div style={{ width: `${Math.min(100, att)}%`, height: "100%", background: col, borderRadius: 4 }} />
+                    </div>
+                  )}
+                  <span style={{ fontSize: 11, fontWeight: 700, color: col, background: attBg(att), padding: "2px 8px", borderRadius: 10, whiteSpace: "nowrap" }}>
+                    {Math.round(att)}%
+                  </span>
                 </div>
-                {linesCfg.map((l) => (
-                  <ProductLineSection
-                    key={l.name}
-                    name={l.name}
-                    color={l.color}
-                    labels={labels}
-                    data={l.data}
-                    defaultTarget={l.target}
-                  />
-                ))}
-              </>
+              );
+            };
+
+            const dataRow = (
+              key: string,
+              label: JSX.Element,
+              target: number,
+              booked: number | null,
+              endArr: number,
+              h2: boolean,
+              total: boolean,
+              ytd: boolean
+            ) => {
+              const delta = booked == null ? null : booked - target;
+              const att = booked == null || target <= 0 ? null : (booked / target) * 100;
+              const bg = ytd ? "#fff" : total ? (h2 ? H2_BG : C.s2) : h2 ? H2_BG : "transparent";
+              const dc = delta == null ? C.t3 : delta >= 0 ? C.grn : C.coralDk;
+              return (
+                <tr key={key} style={{ background: bg, borderTop: ytd ? `2px solid ${C.navy}` : `1px solid ${C.s1}` }}>
+                  <Td l bold={total}>{label}</Td>
+                  <Td mono color={C.t2} bold={total}>{money(target)}</Td>
+                  <Td mono color={booked == null ? C.t3 : C.coralDk} bold={total}>{booked == null ? "—" : money(booked)}</Td>
+                  <Td mono color={dc} bold={total}>{delta == null ? "—" : dlt(delta)}</Td>
+                  <td style={{ padding: "10px 16px" }}>{attCell(att, !total)}</td>
+                  <Td mono color={C.t2} bold={total}>{money(endArr)}</Td>
+                </tr>
+              );
+            };
+
+            return (
+              <Card
+                title="Monthly detail — booked vs target"
+                sub="Jul onward (H2) is the rebased plan to $10M year-end — shown shaded; Jan–Jun (H1) unshaded. Jul–Dec targets are the net-new ARR implied by each month's Ending-ARR step."
+              >
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: C.s1, borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Month</Th>
+                        <Th>Target New ARR</Th>
+                        <Th>Booked</Th>
+                        <Th>Δ</Th>
+                        <Th l>Attainment</Th>
+                        <Th>Ending ARR Target</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {P.chart.map((c, i) =>
+                        dataRow(
+                          c.month,
+                          <>
+                            <span style={{ fontWeight: 600, color: C.t1 }}>{c.month}</span>{" "}
+                            <span style={{ color: C.t3, fontSize: 11 }}>{`Q${Math.floor(i / 3) + 1}`}</span>
+                          </>,
+                          c.target,
+                          i <= nowMonth ? (c.booked ?? 0) : null,
+                          TARGETS.endARR[i],
+                          i >= 6,
+                          false,
+                          false
+                        )
+                      )}
+                      {[0, 1, 2, 3].map((qi) => {
+                        const idxs = [qi * 3, qi * 3 + 1, qi * 3 + 2];
+                        const target = idxs.reduce((s, i) => s + TARGETS.newARR[i], 0);
+                        const elapsed = idxs.filter((i) => i <= nowMonth);
+                        const booked = elapsed.length
+                          ? elapsed.reduce((s, i) => s + (P.chart[i].booked ?? 0), 0)
+                          : null;
+                        return dataRow(
+                          `q${qi + 1}`,
+                          <span style={{ fontWeight: 700 }}>{`Q${qi + 1} total`}</span>,
+                          target,
+                          booked,
+                          TARGETS.endARR[qi * 3 + 2],
+                          qi >= 2,
+                          true,
+                          false
+                        );
+                      })}
+                      {(() => {
+                        const idxs = P.chart.map((_, i) => i).filter((i) => i <= nowMonth);
+                        const t = idxs.reduce((s, i) => s + TARGETS.newARR[i], 0);
+                        const b = idxs.reduce((s, i) => s + (P.chart[i].booked ?? 0), 0);
+                        return dataRow(
+                          "ytd",
+                          <>
+                            <span style={{ fontWeight: 700 }}>2026 YTD</span>{" "}
+                            <span style={{ color: C.t3, fontSize: 11 }}>through {P.chart[nowMonth].month}</span>
+                          </>,
+                          t,
+                          b,
+                          TARGETS.endARR[nowMonth],
+                          false,
+                          true,
+                          true
+                        );
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
             );
           })()}
-
-          <Card title="ARR Trend" sub="Hover a point for details" accent={C.coral}>
-            <div style={{ padding: "16px 20px" }}>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-                <ChartPeriodToggle period={period} onChange={setPeriod} />
-              </div>
-              <ArrChart points={chartPoints} />
-            </div>
-          </Card>
-
-          <Card title={period === "monthly" ? "ARR Trend Table (Monthly)" : "ARR Trend Table (Weekly)"}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                  <Th l>{period === "monthly" ? "Month" : "Week Starting"}</Th>
-                  <Th>New ARR</Th>
-                  <Th>Active ARR</Th>
-                  <Th>Churned ARR</Th>
-                  <Th>{period === "monthly" ? "MoM %" : "WoW %"}</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {chartPoints.slice(-16).map((p) => (
-                  <tr key={p.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                    <Td l mono>{p.label}</Td>
-                    <Td mono>{fmt(p.newARR)}</Td>
-                    <Td mono>{fmt(p.activeARR)}</Td>
-                    <Td mono color={C.red}>{fmt(p.churnedARR)}</Td>
-                    <Td mono color={(p.changePct ?? 0) >= 0 ? C.grn : C.red}>{pct(p.changePct)}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-
-          <Card
-            title={`New ARR Mix — ${period === "monthly" ? "Last 3 Months" : "Last 3 Weeks"}`}
-            sub="Net New + Expansion breakdown with period-over-period direction · Total = New ARR"
-          >
-            {(() => {
-              const win = chartPoints.slice(-3);
-              const types = [
-                { label: "Net New", key: "newBusiness" as const, color: C.navy },
-                { label: "Expansion", key: "expansion" as const, color: C.teal },
-              ];
-              const rowTotal = (p: (typeof win)[number]) =>
-                types.reduce((s, t) => s + p[t.key], 0);
-              const totals = types.map((t) => win.reduce((s, p) => s + p[t.key], 0));
-              const grandTotal = totals.reduce((s, n) => s + n, 0);
-              return (
-                <>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                      <Th l>Type</Th>
-                      {win.map((p) => (
-                        <Th key={p.label}>{p.label}</Th>
-                      ))}
-                      <Th>Total</Th>
-                      <Th>Mix %</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {types.map((t, ti) => (
-                      <tr key={t.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                        <td style={{ padding: "10px 16px", fontSize: 13 }}>
-                          <span
-                            style={{
-                              display: "inline-block",
-                              width: 9,
-                              height: 9,
-                              borderRadius: 2,
-                              background: t.color,
-                              marginRight: 8,
-                            }}
-                          />
-                          <span style={{ fontWeight: 600, color: C.t1 }}>{t.label}</span>
-                        </td>
-                        {win.map((p, i) => {
-                          const v = p[t.key];
-                          const prev = i > 0 ? win[i - 1][t.key] : null;
-                          const dir = prev == null ? null : v > prev ? "up" : v < prev ? "down" : "flat";
-                          return (
-                            <Td key={p.label} mono>
-                              {fmt(v)}{" "}
-                              {dir === "up" && <span style={{ color: C.grn }}>▲</span>}
-                              {dir === "down" && <span style={{ color: C.red }}>▼</span>}
-                            </Td>
-                          );
-                        })}
-                        <Td mono bold>{fmt(totals[ti])}</Td>
-                        <Td mono color={C.t2}>
-                          {grandTotal > 0 ? ((totals[ti] / grandTotal) * 100).toFixed(0) + "%" : "—"}
-                        </Td>
-                      </tr>
-                    ))}
-                    <tr style={{ borderTop: `2px solid ${C.navy}` }}>
-                      <Td l bold>New ARR</Td>
-                      {win.map((p) => (
-                        <Td key={p.label} mono bold>
-                          {fmt(rowTotal(p))}
-                        </Td>
-                      ))}
-                      <Td mono bold>{fmt(grandTotal)}</Td>
-                      <Td mono color={C.t2}>100%</Td>
-                    </tr>
-                  </tbody>
-                </table>
-                </>
-              );
-            })()}
-          </Card>
-
-          <Card title="Rep Quota Progress — Q3 FY26">
-            <div style={{ padding: 20, display: "grid", gap: 16 }}>
-              {data.aeAttainment.reps.map((rep) => (
-                <div key={rep.name}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6 }}>
-                    <span style={{ fontWeight: 600, color: C.t1 }}>{rep.name}</span>
-                    <span style={{ color: C.t2 }}>
-                      {fmt(rep.actual)} / {fmt(rep.quota)} ({pct(rep.pctOfQuota)})
-                    </span>
-                  </div>
-                  <Bar value={rep.actual} target={rep.quota} />
-                </div>
-              ))}
-            </div>
-          </Card>
         </div>
       )}
 
