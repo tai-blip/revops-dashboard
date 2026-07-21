@@ -8,7 +8,6 @@ import { LineTrendChart } from "@/lib/LineTrendChart";
 import { GroupedBarChart } from "@/lib/GroupedBarChart";
 import { Sparkline, DeltaPill, wowDeltaPct, fmtMetricValue } from "@/lib/Sparkline";
 import { PlanChart } from "@/lib/PlanChart";
-import { ProductLineSection } from "@/lib/ProductLineChart";
 import { TabHeader } from "@/lib/TabHeader";
 import {
   TARGETS,
@@ -1055,7 +1054,7 @@ export default function Dashboard() {
 
             const dataRow = (
               key: string,
-              label: JSX.Element,
+              label: React.ReactNode,
               target: number,
               booked: number | null,
               endArr: number,
