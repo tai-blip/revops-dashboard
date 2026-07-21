@@ -432,9 +432,9 @@ export default function Dashboard() {
         ],
       },
       targets: {
-        sentence: `New ARR added in ${S.currentMonth?.label ?? "the latest month"}: ${fmt(S.currentMonth?.newARR)}. The team sits at ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` ARR mix this quarter skews ${nbPct.toFixed(0)}% Net New.` : ""}`,
+        sentence: `Quarter-to-date the team has booked ${fmt(teamActual)} — ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` ARR mix this quarter skews ${nbPct.toFixed(0)}% Net New.` : ""}`,
         stats: [
-          { label: "New ARR (current mo)", value: fmt(S.currentMonth?.newARR), sub: S.currentMonth?.label },
+          { label: "New ARR (current mo)", value: fmt(teamActual), sub: S.currentMonth?.label },
           { label: "Team actual Q3", value: fmt(teamActual), sub: "closed-won + live paying" },
           { label: "Team quota Q3", value: fmt(teamQuota), sub: `across ${data.aeAttainment.reps.length} AEs` },
           { label: "% of quota", value: teamPct.toFixed(1) + "%", sub: `${S.elapsedPct.toFixed(0)}% of quarter gone`, tone: teamPct >= S.elapsedPct ? ("good" as const) : ("bad" as const) },
