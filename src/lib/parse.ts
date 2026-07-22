@@ -278,12 +278,14 @@ export function parsePipelineWowTab(rows: Row[]) {
   const newOppsMom = parseRepTable("MONTH OVER MONTH — New Opps Entered");
   const newArrMom = parseRepTable("MONTH OVER MONTH — New ARR Created");
 
-  // Net New ARR + Expansion ARR MoM blocks (Ask 3). Try a few marker variants
-  // so it works regardless of the exact title text used in the sheet.
+  // Net New ARR + Expansion ARR MoM blocks (Ask 3). Match by title text with a
+  // month-header sanity check, trying specific → broad so a stray keyword hit
+  // (e.g. an "Expansion Lead" stage row) can't be mistaken for the block.
   function parseRepTableAny(markers: string[]) {
+    const monthish = (s: string) => /^[A-Za-z]{3}[-\s]?\d{2,4}$/.test(s);
     for (const m of markers) {
       const t = parseRepTable(m);
-      if (t.months.length && Object.keys(t.reps).length) return t;
+      if (t.months.some(monthish) && Object.keys(t.reps).length) return t;
     }
     return { months: [] as string[], reps: {} as Record<string, number[]> };
   }
@@ -291,11 +293,16 @@ export function parsePipelineWowTab(rows: Row[]) {
     "MONTH OVER MONTH — Net New ARR",
     "Net New ARR Created",
     "Net New ARR",
+    "Net New",
   ]);
   const expansionArrMom = parseRepTableAny([
     "MONTH OVER MONTH — Expansion ARR",
     "Expansion ARR Created",
     "Expansion ARR",
+    "MONTH OVER MONTH — Expansion",
+    "Expansion Created",
+    "Biz Expansion",
+    "Expansion",
   ]);
 
   return { filterRep, weekLabels, weeks, newOppsMom, newArrMom, netNewArrMom, expansionArrMom };

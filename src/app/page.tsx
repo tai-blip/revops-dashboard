@@ -1430,16 +1430,39 @@ export default function Dashboard() {
             );
             const attByName: Record<string, { actual: number; nb?: number; exp?: number }> = {};
             for (const a of data.aeAttainment.reps) attByName[a.name] = a;
+            // Q3 month labels (e.g. Jul-26/Aug-26/Sep-26) for summing MoM ARR blocks.
+            const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const qMonthSet = new Set<string>();
+            {
+              const [sy, sm] = data.quarter.start.slice(0, 7).split("-").map(Number);
+              for (let k = 0; k < 3; k++) {
+                const m = sm - 1 + k;
+                const y = sy + Math.floor(m / 12);
+                qMonthSet.add(`${MON[m % 12]}-${String(y).slice(2)}`);
+              }
+            }
+            const sumQ3 = (blk: { months: string[]; reps: Record<string, number[]> }, name: string) => {
+              const arr = blk.reps[name];
+              if (!arr) return 0;
+              return blk.months.reduce((s, mo, i) => s + (qMonthSet.has(mo) ? (arr[i] ?? 0) : 0), 0);
+            };
             return (
               <div style={{ display: "grid", gap: 12, marginBottom: 16 }}>
                 {data.forecastTab.rows.map((rep) => {
-                  // Closed Won total comes from the AE attainment tab (sheet); falls
-                  // back to the QoQ-sourced forecast row, then the Query-2 split.
                   const att = attByName[rep.name];
+                  // NB/Exp split: prefer the Q3 sums of the Net New / Expansion MoM
+                  // blocks (booked ARR), then AE-attainment split columns, then Query 2.
+                  const nbQ3 = sumQ3(data.pipelineWow.netNewArrMom, rep.name);
+                  const expQ3 = sumQ3(data.pipelineWow.expansionArrMom, rep.name);
                   const cwq = data.cwSplitByOwner?.[rep.name] ?? { nb: 0, exp: 0 };
-                  const cwTotal = att?.actual ?? rep.closedWon ?? (cwq.nb + cwq.exp);
-                  const hasSheetSplit = att != null && ((att.nb ?? 0) !== 0 || (att.exp ?? 0) !== 0);
-                  const cw = hasSheetSplit ? { nb: att!.nb ?? 0, exp: att!.exp ?? 0 } : cwq;
+                  const attSplit = att != null && ((att.nb ?? 0) !== 0 || (att.exp ?? 0) !== 0);
+                  const cw =
+                    nbQ3 !== 0 || expQ3 !== 0
+                      ? { nb: nbQ3, exp: expQ3 }
+                      : attSplit
+                      ? { nb: att!.nb ?? 0, exp: att!.exp ?? 0 }
+                      : cwq;
+                  const cwTotal = att?.actual ?? rep.closedWon ?? cw.nb + cw.exp;
                   const quota = rep.quota;
                   const attain = quota && quota > 0 ? cwTotal / quota : null;
                   const pipeGen = q3CreatedByOwner[rep.name] ?? 0;
