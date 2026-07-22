@@ -354,7 +354,9 @@ export function computeAcvDistribution(closedDeals: ClosedDeal[]) {
 // ── Forecast tab: in-quarter per-AE potential, mirroring the original dashboard ──
 export type ForecastRow = {
   name: string;
+  short: string;
   am: boolean;
+  lead?: boolean;
   openPipe: number;
   quota: number | null;
   closedWon: number;
@@ -467,7 +469,7 @@ export function parseForecastingStages(rows: Row[]): ForecastingStageRow[] {
 export function computeForecastTab(
   openDeals: OpenDeal[],
   closedDeals: ClosedDeal[],
-  roster: { name: string; short: string; quota: number | null; am: boolean }[],
+  roster: { name: string; short: string; quota: number | null; am: boolean; lead?: boolean }[],
   qStartISO: string,
   qEndISO: string,
   currentLiveARR: number,
@@ -512,7 +514,9 @@ export function computeForecastTab(
     const potential = s ? s.potential : cw + potNB + potExp;
     return {
       name: a.name,
+      short: a.short,
       am: a.am,
+      lead: a.lead ?? false,
       openPipe,
       quota: a.quota,
       closedWon: cw,
@@ -539,8 +543,9 @@ export function computeForecastTab(
       attainP: quota ? potential / quota : null,
     };
   };
-  const aeTeam = sum(rows.filter((r) => !r.am));
-  const totalInclAM = sum(rows);
+  const aeTeam = sum(rows.filter((r) => !r.am && !r.lead));
+  const totalInclAM = sum(rows.filter((r) => !r.lead));
+  const totalInclLead = sum(rows);
 
   // ── Year-end projection: per-stage weighted contributions ──
   const YE_WR = 0.25; // flat rate kept for the gap-coverage "pipeline needed" math
@@ -641,7 +646,7 @@ export function computeForecastTab(
     }
     potOpenQ += d.expectedRevQ;
   }
-  const teamActualNB = roster.filter((r) => !r.am).reduce((s, a) => s + (cwByOwner[a.name]?.nb ?? 0), 0);
+  const teamActualNB = roster.filter((r) => !r.am && !r.lead).reduce((s, a) => s + (cwByOwner[a.name]?.nb ?? 0), 0);
   const potentialLanding = teamActualNB + potOpenQ;
 
   const decideDeals = openDeals
@@ -658,6 +663,7 @@ export function computeForecastTab(
     rows,
     aeTeam,
     totalInclAM,
+    totalInclLead,
     teamProjected: aeTeam.potential,
     teamQuota,
     teamActual,

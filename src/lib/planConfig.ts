@@ -54,12 +54,13 @@ export function monthsInQuarter(q: string): number[] {
   return map[q] ?? [6, 7, 8];
 }
 
-export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; am: boolean }[] = [
+export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; am: boolean; lead?: boolean }[] = [
   { name: "James Burdick", short: "James", quotaQ3: 255000, am: false },
   { name: "Dorsa Mahmoudnia", short: "Dorsa", quotaQ3: 250000, am: false },
   { name: "Jed Rutstein", short: "Jed", quotaQ3: 250000, am: false },
   { name: "Jill Bucci", short: "Jill", quotaQ3: 200000, am: false },
   { name: "Mathias Berthelemot", short: "Mathias", quotaQ3: 250000, am: true },
+  { name: "David Dubinski", short: "Davi", quotaQ3: 0, am: false, lead: true },
 ];
 
 export const CURRENT_LIVE_ARR_FALLBACK = 5690808;

@@ -58,9 +58,10 @@ type DashboardData = {
     byStage: Record<string, { raw: number; weighted: number; count: number }>;
   };
   forecastTab: {
-    rows: { name: string; am: boolean; openPipe: number; quota: number | null; closedWon: number; potNB: number; potExp: number; potential: number; variance: number | null; attainP: number | null }[];
+    rows: { name: string; short?: string; am: boolean; lead?: boolean; openPipe: number; quota: number | null; closedWon: number; potNB: number; potExp: number; potential: number; variance: number | null; attainP: number | null }[];
     aeTeam: { openPipe: number; quota: number; closedWon: number; potNB: number; potExp: number; potential: number; variance: number; attainP: number | null };
     totalInclAM: { openPipe: number; quota: number; closedWon: number; potNB: number; potExp: number; potential: number; variance: number; attainP: number | null };
+    totalInclLead?: { openPipe: number; quota: number; closedWon: number; potNB: number; potExp: number; potential: number; variance: number; attainP: number | null };
     teamProjected: number;
     teamQuota: number;
     teamActual: number;
@@ -1240,6 +1241,99 @@ export default function Dashboard() {
           </Card>
 
           <Card
+            title="Pipeline generation by AE — Q3 FY26"
+            sub="New pipeline created this quarter — total contract value (Amount) of opps reaching SQL, vs each AE's quarterly pipe-generation target. Open pipeline shown for context."
+            accent={C.coral}
+          >
+            {(() => {
+              const kM = (n: number) => {
+                const a = Math.abs(n);
+                if (a >= 1e6) return "$" + (a / 1e6).toFixed(2) + "M";
+                if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
+                return "$" + Math.round(a);
+              };
+              const quotaByName: Record<string, number | null> = {};
+              for (const r of data.pipeline.aeBreakdown) quotaByName[r.name] = r.quota;
+              const genTargetOf = (name: string) => {
+                const q = quotaByName[name];
+                return q != null && q > 0 ? q : null;
+              };
+              const roster = [...data.forecastTab.rows].sort(
+                (a, b) =>
+                  (a.lead ? 0 : a.am ? 2 : 1) - (b.lead ? 0 : b.am ? 2 : 1)
+              );
+              const aeRows = roster.filter((r) => !r.am && !r.lead);
+              const teamTarget = aeRows.reduce((s, r) => s + (genTargetOf(r.name) ?? 0), 0);
+              const teamGen = aeRows.reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
+              const teamOpps = aeRows.reduce((s, r) => s + (q3CreatedCountByOwner[r.name] ?? 0), 0);
+              const teamOpen = aeRows.reduce((s, r) => s + (r.openPipe ?? 0), 0);
+              const progressCell = (gen: number, target: number | null) => {
+                if (target == null)
+                  return <span style={{ fontSize: 12, color: C.t3 }}>no target</span>;
+                const p = target > 0 ? Math.round((gen / target) * 100) : 0;
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <Bar value={gen} target={target} />
+                    </div>
+                    <span style={{ fontSize: 12, color: C.t3, minWidth: 30, textAlign: "right" }}>
+                      {p}%
+                    </span>
+                  </div>
+                );
+              };
+              return (
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: C.s1, borderBottom: `1px solid ${C.bd}` }}>
+                      <Th l>AE</Th>
+                      <Th>Gen Target</Th>
+                      <Th>Generated QTD (TCV)</Th>
+                      <Th l>Progress to Gen Target</Th>
+                      <Th># Opps</Th>
+                      <Th>Open Pipeline</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roster.map((row) => {
+                      const target = genTargetOf(row.name);
+                      const gen = q3CreatedByOwner[row.name] ?? 0;
+                      const opps = q3CreatedCountByOwner[row.name] ?? 0;
+                      return (
+                        <tr key={row.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <Td l bold>
+                            {row.short ?? row.name.split(" ")[0]}
+                            {row.am && (
+                              <span style={{ fontSize: 11, color: C.t3, fontWeight: 400 }}> · AM</span>
+                            )}
+                          </Td>
+                          <Td mono color={C.navy2}>{target != null ? kM(target) : "—"}</Td>
+                          <Td mono bold color={C.purp}>{kM(gen)}</Td>
+                          <td style={{ padding: "10px 16px", width: 220 }}>
+                            {progressCell(gen, target)}
+                          </td>
+                          <Td mono color={C.navy2}>{opps}</Td>
+                          <Td mono>{kM(row.openPipe ?? 0)}</Td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ background: C.s1, borderTop: `2px solid ${C.navy}` }}>
+                      <Td l bold>Team (AEs)</Td>
+                      <Td mono bold color={C.navy2}>{kM(teamTarget)}</Td>
+                      <Td mono bold color={C.purp}>{kM(teamGen)}</Td>
+                      <td style={{ padding: "10px 16px", width: 220 }}>
+                        {progressCell(teamGen, teamTarget)}
+                      </td>
+                      <Td mono bold color={C.navy2}>{teamOpps}</Td>
+                      <Td mono bold>{kM(teamOpen)}</Td>
+                    </tr>
+                  </tbody>
+                </table>
+              );
+            })()}
+          </Card>
+
+          <Card
             title="Pipeline Movement — Trend"
             sub="New pipeline created, closed-won, and closed-lost, over time — filter by AE and by what you want to see"
             accent={C.coral}
@@ -1309,98 +1403,6 @@ export default function Dashboard() {
                 valueFormat={pipeCriteria === "createdCount" ? "number" : "currency"}
               />
             </div>
-          </Card>
-
-          <Card
-            title="Pipeline generation by AE — Q3 FY26"
-            sub="New pipeline created this quarter — total contract value (Amount) of opps reaching SQL, vs each AE's quarterly pipe-generation target. Open pipeline shown for context."
-            accent={C.coral}
-          >
-            {(() => {
-              const kM = (n: number) => {
-                const a = Math.abs(n);
-                if (a >= 1e6) return "$" + (a / 1e6).toFixed(2) + "M";
-                if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
-                return "$" + Math.round(a);
-              };
-              const quotaByName: Record<string, number | null> = {};
-              for (const r of data.pipeline.aeBreakdown) quotaByName[r.name] = r.quota;
-              const genTargetOf = (name: string) => {
-                const q = quotaByName[name];
-                return q != null && q > 0 ? q : null;
-              };
-              const roster = [...data.forecastTab.rows].sort(
-                (a, b) => Number(a.am) - Number(b.am)
-              );
-              const aeRows = roster.filter((r) => !r.am);
-              const teamTarget = aeRows.reduce((s, r) => s + (genTargetOf(r.name) ?? 0), 0);
-              const teamGen = aeRows.reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
-              const teamOpps = aeRows.reduce((s, r) => s + (q3CreatedCountByOwner[r.name] ?? 0), 0);
-              const teamOpen = aeRows.reduce((s, r) => s + (r.openPipe ?? 0), 0);
-              const progressCell = (gen: number, target: number | null) => {
-                if (target == null)
-                  return <span style={{ fontSize: 12, color: C.t3 }}>no target</span>;
-                const p = target > 0 ? Math.round((gen / target) * 100) : 0;
-                return (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <Bar value={gen} target={target} />
-                    </div>
-                    <span style={{ fontSize: 12, color: C.t3, minWidth: 30, textAlign: "right" }}>
-                      {p}%
-                    </span>
-                  </div>
-                );
-              };
-              return (
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ background: C.s1, borderBottom: `1px solid ${C.bd}` }}>
-                      <Th l>AE</Th>
-                      <Th>Gen Target</Th>
-                      <Th>Generated QTD (TCV)</Th>
-                      <Th l>Progress to Gen Target</Th>
-                      <Th># Opps</Th>
-                      <Th>Open Pipeline</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {roster.map((row) => {
-                      const target = genTargetOf(row.name);
-                      const gen = q3CreatedByOwner[row.name] ?? 0;
-                      const opps = q3CreatedCountByOwner[row.name] ?? 0;
-                      return (
-                        <tr key={row.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                          <Td l bold>
-                            {row.name}
-                            {row.am && (
-                              <span style={{ fontSize: 11, color: C.t3, fontWeight: 400 }}> · AM</span>
-                            )}
-                          </Td>
-                          <Td mono color={C.navy2}>{target != null ? kM(target) : "—"}</Td>
-                          <Td mono bold color={C.purp}>{kM(gen)}</Td>
-                          <td style={{ padding: "10px 16px", width: 220 }}>
-                            {progressCell(gen, target)}
-                          </td>
-                          <Td mono color={C.navy2}>{opps}</Td>
-                          <Td mono>{kM(row.openPipe ?? 0)}</Td>
-                        </tr>
-                      );
-                    })}
-                    <tr style={{ background: C.s1, borderTop: `2px solid ${C.navy}` }}>
-                      <Td l bold>Team (AEs)</Td>
-                      <Td mono bold color={C.navy2}>{kM(teamTarget)}</Td>
-                      <Td mono bold color={C.purp}>{kM(teamGen)}</Td>
-                      <td style={{ padding: "10px 16px", width: 220 }}>
-                        {progressCell(teamGen, teamTarget)}
-                      </td>
-                      <Td mono bold color={C.navy2}>{teamOpps}</Td>
-                      <Td mono bold>{kM(teamOpen)}</Td>
-                    </tr>
-                  </tbody>
-                </table>
-              );
-            })()}
           </Card>
 
         </div>
@@ -1491,7 +1493,10 @@ export default function Dashboard() {
       {tab === "forecast" && (() => {
         const F = data.forecastTab;
         const Q = data.quarter;
-        const roster = F.rows;
+        const roster = [...F.rows].sort(
+          (a, b) => (a.lead ? 0 : a.am ? 2 : 1) - (b.lead ? 0 : b.am ? 2 : 1)
+        );
+        const hasLead = F.rows.some((r) => r.lead);
         const money = (n: number | null) => (n == null ? "\u2014" : fmt(n));
         const short = (name: string) => name.split(" ")[0];
 
@@ -1566,7 +1571,7 @@ export default function Dashboard() {
                 <tbody>
                   {roster.map((r) => (
                     <tr key={r.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                      <Td l bold>{short(r.name)}{r.am && <span style={{ color: C.t3, fontWeight: 400, fontSize: 11 }}> · AM</span>}</Td>
+                      <Td l bold>{r.short ?? short(r.name)}{r.am && <span style={{ color: C.t3, fontWeight: 400, fontSize: 11 }}> · AM</span>}</Td>
                       <Td mono color={C.blue}>{fmt(r.openPipe)}</Td>
                       <Td mono color={C.t2}>{r.quota != null && r.quota > 0 ? fmt(r.quota) : "\u2014"}</Td>
                       <Td mono color={r.closedWon > 0 ? C.coralDk : C.t1}>{fmt(r.closedWon)}</Td>
@@ -1588,6 +1593,17 @@ export default function Dashboard() {
                     <Td mono color={C.coralDk}>{fmt(F.totalInclAM.potNB)}</Td><Td mono color={C.purp}>{fmt(F.totalInclAM.potExp)}</Td><Td mono bold>{fmt(F.totalInclAM.potential)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(F.totalInclAM.attainP, null)}</td>
                   </tr>
+                  {hasLead && (() => {
+                    const G = F.totalInclLead ?? F.totalInclAM;
+                    return (
+                      <tr style={{ background: "#E4EAF2", fontWeight: 700 }}>
+                        <Td l bold>Total · incl AM + Davi</Td>
+                        <Td mono>{fmt(G.openPipe)}</Td><Td mono>{fmt(G.quota)}</Td><Td mono>{fmt(G.closedWon)}</Td>
+                        <Td mono color={C.coralDk}>{fmt(G.potNB)}</Td><Td mono color={C.purp}>{fmt(G.potExp)}</Td><Td mono bold>{fmt(G.potential)}</Td>
+                        <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(G.attainP, null)}</td>
+                      </tr>
+                    );
+                  })()}
                 </tbody>
               </table>
             </div>

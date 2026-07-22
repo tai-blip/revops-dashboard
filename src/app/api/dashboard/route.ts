@@ -78,6 +78,7 @@ export async function GET() {
       short: a.short,
       quota: a.quotaQ3,
       am: a.am,
+      lead: a.lead ?? false,
     }));
     // Next quarter (for the "Next quarter at a glance" section). Quota derived from
     // the plan's New-ARR targets for that quarter's months — stays live, no hardcoding.
