@@ -219,6 +219,17 @@ export default function Dashboard() {
       monthlyCumulative.push({ label: m.label, actual: running });
     }
 
+    // 2026-only cumulative (restarts at Jan-26 = YTD attainment). H1 (Jan–Jun) is
+    // shaded as the prior plan — superseded by the H2 plan — vs H2 (Jul–Dec).
+    const cumulative2026: { label: string; actual: number; isH1: boolean }[] = [];
+    let run26 = 0;
+    for (const m of data.aeAttainment.monthlyTeamActual) {
+      if (!/-26$/.test(m.label)) continue;
+      run26 += m.actual;
+      const mi = MONTH_ABBR.indexOf(m.label.slice(0, 3).toLowerCase());
+      cumulative2026.push({ label: m.label, actual: run26, isH1: mi >= 0 && mi <= 5 });
+    }
+
     // Cumulative churned ARR (last 12 months window)
     const churnWindow = data.arr.monthly.slice(-12);
     const churnCumulative: number[] = [];
@@ -236,6 +247,7 @@ export default function Dashboard() {
       totalPipelineARR,
       coverageRatio,
       monthlyCumulative,
+      cumulative2026,
       churnWindow,
       churnCumulative,
     };
@@ -930,15 +942,27 @@ export default function Dashboard() {
             })()}
 
             <Card
-              title="Team ARR Attainment — Cumulative"
-              sub="Running total of closed-won + live-paying ARR by month"
+              title="Team ARR Attainment — Cumulative (2026)"
+              sub="2026 YTD running total of closed-won + live-paying ARR · H1 (faded) is the prior plan, replaced by the H2 plan"
             >
               <div style={{ padding: "16px 20px" }}>
                 <BarTrendChart
-                  labels={derived.monthlyCumulative.map((m) => m.label)}
-                  values={derived.monthlyCumulative.map((m) => m.actual)}
+                  labels={derived.cumulative2026.map((m) => m.label)}
+                  values={derived.cumulative2026.map((m) => m.actual)}
+                  barColors={derived.cumulative2026.map((m) => (m.isH1 ? C.bd : C.navy))}
                   valueFormat="currency"
                 />
+                {/* H1 (prior plan) vs H2 (current plan) legend */}
+                <div style={{ display: "flex", gap: 18, marginTop: 10, fontSize: 11.5, color: C.t2 }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 11, height: 11, borderRadius: 2, background: C.bd, display: "inline-block" }} />
+                    H1 — prior plan (superseded)
+                  </span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 11, height: 11, borderRadius: 2, background: C.navy, display: "inline-block" }} />
+                    H2 — current plan
+                  </span>
+                </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
                   <KV label="Actual (Q3)" v={fmt(derived.teamActual)} />
                   <KV label="Quota (Q3)" v={fmt(derived.teamQuota)} />
