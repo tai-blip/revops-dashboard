@@ -105,8 +105,18 @@ export function parseAeAttainmentTab(rows: Row[]) {
     quota: number;
     pctOfQuota: number;
     actual: number;
+    nb: number;
+    exp: number;
   }[] = [];
   const monthlySums = monthCols.map(() => 0);
+
+  // Optional per-rep Closed-Won breakdown columns, matched by header name so
+  // position doesn't matter. If absent, nb/exp stay 0 and the card falls back.
+  const findCol = (kw: string) =>
+    headerRow.findIndex((c) => typeof c === "string" && c.toLowerCase().includes(kw));
+  const nbCol = findCol("new business");
+  const expCol = findCol("expansion");
+  const cwCol = findCol("closed won");
 
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i];
@@ -115,7 +125,9 @@ export function parseAeAttainmentTab(rows: Row[]) {
       name: String(r[0]),
       quota: Number(r[1] ?? 0),
       pctOfQuota: Number(r[2] ?? 0),
-      actual: Number(r[3] ?? 0),
+      actual: cwCol >= 0 ? Number(r[cwCol] ?? 0) : Number(r[3] ?? 0),
+      nb: nbCol >= 0 ? Number(r[nbCol] ?? 0) : 0,
+      exp: expCol >= 0 ? Number(r[expCol] ?? 0) : 0,
     });
     monthCols.forEach((m, mi) => {
       monthlySums[mi] += Number(r[m.idx] ?? 0);
@@ -266,5 +278,25 @@ export function parsePipelineWowTab(rows: Row[]) {
   const newOppsMom = parseRepTable("MONTH OVER MONTH — New Opps Entered");
   const newArrMom = parseRepTable("MONTH OVER MONTH — New ARR Created");
 
-  return { filterRep, weekLabels, weeks, newOppsMom, newArrMom };
+  // Net New ARR + Expansion ARR MoM blocks (Ask 3). Try a few marker variants
+  // so it works regardless of the exact title text used in the sheet.
+  function parseRepTableAny(markers: string[]) {
+    for (const m of markers) {
+      const t = parseRepTable(m);
+      if (t.months.length && Object.keys(t.reps).length) return t;
+    }
+    return { months: [] as string[], reps: {} as Record<string, number[]> };
+  }
+  const netNewArrMom = parseRepTableAny([
+    "MONTH OVER MONTH — Net New ARR",
+    "Net New ARR Created",
+    "Net New ARR",
+  ]);
+  const expansionArrMom = parseRepTableAny([
+    "MONTH OVER MONTH — Expansion ARR",
+    "Expansion ARR Created",
+    "Expansion ARR",
+  ]);
+
+  return { filterRep, weekLabels, weeks, newOppsMom, newArrMom, netNewArrMom, expansionArrMom };
 }

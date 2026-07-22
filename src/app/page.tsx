@@ -33,7 +33,7 @@ type DashboardData = {
     weekly: ArrPoint[];
   };
   aeAttainment: {
-    reps: { name: string; quota: number; pctOfQuota: number; actual: number }[];
+    reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
     monthlyTeamActual: { label: string; actual: number }[];
   };
   pipeline: {
@@ -49,6 +49,8 @@ type DashboardData = {
     weeks: { metric: string; values: (number | null)[] }[];
     newOppsMom: { months: string[]; reps: Record<string, number[]> };
     newArrMom: { months: string[]; reps: Record<string, number[]> };
+    netNewArrMom: { months: string[]; reps: Record<string, number[]> };
+    expansionArrMom: { months: string[]; reps: Record<string, number[]> };
   };
   dealHealth: { label: string; min: number; max: number; arr: number; count: number }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
@@ -1426,11 +1428,18 @@ export default function Dashboard() {
             const label = (t: string) => (
               <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em" }}>{t}</div>
             );
+            const attByName: Record<string, { actual: number; nb?: number; exp?: number }> = {};
+            for (const a of data.aeAttainment.reps) attByName[a.name] = a;
             return (
               <div style={{ display: "grid", gap: 12, marginBottom: 16 }}>
                 {data.forecastTab.rows.map((rep) => {
-                  const cw = data.cwSplitByOwner?.[rep.name] ?? { nb: 0, exp: 0 };
-                  const cwTotal = cw.nb + cw.exp;
+                  // Closed Won total comes from the AE attainment tab (sheet); falls
+                  // back to the QoQ-sourced forecast row, then the Query-2 split.
+                  const att = attByName[rep.name];
+                  const cwq = data.cwSplitByOwner?.[rep.name] ?? { nb: 0, exp: 0 };
+                  const cwTotal = att?.actual ?? rep.closedWon ?? (cwq.nb + cwq.exp);
+                  const hasSheetSplit = att != null && ((att.nb ?? 0) !== 0 || (att.exp ?? 0) !== 0);
+                  const cw = hasSheetSplit ? { nb: att!.nb ?? 0, exp: att!.exp ?? 0 } : cwq;
                   const quota = rep.quota;
                   const attain = quota && quota > 0 ? cwTotal / quota : null;
                   const pipeGen = q3CreatedByOwner[rep.name] ?? 0;
@@ -1540,6 +1549,58 @@ export default function Dashboard() {
                 labels={data.pipelineWow.newOppsMom.months}
                 values={data.pipelineWow.newOppsMom.reps[trendRep] ?? []}
                 valueFormat="number"
+                showValues
+                trendline
+              />
+            </div>
+          </Card>
+
+          <Card
+            title="New ARR"
+            sub="New ARR booked by rep, per month — split into Net New and Expansion"
+          >
+            <div style={{ padding: "16px 20px" }}>
+              <div style={{ marginBottom: 16 }}>
+                <select
+                  value={trendRep}
+                  onChange={(e) => setTrendRep(e.target.value)}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: `1px solid ${C.bd}`,
+                    fontSize: 13,
+                    color: C.t1,
+                    background: "#fff",
+                  }}
+                >
+                  {Object.keys(data.pipelineWow.newArrMom.reps).map((rep) => (
+                    <option key={rep} value={rep}>
+                      {rep}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 6 }}>
+                Net New ARR ($)
+              </div>
+              <div style={{ marginBottom: 24 }}>
+                <BarTrendChart
+                  labels={data.pipelineWow.netNewArrMom.months}
+                  values={data.pipelineWow.netNewArrMom.reps[trendRep] ?? []}
+                  valueFormat="currency"
+                  showValues
+                  trendline
+                />
+              </div>
+
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: C.t2, marginBottom: 6 }}>
+                Expansion ARR ($)
+              </div>
+              <BarTrendChart
+                labels={data.pipelineWow.expansionArrMom.months}
+                values={data.pipelineWow.expansionArrMom.reps[trendRep] ?? []}
+                valueFormat="currency"
                 showValues
                 trendline
               />
