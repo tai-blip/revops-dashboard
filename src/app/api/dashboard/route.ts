@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSheetValues } from "@/lib/sheets";
 import {
   parseArrTab,
+  parseArrMomProgressionTab,
   parseAeAttainmentTab,
   parsePipelineTab,
   parsePipelineWowTab,
@@ -44,9 +45,10 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [arrRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows] =
+    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows] =
       await Promise.all([
         getSheetValues("ARR & recurring revenue"),
+        getSheetValues("ARR MoM Progression", "A1:D400"),
         getSheetValues("AE attainment"),
         getSheetValues("Pipeline"),
         getSheetValues("Pipeline - WoW", "A1:BI400"),
@@ -56,6 +58,7 @@ export async function GET() {
       ]);
 
     const arr = parseArrTab(arrRows);
+    const arrMom = parseArrMomProgressionTab(arrMomRows);
     const aeAttainment = parseAeAttainmentTab(aeRows);
     const pipeline = parsePipelineTab(pipelineRows);
     const pipelineWow = parsePipelineWowTab(pipelineWowRows);
@@ -174,6 +177,7 @@ export async function GET() {
     return NextResponse.json({
       updatedAt: new Date().toISOString(),
       arr,
+      arrMom,
       aeAttainment,
       pipeline,
       pipelineWow,

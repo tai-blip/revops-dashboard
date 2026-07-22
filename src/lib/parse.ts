@@ -86,6 +86,35 @@ export function parseArrTab(rows: Row[]) {
   return { monthly, weekly };
 }
 
+// "ARR MoM Progression" tab — the authoritative Total-ARR history that drives the
+// "Path to $10M" trend and the Command Live-ARR headline. Columns:
+// Month | Total ARR | MoM Change ($) | MoM Growth (%)
+export type ArrMomPoint = {
+  label: string; // "YYYY-MM"
+  totalARR: number;
+  momChange: number;
+  momGrowth: number; // percent units, e.g. 3.12 means 3.12%
+};
+
+export function parseArrMomProgressionTab(rows: Row[]): ArrMomPoint[] {
+  const headerIdx = rows.findIndex((r) => r[0] === "Month");
+  const out: ArrMomPoint[] = [];
+  if (headerIdx === -1) return out;
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (r[0] == null || r[0] === "") break;
+    const label = sheetsSerialToISODate(r[0]).slice(0, 7); // "2026-07"
+    if (!/^\d{4}-\d{2}$/.test(label)) continue;
+    out.push({
+      label,
+      totalARR: Number(r[1] ?? 0),
+      momChange: Number(r[2] ?? 0),
+      momGrowth: Number(r[3] ?? 0),
+    });
+  }
+  return out;
+}
+
 export function parseAeAttainmentTab(rows: Row[]) {
   const headerIdx = rows.findIndex((r) => r[0] === "AE");
   if (headerIdx === -1) return { reps: [], monthlyTeamActual: [] };
