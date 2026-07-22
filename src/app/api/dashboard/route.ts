@@ -97,9 +97,20 @@ export async function GET() {
     // names onto roster full names. This is the single source of truth for the
     // in-quarter table (incl. Closed Won) — no recompute.
     const qoqByShort = parseForecastingQoQ(forecastingRows, q);
+    const normKey = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+    const qoqNorm: typeof qoqByShort = {};
+    for (const [k, v] of Object.entries(qoqByShort)) qoqNorm[normKey(k)] = v;
     const forecastSheetRows: typeof qoqByShort = {};
     for (const a of AE_ROSTER) {
-      const s = qoqByShort[a.short] ?? qoqByShort[a.name];
+      // Match the sheet's QoQ row by short name, full name, or first name —
+      // exact first, then whitespace/case-normalized (so "Davi" / "David
+      // Dubinski" / "David" all resolve to the same QoQ row).
+      const cands = [a.short, a.name, a.name.split(" ")[0]];
+      let s: (typeof qoqByShort)[string] | undefined;
+      for (const c of cands) {
+        const hit = qoqByShort[c] ?? qoqNorm[normKey(c)];
+        if (hit) { s = hit; break; }
+      }
       if (s) forecastSheetRows[a.name] = s;
     }
     // Year-end projection uses the sheet's "Weighted Pipeline by Deal Stage"

@@ -1500,6 +1500,24 @@ export default function Dashboard() {
         const money = (n: number | null) => (n == null ? "\u2014" : fmt(n));
         const short = (name: string) => name.split(" ")[0];
 
+        // Totals incl. AM + Davi (grand total) drive the forecast headline numbers.
+        const T = F.totalInclLead ?? F.totalInclAM;
+        const totalPot = T.potential;
+        const totalQuota = T.quota;
+        const totalCW = T.closedWon;
+        // End-of-Q2 live ARR = Active/Live ARR of the calendar month before the quarter starts.
+        const qStartYM = Q.start.slice(0, 7);
+        const [qsY, qsM] = qStartYM.split("-").map(Number);
+        const q2EndYM = `${qsM === 1 ? qsY - 1 : qsY}-${String(qsM === 1 ? 12 : qsM - 1).padStart(2, "0")}`;
+        const endOfQ2ARR = data.arr.monthly.find((m) => m.label === q2EndYM)?.activeARR ?? F.currentLiveARR;
+        // Projected year-end / Expected Q3 end = end-of-Q2 live ARR + Q3 potential ARR.
+        const projYE2 = endOfQ2ARR + totalPot;
+        const yeGap2 = F.annualTarget - projYE2;
+        // Remainder of quarter, measured against the TOTAL quota (incl AM + Davi).
+        const remGap = Math.max(0, totalQuota - totalCW);
+        const remPerWeek = F.weeksLeft > 0 ? remGap / F.weeksLeft : 0;
+        const potVsQuota = totalQuota > 0 ? totalPot / totalQuota : 0;
+
         // Decide board derived numbers
         const decideView = F.decideDeals.filter((d) => decideAE === "all" || d.owner === decideAE);
         const decideOwners = ["all", ...Array.from(new Set(F.decideDeals.map((d) => d.owner)))];
@@ -1539,22 +1557,19 @@ export default function Dashboard() {
 
         return (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          {tabSummaries && (
-            <TabHeader label="Forecast" sentence={tabSummaries.forecast.sentence} stats={tabSummaries.forecast.stats} />
-          )}
 
           {/* header tiles */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
             <Card title={`${Q.key} Projected Close`}>
               <div style={{ padding: "14px 18px" }}>
-                <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.teamProjected >= F.teamQuota ? C.grn : C.ylw }}>{fmt(F.teamProjected)}</div>
-                <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>vs {fmt(F.teamQuota)} quota · {pct(F.teamQuota ? F.teamProjected / F.teamQuota : 0)}</div>
+                <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: totalPot >= totalQuota ? C.grn : C.ylw }}>{fmt(totalPot)}</div>
+                <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>Potential ARR vs {fmt(totalQuota)} quota · {pct(potVsQuota)}</div>
               </div>
             </Card>
-            <Card title="Projected Year-End ARR">
+            <Card title="Expected Q3 End · Projected Year-End ARR">
               <div style={{ padding: "14px 18px" }}>
-                <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.projYE >= F.annualTarget ? C.grn : C.coralDk }}>{fmt(F.projYE)}</div>
-                <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>vs {fmt(F.annualTarget)} · gap {fmt(F.annualGap)}</div>
+                <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projYE2 >= F.annualTarget ? C.grn : C.coralDk }}>{fmt(projYE2)}</div>
+                <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>End-of-Q2 {fmt(endOfQ2ARR)} + {fmt(totalPot)} potential · vs {fmt(F.annualTarget)} target</div>
               </div>
             </Card>
           </div>
@@ -1614,23 +1629,23 @@ export default function Dashboard() {
             <div style={{ padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
               <div>
                 <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Still to close (to quota)</div>
-                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.quotaGap > 0 ? C.coralDk : C.grn }}>{F.quotaGap > 0 ? fmt(F.quotaGap) : "met"}</div>
-                <div style={{ fontSize: 12, color: C.t2 }}>{fmt(F.teamActual)} of {fmt(F.teamQuota)} quota closed</div>
+                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: remGap > 0 ? C.coralDk : C.grn }}>{remGap > 0 ? fmt(remGap) : "met"}</div>
+                <div style={{ fontSize: 12, color: C.t2 }}>{fmt(totalCW)} of {fmt(totalQuota)} quota closed</div>
               </div>
               <div>
                 <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>ARR needed / week left</div>
-                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.navy }}>{F.quotaGap > 0 ? fmt(F.quotaPerWeek) : "\u2014"}</div>
+                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.navy }}>{remGap > 0 ? fmt(remPerWeek) : "\u2014"}</div>
                 <div style={{ fontSize: 12, color: C.t2 }}>across {F.weeksLeft} week{F.weeksLeft === 1 ? "" : "s"} remaining</div>
               </div>
               <div>
                 <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Quarter landing (Potential ARR)</div>
-                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.potentialLanding >= F.teamQuota ? C.grn : C.coralDk }}>{fmt(F.potentialLanding)}</div>
-                <div style={{ fontSize: 12, color: C.t2 }}>{pct(F.teamQuota ? F.potentialLanding / F.teamQuota : 0)} of quota · NB CW + NB open</div>
+                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: totalPot >= totalQuota ? C.grn : C.coralDk }}>{fmt(totalPot)}</div>
+                <div style={{ fontSize: 12, color: C.t2 }}>{pct(potVsQuota)} of quota · CW + open potential</div>
               </div>
               <div>
                 <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase" }}>Surplus / shortfall vs quota</div>
-                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.potentialLanding >= F.teamQuota ? C.grn : C.red }}>{F.potentialLanding >= F.teamQuota ? "+" + fmt(F.potentialLanding - F.teamQuota) : fmt(F.potentialLanding - F.teamQuota)}</div>
-                <div style={{ fontSize: 12, color: C.t2 }}>if open expected lands as forecast</div>
+                <div style={{ fontSize: 23, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: totalPot >= totalQuota ? C.grn : C.red }}>{totalPot >= totalQuota ? "+" + fmt(totalPot - totalQuota) : fmt(totalPot - totalQuota)}</div>
+                <div style={{ fontSize: 12, color: C.t2 }}>if open potential lands as forecast</div>
               </div>
             </div>
           </Card>
@@ -1780,19 +1795,19 @@ export default function Dashboard() {
               return s + "$" + Math.round(a);
             };
             const PLOT = 300;
-            const maxV = Math.max(F.annualTarget, F.projYE) * 1.05;
+            const maxV = Math.max(F.annualTarget, projYE2) * 1.05;
             const yPx = (v: number) => (v / maxV) * PLOT;
             type Step = { label: string; type: "base" | "inc" | "gap" | "target"; value: number; of?: string; from?: number };
             const steps: Step[] = [
-              { label: "Current live ARR", type: "base", value: F.currentLiveARR },
-              ...F.yeWaterfall.map((w) => ({ label: w.stage, type: "inc" as const, value: w.weighted, of: `of ${fk(w.raw)}` })),
-              { label: "Gap to target", type: "gap", value: Math.max(0, F.annualGap), from: F.projYE },
+              { label: "End of Q2 live ARR", type: "base", value: endOfQ2ARR },
+              { label: "Q3 Potential ARR", type: "inc", value: totalPot, of: `${pct(potVsQuota)} of quota` },
+              { label: "Gap to target", type: "gap", value: Math.max(0, yeGap2), from: projYE2 },
               { label: "FY26 target", type: "target", value: F.annualTarget },
             ];
             const n = steps.length;
             let running = 0;
             return (
-              <Card title="Year-end projection vs annual target" sub="Current ARR plus all open pipeline weighted at the derived per-stage close rates, versus the FY26 ending-ARR target." accent={C.navy}>
+              <Card title="Year-end projection vs annual target" sub="End-of-Q2 live ARR plus Q3 Potential ARR (from the Quarter Forecast), versus the FY26 ending-ARR target." accent={C.navy}>
                 <div style={{ padding: "16px 20px" }}>
                   <div style={{ position: "relative", height: PLOT, borderBottom: `1px solid ${C.bd}` }}>
                     {steps.map((s, i) => {
@@ -1821,18 +1836,18 @@ export default function Dashboard() {
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginTop: 18 }}>
-                    <div><div style={{ fontSize: 11, color: C.t3 }}>Current Live ARR</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(F.currentLiveARR)}</div></div>
-                    <div><div style={{ fontSize: 11, color: C.t3 }}>Weighted Open Pipe</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.blue }}>{fk(F.weightedAnnual)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>from {fk(F.rawAnnual)} raw</div></div>
-                    <div><div style={{ fontSize: 11, color: C.t3 }}>Projected Year-End</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk }}>{fk(F.projYE)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>End of Q2 Live ARR</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(endOfQ2ARR)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Q3 Potential ARR</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.blue }}>{fk(totalPot)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>from Quarter Forecast</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Projected Year-End</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk }}>{fk(projYE2)}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Annual Target</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(F.annualTarget)}</div></div>
-                    <div><div style={{ fontSize: 11, color: C.t3 }}>Gap</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: F.annualGap > 0 ? C.red : C.grn }}>{fk(F.annualGap)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Gap</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: yeGap2 > 0 ? C.red : C.grn }}>{fk(yeGap2)}</div></div>
                   </div>
 
                   <div style={{ background: "#FAEEDA", borderRadius: 12, padding: "14px 16px", marginTop: 16, fontSize: 13.5, color: "#6b5320", lineHeight: 1.55 }}>
-                    {F.annualGap > 0 ? (
-                      <>To cover the <b>{fk(F.annualGap)}</b> shortfall at the assumed <b>25%</b> close rate, the team needs to create roughly <b style={{ color: C.coralDk }}>{fk(F.pipelineNeededForGap)}</b> of net-new pipeline beyond what's already open.</>
+                    {yeGap2 > 0 ? (
+                      <>Projected year-end of <b>{fk(projYE2)}</b> (end-of-Q2 {fk(endOfQ2ARR)} + {fk(totalPot)} Q3 potential) is <b style={{ color: C.coralDk }}>{fk(yeGap2)}</b> short of the <b>{fk(F.annualTarget)}</b> target.</>
                     ) : (
-                      <>Projected year-end of <b>{fk(F.projYE)}</b> is on track to meet or exceed the <b>{fk(F.annualTarget)}</b> target.</>
+                      <>Projected year-end of <b>{fk(projYE2)}</b> is on track to meet or exceed the <b>{fk(F.annualTarget)}</b> target.</>
                     )}
                   </div>
                 </div>
