@@ -32,6 +32,7 @@ type DashboardData = {
     monthly: ArrPoint[];
     weekly: ArrPoint[];
   };
+  arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
     monthlyTeamActual: { label: string; actual: number }[];
@@ -128,8 +129,17 @@ const TABS = [
   ["attainment", "AE Attainment"],
   ["acv", "ACV & Deal Size"],
   ["productarr", "Product ARR"],
-  ["actions", "Who Does What"],
 ] as const;
+
+// Is a Pipeline-WoW MoM month label (e.g. "Jul-26") inside Q3 FY26 (Jul–Sep 2026)?
+const MONTH_ABBR = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+function isQ3Fy26(label: string): boolean {
+  const m = /^([A-Za-z]{3})-(\d{2})$/.exec(label.trim());
+  if (!m) return false;
+  const mi = MONTH_ABBR.indexOf(m[1].toLowerCase());
+  const yr = 2000 + parseInt(m[2], 10);
+  return yr === 2026 && (mi === 6 || mi === 7 || mi === 8);
+}
 
 function ChartPeriodToggle({
   period,
@@ -209,6 +219,17 @@ export default function Dashboard() {
       monthlyCumulative.push({ label: m.label, actual: running });
     }
 
+    // 2026-only cumulative (restarts at Jan-26 = YTD attainment). H1 (Jan–Jun) is
+    // shaded as the prior plan — superseded by the H2 plan — vs H2 (Jul–Dec).
+    const cumulative2026: { label: string; actual: number; isH1: boolean }[] = [];
+    let run26 = 0;
+    for (const m of data.aeAttainment.monthlyTeamActual) {
+      if (!/-26$/.test(m.label)) continue;
+      run26 += m.actual;
+      const mi = MONTH_ABBR.indexOf(m.label.slice(0, 3).toLowerCase());
+      cumulative2026.push({ label: m.label, actual: run26, isH1: mi >= 0 && mi <= 5 });
+    }
+
     // Cumulative churned ARR (last 12 months window)
     const churnWindow = data.arr.monthly.slice(-12);
     const churnCumulative: number[] = [];
@@ -226,6 +247,7 @@ export default function Dashboard() {
       totalPipelineARR,
       coverageRatio,
       monthlyCumulative,
+      cumulative2026,
       churnWindow,
       churnCumulative,
     };
@@ -236,28 +258,59 @@ export default function Dashboard() {
     return Array.from(new Set(data.trendEvents.map((e) => e.owner))).sort();
   }, [data]);
 
-  // Pipeline created within Q3 FY26 (Jul 1 – Sep 30, 2026), per AE
+  // Monthly ARR-trend series from the "ARR MoM Progression" tab (Total ARR), joined to
+  // the ARR tab by month so the hover tooltip keeps New ARR / Churned. changePct uses
+  // the tab's MoM Growth % (÷100 → fraction, since pct() multiplies back up). Falls
+  // back to the ARR tab's monthly points when the new tab is absent (demo mode).
+  const arrMomPoints = useMemo<ArrPoint[]>(() => {
+    if (!data) return [];
+    if (!data.arrMom || !data.arrMom.length) return data.arr.monthly;
+    const byLabel = new Map(data.arr.monthly.map((m) => [m.label, m]));
+    return data.arrMom.map((p) => {
+      const m = byLabel.get(p.label);
+      return {
+        label: p.label,
+        activeARR: p.totalARR,
+        newARR: m?.newARR ?? 0,
+        newBusiness: m?.newBusiness ?? 0,
+        expansion: m?.expansion ?? 0,
+        renewals: m?.renewals ?? 0,
+        churnedARR: m?.churnedARR ?? 0,
+        changePct: p.momGrowth / 100,
+        alfie: m?.alfie ?? 0,
+        managedServices: m?.managedServices ?? 0,
+        coreExisting: m?.coreExisting ?? 0,
+        alfieTarget: m?.alfieTarget ?? 0,
+        msTarget: m?.msTarget ?? 0,
+      };
+    });
+  }, [data]);
+
+  // Pipeline created within Q3 FY26, per AE — sourced from the Pipeline-WoW tab's
+  // "New ARR Created ($)" rep-by-rep MoM table (Jul–Sep 2026 columns). This is the
+  // warehouse's own figure, so the headline total and the per-rep table reconcile
+  // exactly (both sum the same rows). The "All (Team)" row is skipped.
   const q3CreatedByOwner = useMemo(() => {
-    if (!data) return {} as Record<string, number>;
     const out: Record<string, number> = {};
-    for (const e of data.trendEvents) {
-      if (e.type !== "created") continue;
-      if (e.date >= "2026-07-01" && e.date <= "2026-09-30") {
-        out[e.owner] = (out[e.owner] ?? 0) + e.arr;
-      }
+    if (!data) return out;
+    const { months, reps } = data.pipelineWow.newArrMom;
+    const q3Idx = months.map((m, i) => (isQ3Fy26(m) ? i : -1)).filter((i) => i >= 0);
+    for (const [rep, vals] of Object.entries(reps)) {
+      if (/^all\b/i.test(rep)) continue;
+      out[rep] = q3Idx.reduce((s, i) => s + (vals[i] ?? 0), 0);
     }
     return out;
   }, [data]);
 
-  // Count of Q3-created opps per AE (parallels q3CreatedByOwner, which sums ARR)
+  // Count of Q3-created opps per AE — from the parallel "New Opps Entered (SQL)" table.
   const q3CreatedCountByOwner = useMemo(() => {
-    if (!data) return {} as Record<string, number>;
     const out: Record<string, number> = {};
-    for (const e of data.trendEvents) {
-      if (e.type !== "created") continue;
-      if (e.date >= "2026-07-01" && e.date <= "2026-09-30") {
-        out[e.owner] = (out[e.owner] ?? 0) + 1;
-      }
+    if (!data) return out;
+    const { months, reps } = data.pipelineWow.newOppsMom;
+    const q3Idx = months.map((m, i) => (isQ3Fy26(m) ? i : -1)).filter((i) => i >= 0);
+    for (const [rep, vals] of Object.entries(reps)) {
+      if (/^all\b/i.test(rep)) continue;
+      out[rep] = q3Idx.reduce((s, i) => s + (vals[i] ?? 0), 0);
     }
     return out;
   }, [data]);
@@ -301,13 +354,25 @@ export default function Dashboard() {
       months.find((m) => m.label === nowKey) ??
       notFuture[notFuture.length - 1] ??
       latest;
-    const arrNow = latest?.activeARR ?? 0;
+    // Live ARR = current-month Total ARR from the "ARR MoM Progression" tab (the
+    // authoritative series). Pick the row for this month, else the latest non-future
+    // row. Falls back to the ARR tab's Active ARR Snapshot if the tab is absent (demo).
+    const arrMomList = data.arrMom && data.arrMom.length ? data.arrMom : null;
+    const arrMomCur = arrMomList
+      ? arrMomList.find((p) => p.label === nowKey) ??
+        arrMomList.filter((p) => p.label <= nowKey).slice(-1)[0] ??
+        arrMomList[arrMomList.length - 1]
+      : null;
+    const arrNow = arrMomCur ? arrMomCur.totalARR : currentMonth?.activeARR ?? 0;
+    const curMoM = arrMomCur ? arrMomCur.momGrowth / 100 : currentMonth?.changePct ?? null;
     const gap = 10000000 - arrNow;
 
-    // Q3 pipe generation vs quota vs time elapsed
+    // Q3 pipe generation vs quota vs time elapsed. Team gen sums the same AE rows the
+    // per-rep table shows (real AEs — excluding AM & lead) so headline == table total.
     const aeRows = data.pipeline.aeBreakdown.filter((r) => r.name !== "TOTAL");
     const quota = aeRows.reduce((s, r) => s + (r.quota ?? 0), 0);
-    const gen = Object.values(q3CreatedByOwner).reduce((s, n) => s + n, 0);
+    const genRows = data.forecastTab.rows.filter((r) => !r.am && !r.lead);
+    const gen = genRows.reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
     const genPct = quota > 0 ? (gen / quota) * 100 : 0;
     const qStart = new Date("2026-07-02").getTime();
     const qEnd = new Date("2026-10-01").getTime();
@@ -348,14 +413,14 @@ export default function Dashboard() {
         : { label: "Low", tone: "bad" as const };
 
     const arrStatus =
-      (currentMonth?.changePct ?? 0) >= 0
+      (curMoM ?? 0) >= 0
         ? { label: "On track", tone: "good" as const }
         : { label: "Declining", tone: "bad" as const };
 
     return {
       arrNow,
       gap,
-      arrMoM: currentMonth?.changePct ?? null,
+      arrMoM: curMoM,
       gen,
       quota,
       genPct,
@@ -407,13 +472,6 @@ export default function Dashboard() {
     const totalHealthArr = data.dealHealth.reduce((s, b) => s + b.arr, 0);
     const stalePct = totalHealthArr > 0 ? (staleArr / totalHealthArr) * 100 : 0;
     const biggest = data.rankedDeals[0];
-
-    const owners = Object.entries(data.whoDoesWhat).sort((a, b) => b[1].openArr - a[1].openArr);
-    const topOwner = owners[0];
-    const totalStaleArr = owners.reduce((s, [, v]) => s + v.staleArr, 0);
-    const totalOpenArr = owners.reduce((s, [, v]) => s + v.openArr, 0);
-    const totalOpenCount = owners.reduce((s, [, v]) => s + v.openCount, 0);
-    const flaggedOwners = owners.filter(([, v]) => v.staleCount > 0).length;
 
     // Q3 ARR mix skew from last 3 months
     const q3Win = months.slice(-3);
@@ -491,15 +549,6 @@ export default function Dashboard() {
           { label: "Median cycle", value: data.winRateYtd.medianCycle != null ? `${data.winRateYtd.medianCycle}d` : "—", sub: "SQL → close" },
         ],
       },
-      actions: {
-        sentence: `${topOwner ? `${topOwner[0]} holds the most open pipeline (${fmt(topOwner[1].openArr)} across ${topOwner[1].openCount} deals). ` : ""}${fmt(totalStaleArr)} across all owners has been stale for 60+ days and needs action.`,
-        stats: [
-          { label: "Total open ARR", value: fmt(totalOpenArr) },
-          { label: "Open deals", value: String(totalOpenCount), sub: `across ${owners.length} owners` },
-          { label: "Stale 60d+ ARR", value: fmt(totalStaleArr), tone: "bad" as const },
-          { label: "Owners flagged", value: String(flaggedOwners), sub: "with stale deals" },
-        ],
-      },
     };
   }, [data, execSummary, wowMetrics]);
 
@@ -542,20 +591,28 @@ export default function Dashboard() {
     const arrPerWeek = weeksLeft > 0 ? arrGap / weeksLeft : 0;
 
     // Pipeline: Q3 created vs quota, weekly run-rate
-    const pipeGen = Object.values(q3CreatedByOwner).reduce((s, n) => s + n, 0);
+    const pipeGen = data.forecastTab.rows
+      .filter((r) => !r.am && !r.lead)
+      .reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
     const pipeQuota = data.pipeline.aeBreakdown
       .filter((r) => r.name !== "TOTAL")
       .reduce((s, r) => s + (r.quota ?? 0), 0);
     const pipeGap = Math.max(0, pipeQuota - pipeGen);
     const pipePerWeek = weeksLeft > 0 ? pipeGap / weeksLeft : 0;
 
-    // Last week's ARR added + pipeline added (from weekly ARR tab + WoW)
-    const lastWeek = data.arr.weekly[data.arr.weekly.length - 1];
+    // Last *completed* week — NOT the current in-progress week. The weekly ARR tab and
+    // the WoW table both carry a row/column for the running week, which understates
+    // "last week". Exclude it: ARR from the last weekly row before this week's Monday;
+    // pipeline from the 2nd-to-last WoW column (the last column is the current week).
+    const curMonday = getWeekStart(now.toISOString().slice(0, 10));
+    const completedWeeks = data.arr.weekly.filter((w) => w.label < curMonday);
+    const lastWeek = completedWeeks[completedWeeks.length - 1];
     const arrAddedLastWeek = lastWeek?.newARR ?? 0;
     const arrWeekLabel = lastWeek?.label ?? "";
     const pipeRow = data.pipelineWow.weeks.find((w) => w.metric.includes("New ARR pipeline Created"));
     const pipeClean = pipeRow?.values.filter((v): v is number => v != null) ?? [];
-    const pipeAddedLastWeek = pipeClean[pipeClean.length - 1] ?? 0;
+    const pipeAddedLastWeek =
+      pipeClean.length >= 2 ? pipeClean[pipeClean.length - 2] : pipeClean[pipeClean.length - 1] ?? 0;
 
     // Chart series: booked vs target, with H2 rebased flag
     const chart = PLAN_MONTHS.map((m, i) => ({
@@ -654,7 +711,7 @@ export default function Dashboard() {
     );
   }
 
-  const chartPoints = period === "monthly" ? data.arr.monthly : data.arr.weekly;
+  const chartPoints = period === "monthly" ? arrMomPoints : data.arr.weekly;
 
   return (
     <div style={{ fontFamily: "var(--font-dm-sans)", background: C.bg, minHeight: "100vh" }}>
@@ -885,15 +942,27 @@ export default function Dashboard() {
             })()}
 
             <Card
-              title="Team ARR Attainment — Cumulative"
-              sub="Running total of closed-won + live-paying ARR by month"
+              title="Team ARR Attainment — Cumulative (2026)"
+              sub="2026 YTD running total of closed-won + live-paying ARR · H1 (faded) is the prior plan, replaced by the H2 plan"
             >
               <div style={{ padding: "16px 20px" }}>
                 <BarTrendChart
-                  labels={derived.monthlyCumulative.map((m) => m.label)}
-                  values={derived.monthlyCumulative.map((m) => m.actual)}
+                  labels={derived.cumulative2026.map((m) => m.label)}
+                  values={derived.cumulative2026.map((m) => m.actual)}
+                  barColors={derived.cumulative2026.map((m) => (m.isH1 ? C.bd : C.navy))}
                   valueFormat="currency"
                 />
+                {/* H1 (prior plan) vs H2 (current plan) legend */}
+                <div style={{ display: "flex", gap: 18, marginTop: 10, fontSize: 11.5, color: C.t2 }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 11, height: 11, borderRadius: 2, background: C.bd, display: "inline-block" }} />
+                    H1 — prior plan (superseded)
+                  </span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 11, height: 11, borderRadius: 2, background: C.navy, display: "inline-block" }} />
+                    H2 — current plan
+                  </span>
+                </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
                   <KV label="Actual (Q3)" v={fmt(derived.teamActual)} />
                   <KV label="Quota (Q3)" v={fmt(derived.teamQuota)} />
@@ -2260,39 +2329,6 @@ export default function Dashboard() {
         );
       })()}
 
-      {tab === "actions" && (
-        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          {tabSummaries && (
-            <TabHeader label="Who Does What" sentence={tabSummaries.actions.sentence} stats={tabSummaries.actions.stats} />
-          )}
-          <Card title="Who Does What — Open Pipeline by Owner" sub="Stale = no stage change in 60+ days">
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                  <Th l>Owner</Th>
-                  <Th># Open Deals</Th>
-                  <Th>Open ARR</Th>
-                  <Th># Stale</Th>
-                  <Th>Stale ARR</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(data.whoDoesWhat)
-                  .sort((a, b) => b[1].openArr - a[1].openArr)
-                  .map(([owner, v]) => (
-                    <tr key={owner} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                      <Td l bold>{owner}</Td>
-                      <Td mono>{v.openCount}</Td>
-                      <Td mono>{fmt(v.openArr)}</Td>
-                      <Td mono color={v.staleCount > 0 ? C.red : C.t1}>{v.staleCount}</Td>
-                      <Td mono color={v.staleArr > 0 ? C.red : C.t1}>{fmt(v.staleArr)}</Td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }

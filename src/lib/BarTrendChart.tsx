@@ -10,6 +10,7 @@ export function BarTrendChart({
   targetLine,
   targetLabel,
   barColor,
+  barColors,
   lineOverlay,
   showValues,
   trendline,
@@ -21,6 +22,7 @@ export function BarTrendChart({
   targetLine?: number;
   targetLabel?: string;
   barColor?: string;
+  barColors?: (string | undefined)[];
   lineOverlay?: { label: string; values: number[]; color: string };
   showValues?: boolean;
   trendline?: boolean;
@@ -108,7 +110,7 @@ export function BarTrendChart({
                 y={y(v)}
                 width={barW}
                 height={Math.max(barH, 1)}
-                fill={hoverIdx === i ? C.coralDk : (barColor ?? C.navy)}
+                fill={hoverIdx === i ? C.coralDk : (barColors?.[i] ?? barColor ?? C.navy)}
                 rx={2}
               />
               <rect
