@@ -18,6 +18,7 @@ import {
   monthsInQuarter,
 } from "@/lib/planConfig";
 import type { ArrPoint } from "@/lib/parse";
+import { AE_PLAN } from "@/lib/aePlan";
 
 type MetricRow = { metric: string; value: number; kind: "currency" | "count" | "percent" | "ratio" };
 type BreakdownRow = { label: string; opps: number; arr: number; pctOfTotal: number };
@@ -112,6 +113,8 @@ type DashboardData = {
     string,
     { openCount: number; openArr: number; staleCount: number; staleArr: number }
   >;
+  cwSplitByOwner?: Record<string, { nb: number; exp: number }>;
+  coverageByOwner?: Record<string, number>;
 };
 
 const TABS = [
@@ -1413,32 +1416,83 @@ export default function Dashboard() {
           {tabSummaries && (
             <TabHeader label="AE Attainment" sentence={tabSummaries.attainment.sentence} stats={tabSummaries.attainment.stats} />
           )}
-          <Card title="AE Attainment — Q3 FY26">
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                  <Th l>AE</Th>
-                  <Th>Quota</Th>
-                  <Th>Actual</Th>
-                  <Th>% of Quota</Th>
-                  <Th l>Progress</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.aeAttainment.reps.map((rep) => (
-                  <tr key={rep.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                    <Td l bold>{rep.name}</Td>
-                    <Td mono>{fmt(rep.quota)}</Td>
-                    <Td mono>{fmt(rep.actual)}</Td>
-                    <Td mono color={rep.pctOfQuota >= 1 ? C.grn : C.t1}>{pct(rep.pctOfQuota)}</Td>
-                    <td style={{ padding: "10px 16px", width: 160 }}>
-                      <Bar value={rep.actual} target={rep.quota} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
+          {(() => {
+            const kM = (n: number) => {
+              const a = Math.abs(n);
+              if (a >= 1e6) return "$" + (a / 1e6).toFixed(2) + "M";
+              if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
+              return "$" + Math.round(a);
+            };
+            const label = (t: string) => (
+              <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em" }}>{t}</div>
+            );
+            return (
+              <div style={{ display: "grid", gap: 12, marginBottom: 16 }}>
+                {data.forecastTab.rows.map((rep) => {
+                  const cw = data.cwSplitByOwner?.[rep.name] ?? { nb: 0, exp: 0 };
+                  const cwTotal = cw.nb + cw.exp;
+                  const quota = rep.quota;
+                  const attain = quota && quota > 0 ? cwTotal / quota : null;
+                  const pipeGen = q3CreatedByOwner[rep.name] ?? 0;
+                  const pipeTarget = AE_PLAN[rep.name]?.pipeGenTargetQ3 ?? 0;
+                  const coverage = data.coverageByOwner?.[rep.name] ?? 0;
+                  const covMult = quota && quota > 0 ? coverage / quota : null;
+                  const isAE = !rep.am && !rep.lead;
+                  return (
+                    <div key={rep.name} style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: "18px 22px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 16, fontWeight: 700, color: C.t1 }}>{rep.name}</span>
+                          {rep.lead && (
+                            <span style={{ fontSize: 11, fontWeight: 600, color: C.t2, background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 6, padding: "2px 8px" }}>Enterprise · not in team attainment</span>
+                          )}
+                          {rep.am && (
+                            <span style={{ fontSize: 11, fontWeight: 600, color: C.t2, background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 6, padding: "2px 8px" }}>AM</span>
+                          )}
+                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: C.coralDk, background: C.coralSoft, borderRadius: 20, padding: "4px 12px" }}>
+                          {rep.lead ? "plan only" : `${attain != null ? pct(attain) : "\u2014"} to quota`}
+                        </span>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20 }}>
+                        <div>
+                          {label("Quota Q3")}
+                          <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{quota != null && quota > 0 ? kM(quota) : "\u2014"}</div>
+                        </div>
+                        <div>
+                          {label("Closed Won")}
+                          <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk, marginTop: 3 }}>{kM(cwTotal)}</div>
+                          <div style={{ fontSize: 11.5, color: C.t3, marginTop: 2 }}>NB {kM(cw.nb)} · Exp {kM(cw.exp)}</div>
+                        </div>
+                        <div>
+                          {label("Pipe Generated (TCV)")}
+                          <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.purp, marginTop: 3 }}>{kM(pipeGen)}</div>
+                          <div style={{ fontSize: 11.5, color: C.t3, marginTop: 2 }}>{pipeTarget > 0 ? `${Math.round((pipeGen / pipeTarget) * 100)}% of ${kM(pipeTarget)} target` : "no target"}</div>
+                        </div>
+                        <div>
+                          {label("Coverage (SAL+SQO+SQL)")}
+                          <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{kM(coverage)}</div>
+                          <div style={{ fontSize: 11.5, color: covMult != null && covMult >= 3 ? C.grn : C.t3, marginTop: 2 }}>{covMult != null ? `${covMult.toFixed(1)}\u00d7 quota` : ""}</div>
+                        </div>
+                      </div>
+                      {isAE && (
+                        <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+                          <div>
+                            {label("Attainment to Quota")}
+                            <div style={{ marginTop: 6 }}><Bar value={cwTotal} target={quota ?? 0} /></div>
+                          </div>
+                          <div>
+                            {label("Pipeline Created to Target")}
+                            <div style={{ marginTop: 6 }}><Bar value={pipeGen} target={pipeTarget} /></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           <Card
             title="Pipe Generation History — Monthly"
@@ -1474,6 +1528,8 @@ export default function Dashboard() {
                   labels={data.pipelineWow.newArrMom.months}
                   values={data.pipelineWow.newArrMom.reps[trendRep] ?? []}
                   valueFormat="currency"
+                  showValues
+                  trendline
                 />
               </div>
 
@@ -1484,6 +1540,8 @@ export default function Dashboard() {
                 labels={data.pipelineWow.newOppsMom.months}
                 values={data.pipelineWow.newOppsMom.reps[trendRep] ?? []}
                 valueFormat="number"
+                showValues
+                trendline
               />
             </div>
           </Card>

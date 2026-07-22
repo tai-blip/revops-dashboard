@@ -11,6 +11,9 @@ export function BarTrendChart({
   targetLabel,
   barColor,
   lineOverlay,
+  showValues,
+  trendline,
+  trendColor,
 }: {
   labels: string[];
   values: number[];
@@ -19,6 +22,9 @@ export function BarTrendChart({
   targetLabel?: string;
   barColor?: string;
   lineOverlay?: { label: string; values: number[]; color: string };
+  showValues?: boolean;
+  trendline?: boolean;
+  trendColor?: string;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
@@ -44,6 +50,29 @@ export function BarTrendChart({
 
   const hovered = hoverIdx != null ? { label: labels[hoverIdx], value: values[hoverIdx] } : null;
   const labelEvery = Math.ceil(labels.length / 12) || 1;
+
+  // Compact formatter for on-bar value labels (e.g. $50k, $1.4M) so they don't overlap.
+  const compact = (v: number) => {
+    if (valueFormat !== "currency") return String(Math.round(v));
+    const a = Math.abs(v);
+    if (a >= 1e6) return "$" + (a / 1e6).toFixed(1) + "M";
+    if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
+    return "$" + Math.round(a);
+  };
+
+  // Least-squares linear trendline over the bar values.
+  const trendVals = (() => {
+    if (!trendline || values.length < 2) return null;
+    const n = values.length;
+    const xm = (n - 1) / 2;
+    const ym = values.reduce((s, v) => s + v, 0) / n;
+    let num = 0, den = 0;
+    for (let i = 0; i < n; i++) { num += (i - xm) * (values[i] - ym); den += (i - xm) ** 2; }
+    const b = den ? num / den : 0;
+    const a = ym - b * xm;
+    return values.map((_, i) => Math.max(0, a + b * i));
+  })();
+  const tColor = trendColor ?? C.red;
 
   return (
     <div style={{ position: "relative" }}>
@@ -90,6 +119,18 @@ export function BarTrendChart({
                 fill="transparent"
                 onMouseEnter={() => setHoverIdx(i)}
               />
+              {showValues && (
+                <text
+                  x={padL + i * gap + gap / 2}
+                  y={y(v) - 4}
+                  textAnchor="middle"
+                  fontSize={8.5}
+                  fontWeight={700}
+                  fill={C.t1}
+                >
+                  {compact(v)}
+                </text>
+              )}
               {i % labelEvery === 0 && (
                 <text
                   x={padL + i * gap + gap / 2}
@@ -105,6 +146,20 @@ export function BarTrendChart({
             </g>
           );
         })}
+
+        {trendVals && (
+          <g>
+            <polyline
+              points={trendVals
+                .map((v, i) => `${(padL + i * gap + gap / 2).toFixed(1)},${y(v).toFixed(1)}`)
+                .join(" ")}
+              fill="none"
+              stroke={tColor}
+              strokeWidth={2}
+              strokeDasharray="6,3"
+            />
+          </g>
+        )}
 
         {lineOverlay && (
           <g>

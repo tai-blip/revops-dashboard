@@ -153,6 +153,24 @@ export async function GET() {
       }
     }
 
+    // ── AE attainment cards: per-owner Q3 closed-won split (NB/Exp) + coverage
+    // pipeline (open deals in SAL/SQO/SQL). Computed from raw Query 1/2 deals. ──
+    const cwSplitByOwner: Record<string, { nb: number; exp: number }> = {};
+    for (const d of closedDeals) {
+      if (!d.isWon || !d.closeDate) continue;
+      const iso = d.closeDate.toISOString().slice(0, 10);
+      if (iso < qDef.start || iso >= qDef.end) continue;
+      if (!cwSplitByOwner[d.owner]) cwSplitByOwner[d.owner] = { nb: 0, exp: 0 };
+      if (/Expansion/.test(d.recordType)) cwSplitByOwner[d.owner].exp += d.arr;
+      else if (/New Business/.test(d.recordType)) cwSplitByOwner[d.owner].nb += d.arr;
+    }
+    const COVERAGE_STAGES = new Set(["SAL", "SQO", "SQL"]);
+    const coverageByOwner: Record<string, number> = {};
+    for (const d of openDeals) {
+      if (!COVERAGE_STAGES.has(d.stage)) continue;
+      coverageByOwner[d.owner] = (coverageByOwner[d.owner] ?? 0) + d.arr;
+    }
+
     return NextResponse.json({
       updatedAt: new Date().toISOString(),
       arr,
@@ -169,6 +187,8 @@ export async function GET() {
       winRateYtd,
       acv,
       whoDoesWhat: byOwner,
+      cwSplitByOwner,
+      coverageByOwner,
     });
   } catch (err) {
     console.error("Dashboard data fetch failed:", err);
