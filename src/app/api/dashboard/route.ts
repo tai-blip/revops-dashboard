@@ -49,7 +49,7 @@ export async function GET() {
         getSheetValues("ARR & recurring revenue"),
         getSheetValues("AE attainment"),
         getSheetValues("Pipeline"),
-        getSheetValues("Pipeline - WoW"),
+        getSheetValues("Pipeline - WoW", "A1:BI400"),
         getSheetValues("Query 1", "A1:Z1000"),
         getSheetValues("Query 2", "A1:Z2000"),
         getSheetValues("Forecasting", "A1:T45"),
