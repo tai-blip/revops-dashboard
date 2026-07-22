@@ -125,19 +125,6 @@ const TABS = [
   ["actions", "Who Does What"],
 ] as const;
 
-function formatMetric(row: MetricRow): string {
-  switch (row.kind) {
-    case "ratio":
-      return row.value.toFixed(2) + "x";
-    case "percent":
-      return pct(row.value);
-    case "count":
-      return String(row.value);
-    default:
-      return fmt(row.value);
-  }
-}
-
 function ChartPeriodToggle({
   period,
   onChange,
@@ -251,6 +238,19 @@ export default function Dashboard() {
       if (e.type !== "created") continue;
       if (e.date >= "2026-07-01" && e.date <= "2026-09-30") {
         out[e.owner] = (out[e.owner] ?? 0) + e.arr;
+      }
+    }
+    return out;
+  }, [data]);
+
+  // Count of Q3-created opps per AE (parallels q3CreatedByOwner, which sums ARR)
+  const q3CreatedCountByOwner = useMemo(() => {
+    if (!data) return {} as Record<string, number>;
+    const out: Record<string, number> = {};
+    for (const e of data.trendEvents) {
+      if (e.type !== "created") continue;
+      if (e.date >= "2026-07-01" && e.date <= "2026-09-30") {
+        out[e.owner] = (out[e.owner] ?? 0) + 1;
       }
     }
     return out;
@@ -1312,51 +1312,90 @@ export default function Dashboard() {
           </Card>
 
           <Card
-            title="AE Pipeline Generation — Q3 FY26"
-            sub="Pipeline created within Q3 (Jul–Sep 2026) vs each AE's quarterly pipe-generation quota"
+            title="Pipeline generation by AE — Q3 FY26"
+            sub="New pipeline created this quarter — total contract value (Amount) of opps reaching SQL, vs each AE's quarterly pipe-generation target. Open pipeline shown for context."
+            accent={C.coral}
           >
             {(() => {
-              const rows = data.pipeline.aeBreakdown.filter((r) => r.name !== "TOTAL");
-              const totalQuota = rows.reduce((s, r) => s + (r.quota ?? 0), 0);
-              const totalCreated = rows.reduce(
-                (s, r) => s + (q3CreatedByOwner[r.name] ?? 0),
-                0
+              const kM = (n: number) => {
+                const a = Math.abs(n);
+                if (a >= 1e6) return "$" + (a / 1e6).toFixed(2) + "M";
+                if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
+                return "$" + Math.round(a);
+              };
+              const quotaByName: Record<string, number | null> = {};
+              for (const r of data.pipeline.aeBreakdown) quotaByName[r.name] = r.quota;
+              const genTargetOf = (name: string) => {
+                const q = quotaByName[name];
+                return q != null && q > 0 ? q : null;
+              };
+              const roster = [...data.forecastTab.rows].sort(
+                (a, b) => Number(a.am) - Number(b.am)
               );
+              const aeRows = roster.filter((r) => !r.am);
+              const teamTarget = aeRows.reduce((s, r) => s + (genTargetOf(r.name) ?? 0), 0);
+              const teamGen = aeRows.reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
+              const teamOpps = aeRows.reduce((s, r) => s + (q3CreatedCountByOwner[r.name] ?? 0), 0);
+              const teamOpen = aeRows.reduce((s, r) => s + (r.openPipe ?? 0), 0);
+              const progressCell = (gen: number, target: number | null) => {
+                if (target == null)
+                  return <span style={{ fontSize: 12, color: C.t3 }}>no target</span>;
+                const p = target > 0 ? Math.round((gen / target) * 100) : 0;
+                return (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <Bar value={gen} target={target} />
+                    </div>
+                    <span style={{ fontSize: 12, color: C.t3, minWidth: 30, textAlign: "right" }}>
+                      {p}%
+                    </span>
+                  </div>
+                );
+              };
               return (
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
-                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                    <tr style={{ background: C.s1, borderBottom: `1px solid ${C.bd}` }}>
                       <Th l>AE</Th>
-                      <Th>Q3 Pipe Quota</Th>
-                      <Th>Created in Q3</Th>
-                      <Th l>Progress</Th>
+                      <Th>Gen Target</Th>
+                      <Th>Generated QTD (TCV)</Th>
+                      <Th l>Progress to Gen Target</Th>
+                      <Th># Opps</Th>
+                      <Th>Open Pipeline</Th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => {
-                      const created = q3CreatedByOwner[row.name] ?? 0;
+                    {roster.map((row) => {
+                      const target = genTargetOf(row.name);
+                      const gen = q3CreatedByOwner[row.name] ?? 0;
+                      const opps = q3CreatedCountByOwner[row.name] ?? 0;
                       return (
                         <tr key={row.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                          <Td l bold>{row.name}</Td>
-                          <Td mono>{row.quota != null && row.quota > 0 ? fmt(row.quota) : "—"}</Td>
-                          <Td mono color={C.purp}>{fmt(created)}</Td>
-                          <td style={{ padding: "10px 16px", width: 160 }}>
-                            {row.quota != null && row.quota > 0 ? (
-                              <Bar value={created} target={row.quota} />
-                            ) : (
-                              <span style={{ fontSize: 12, color: C.t3 }}>no quota</span>
+                          <Td l bold>
+                            {row.name}
+                            {row.am && (
+                              <span style={{ fontSize: 11, color: C.t3, fontWeight: 400 }}> · AM</span>
                             )}
+                          </Td>
+                          <Td mono color={C.navy2}>{target != null ? kM(target) : "—"}</Td>
+                          <Td mono bold color={C.purp}>{kM(gen)}</Td>
+                          <td style={{ padding: "10px 16px", width: 220 }}>
+                            {progressCell(gen, target)}
                           </td>
+                          <Td mono color={C.navy2}>{opps}</Td>
+                          <Td mono>{kM(row.openPipe ?? 0)}</Td>
                         </tr>
                       );
                     })}
-                    <tr style={{ borderTop: `2px solid ${C.navy}` }}>
-                      <Td l bold>TOTAL</Td>
-                      <Td mono bold>{fmt(totalQuota)}</Td>
-                      <Td mono bold color={C.purp}>{fmt(totalCreated)}</Td>
-                      <td style={{ padding: "10px 16px", width: 160 }}>
-                        <Bar value={totalCreated} target={totalQuota} />
+                    <tr style={{ background: C.s1, borderTop: `2px solid ${C.navy}` }}>
+                      <Td l bold>Team (AEs)</Td>
+                      <Td mono bold color={C.navy2}>{kM(teamTarget)}</Td>
+                      <Td mono bold color={C.purp}>{kM(teamGen)}</Td>
+                      <td style={{ padding: "10px 16px", width: 220 }}>
+                        {progressCell(teamGen, teamTarget)}
                       </td>
+                      <Td mono bold color={C.navy2}>{teamOpps}</Td>
+                      <Td mono bold>{kM(teamOpen)}</Td>
                     </tr>
                   </tbody>
                 </table>
@@ -1364,84 +1403,6 @@ export default function Dashboard() {
             })()}
           </Card>
 
-          <div style={{ marginBottom: 12 }}>
-            <Pill tone="blue">Stage/coverage snapshot filtered by: {data.pipeline.filterRep}</Pill>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
-            {Object.entries(data.pipeline.metricSections).map(([section, rows]) => (
-              <Card key={section} title={section}>
-                <div style={{ padding: 16 }}>
-                  {rows.map((row) => (
-                    <div
-                      key={row.metric}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        padding: "6px 0",
-                        borderBottom: `1px solid ${C.s1}`,
-                        fontSize: 13,
-                      }}
-                    >
-                      <span style={{ color: C.t2 }}>{row.metric}</span>
-                      <span style={{ fontFamily: "var(--font-dm-mono)", color: C.t1 }}>
-                        {formatMetric(row)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            ))}
-          </div>
-
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, margin: "18px 0", alignItems: "start" }}>
-            {Object.entries(data.pipeline.breakdownSections).map(([section, rows]) => (
-              <Card key={section} title={section}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                      <Th l>{section.includes("STAGE") ? "Stage" : section.includes("SOURCE") ? "Source" : "Age"}</Th>
-                      <Th># Opps</Th>
-                      <Th>ARR</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row) => (
-                      <tr key={row.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                        <Td l bold={row.label === "TOTAL"}>{row.label}</Td>
-                        <Td mono>{row.opps}</Td>
-                        <Td mono>{fmt(row.arr)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Card>
-            ))}
-
-            <Card title="9. WEIGHTED PIPELINE" sub="Stage probability weights from your Pipeline tab">
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>Stage</Th>
-                    <Th>ARR</Th>
-                    <Th>Prob.</Th>
-                    <Th>Weighted</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.pipeline.stageWeights.map((row) => (
-                    <tr key={row.stage} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                      <Td l bold>{row.stage}</Td>
-                      <Td mono>{fmt(row.arr)}</Td>
-                      <Td mono>{pct(row.probability)}</Td>
-                      <Td mono color={C.purp}>{fmt(row.weighted)}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
-          </div>
         </div>
       )}
 

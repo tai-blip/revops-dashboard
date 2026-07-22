@@ -165,7 +165,7 @@ export function ArrChart({
         >
           <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>{hovered.label}</div>
           <div style={{ marginBottom: 2 }}>
-            Active ARR: <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 600 }}>{fmt(hovered.activeARR)}</span>
+            Live ARR: <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 600 }}>{fmt(hovered.activeARR)}</span>
           </div>
           <div style={{ marginBottom: 2 }}>
             New ARR: <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 600 }}>{fmt(hovered.newARR)}</span>
