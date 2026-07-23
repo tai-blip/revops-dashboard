@@ -6,3 +6,6 @@ node_modules
 
 # Local data snapshots (sheet rollback backups)
 data-snapshots/
+
+# Local double-click launcher (machine-specific)
+*.command

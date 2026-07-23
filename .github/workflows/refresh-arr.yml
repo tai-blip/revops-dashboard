@@ -1,6 +1,6 @@
-name: Daily ARR refresh (SFDC → Sheet)
+name: Daily RevOps data refresh (SFDC → Sheet)
 
-# Runs the Salesforce → Google Sheet pull daily and on-demand.
+# Runs all Salesforce → Google Sheet pulls daily and on-demand.
 on:
   schedule:
     - cron: "0 12 * * *"   # every day at 12:00 UTC (8pm Singapore). Adjust as needed.
@@ -9,20 +9,29 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY_B64: ${{ secrets.GOOGLE_PRIVATE_KEY_B64 }}
+      SF_LOGIN_URL: ${{ secrets.SF_LOGIN_URL }}
+      SF_API_VERSION: ${{ secrets.SF_API_VERSION }}
+      SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
+      SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - run: npm ci
-      - name: Refresh ARR from Salesforce
+      - name: ARR MoM (SFDC → Sheet)
         run: node scripts/refresh-arr-from-sfdc.mjs
-        env:
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
-          GOOGLE_PRIVATE_KEY_B64: ${{ secrets.GOOGLE_PRIVATE_KEY_B64 }}
-          SF_LOGIN_URL: ${{ secrets.SF_LOGIN_URL }}
-          SF_API_VERSION: ${{ secrets.SF_API_VERSION }}
-          SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
-          SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
+      - name: Lead-conversion compliance
+        if: always()
+        run: node scripts/refresh-lead-conversion.mjs
+      - name: Probability freshness
+        if: always()
+        run: node scripts/refresh-probability-freshness.mjs
+      - name: Opps without a contact
+        if: always()
+        run: node scripts/refresh-opps-without-contact.mjs
