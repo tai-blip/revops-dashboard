@@ -1,0 +1,28 @@
+name: Daily ARR refresh (SFDC → Sheet)
+
+# Runs the Salesforce → Google Sheet pull daily and on-demand.
+on:
+  schedule:
+    - cron: "0 12 * * *"   # every day at 12:00 UTC (8pm Singapore). Adjust as needed.
+  workflow_dispatch: {}      # lets you run it manually from the Actions tab
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Refresh ARR from Salesforce
+        run: node scripts/refresh-arr-from-sfdc.mjs
+        env:
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_PRIVATE_KEY_B64: ${{ secrets.GOOGLE_PRIVATE_KEY_B64 }}
+          SF_LOGIN_URL: ${{ secrets.SF_LOGIN_URL }}
+          SF_API_VERSION: ${{ secrets.SF_API_VERSION }}
+          SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
+          SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
