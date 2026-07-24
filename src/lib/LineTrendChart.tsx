@@ -9,10 +9,12 @@ export function LineTrendChart({
   labels,
   series,
   valueFormat = "number",
+  showValues,
 }: {
   labels: string[];
   series: Series[];
   valueFormat?: "number" | "currency" | "percent";
+  showValues?: boolean;
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
@@ -79,6 +81,32 @@ export function LineTrendChart({
             ) : null
           )
         )}
+
+        {/* on-point value labels (compact $k/$M), for single/dual-series charts */}
+        {showValues &&
+          series.map((s) =>
+            s.values.map((v, i) =>
+              v != null ? (
+                <text
+                  key={"lbl" + s.label + i}
+                  x={x(i)}
+                  y={y(v) - 9}
+                  textAnchor="middle"
+                  fontSize={9}
+                  fontWeight={700}
+                  fill={C.t1}
+                >
+                  {valueFormat === "currency"
+                    ? Math.abs(v) >= 1e6
+                      ? "$" + (v / 1e6).toFixed(2) + "M"
+                      : Math.abs(v) >= 1e3
+                      ? "$" + Math.round(v / 1e3) + "k"
+                      : "$" + Math.round(v)
+                    : fmtVal(v)}
+                </text>
+              ) : null
+            )
+          )}
 
         {labels.map((l, i) => (
           <rect

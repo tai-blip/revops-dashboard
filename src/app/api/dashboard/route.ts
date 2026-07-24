@@ -3,6 +3,9 @@ import { getSheetValues } from "@/lib/sheets";
 import {
   parseArrTab,
   parseArrMomProgressionTab,
+  parseArrMomRebuildTab,
+  parseAcvMomTab,
+  parsePerLocation,
   parseAeAttainmentTab,
   parsePipelineTab,
   parsePipelineWowTab,
@@ -46,7 +49,7 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows] =
+    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, segmentsRows] =
       await Promise.all([
         getSheetValues("ARR & recurring revenue"),
         getSheetValues("ARR MoM Progression", "A1:D400"),
@@ -59,10 +62,18 @@ export async function GET() {
         // Daily SFDC pull (all closed deals + dimensions) — powers ACV & Deal Size.
         // Tolerate absence so the dashboard still loads if the pull hasn't run.
         getSheetValues("SOQL_ClosedDeals", "A1:T4000").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_MoM_Rebuild", "A1:M400").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ACV_MoM", "A1:S20").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_MoM_Segments", "A1:AB40").catch(() => [] as (string | number | null)[][]),
       ]);
 
     const arr = parseArrTab(arrRows);
-    const arrMom = parseArrMomProgressionTab(arrMomRows);
+    // Command ARR chart source: the automated SFDC rebuild (Rule A). Fall back to
+    // the manual "ARR MoM Progression" tab if the rebuild hasn't been written yet.
+    const arrMomRebuild = parseArrMomRebuildTab(arrMomRebuildRows);
+    const arrMom = arrMomRebuild.length ? arrMomRebuild : parseArrMomProgressionTab(arrMomRows);
+    const acvMoM = parseAcvMomTab(acvMomRows);
+    const perLocation = parsePerLocation(segmentsRows);
     const aeAttainment = parseAeAttainmentTab(aeRows);
     const pipeline = parsePipelineTab(pipelineRows);
     const pipelineWow = parsePipelineWowTab(pipelineWowRows);
@@ -196,6 +207,8 @@ export async function GET() {
       winRateYtd,
       acv,
       acvInsights,
+      acvMoM,
+      perLocation,
       whoDoesWhat: byOwner,
       cwSplitByOwner,
       coverageByOwner,

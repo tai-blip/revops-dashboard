@@ -122,6 +122,17 @@ type DashboardData = {
     byAE: { owner: string; count: number; avg: number; median: number; totalARR: number }[];
     arrByTier: { months: string[]; tiers: { tier: string; values: number[] }[] };
   } | null;
+  acvMoM?: {
+    months: string[];
+    all: (number | null)[];
+    groups: { key: "segment" | "region" | "ae"; series: { name: string; values: (number | null)[] }[] }[];
+  } | null;
+  perLocation?: {
+    months: string[];
+    perLoc: (number | null)[];
+    locations: (number | null)[];
+    arr: (number | null)[];
+  } | null;
   whoDoesWhat: Record<
     string,
     { openCount: number; openArr: number; staleCount: number; staleArr: number }
@@ -149,6 +160,87 @@ function isQ3Fy26(label: string): boolean {
   const mi = MONTH_ABBR.indexOf(m[1].toLowerCase());
   const yr = 2000 + parseInt(m[2], 10);
   return yr === 2026 && (mi === 6 || mi === 7 || mi === 8);
+}
+
+// MoM progression card (styled after the Pipeline WoW card): pill per series,
+// line chart of the selected series with on-point value labels, and the full
+// numbers table underneath so every point is checkable against the ACV_MoM tab.
+function MomProgressCard({
+  title,
+  sub,
+  months,
+  series,
+  accent,
+}: {
+  title: string;
+  sub: string;
+  months: string[];
+  series: { name: string; values: (number | null)[] }[];
+  accent: string;
+}) {
+  const [sel, setSel] = useState(0);
+  const shortMonths = months.map((m) => m.split(" ")[0]);
+  const kFmt = (v: number | null) =>
+    v == null ? "—" : Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : Math.abs(v) >= 1e3 ? "$" + (v / 1e3).toFixed(1) + "k" : "$" + Math.round(v);
+  const active = series[Math.min(sel, series.length - 1)];
+  if (!series.length) return null;
+  return (
+    <Card title={title} sub={sub}>
+      <div style={{ padding: "12px 20px 16px" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+          {series.map((s, i) => (
+            <button
+              key={s.name}
+              onClick={() => setSel(i)}
+              style={{
+                padding: "5px 12px", fontSize: 12, fontWeight: 600, borderRadius: 6,
+                border: `1px solid ${C.bd}`, cursor: "pointer",
+                background: i === sel ? C.navy : "#fff", color: i === sel ? "#fff" : C.t2,
+              }}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+        <LineTrendChart
+          labels={shortMonths}
+          series={[{ label: active.name, values: active.values, color: accent }]}
+          valueFormat="currency"
+          showValues
+        />
+        <div style={{ overflowX: "auto", marginTop: 10 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                <th style={{ textAlign: "left", padding: "6px 8px", color: C.t3, fontWeight: 700 }}> </th>
+                {shortMonths.map((m, i) => (
+                  <th key={i} style={{ textAlign: "right", padding: "6px 8px", color: C.t3, fontWeight: 700 }}>{m}</th>
+                ))}
+                <th style={{ textAlign: "right", padding: "6px 8px", color: C.t3, fontWeight: 700 }}>MoM</th>
+              </tr>
+            </thead>
+            <tbody>
+              {series.map((s, i) => (
+                <tr
+                  key={s.name}
+                  onClick={() => setSel(i)}
+                  style={{ borderBottom: `1px solid ${C.s1}`, cursor: "pointer", background: i === sel ? C.s1 : "transparent" }}
+                >
+                  <td style={{ padding: "6px 8px", fontWeight: 700, whiteSpace: "nowrap" }}>{s.name}</td>
+                  {s.values.map((v, j) => (
+                    <td key={j} style={{ padding: "6px 8px", textAlign: "right", fontFamily: "var(--font-dm-mono)" }}>{kFmt(v)}</td>
+                  ))}
+                  <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                    <DeltaPill delta={wowDeltaPct(s.values)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Card>
+  );
 }
 
 function ChartPeriodToggle({
@@ -2201,6 +2293,72 @@ export default function Dashboard() {
                     </tbody>
                   </table>
                 </Card>
+
+                {/* ── ACV progression MoM (sheet-computed in the ACV_MoM tab) ── */}
+                {data.acvMoM && (
+                  <>
+                    <MomProgressCard
+                      title="ACV Progression — by Deal Segment"
+                      sub="Avg ACV of deals won each month, last 12 months · computed in the ACV_MoM sheet tab · click a pill or row to chart it"
+                      months={data.acvMoM.months}
+                      series={[{ name: "All", values: data.acvMoM.all }, ...(data.acvMoM.groups.find((g) => g.key === "segment")?.series ?? [])]}
+                      accent={C.navy}
+                    />
+                    <MomProgressCard
+                      title="ACV Progression — by Region"
+                      sub="Avg ACV of deals won each month, last 12 months · computed in the ACV_MoM sheet tab"
+                      months={data.acvMoM.months}
+                      series={data.acvMoM.groups.find((g) => g.key === "region")?.series ?? []}
+                      accent={C.teal}
+                    />
+                    <MomProgressCard
+                      title="ACV Progression — by AE"
+                      sub="Avg ACV of deals won each month, last 12 months · computed in the ACV_MoM sheet tab"
+                      months={data.acvMoM.months}
+                      series={data.acvMoM.groups.find((g) => g.key === "ae")?.series ?? []}
+                      accent={C.purp}
+                    />
+                  </>
+                )}
+
+                {/* ── $ per Location (ARR / active locations in contract) ── */}
+                {data.perLocation && (() => {
+                  const P = data.perLocation;
+                  const cur = P.perLoc[P.perLoc.length - 1];
+                  const prev = P.perLoc[P.perLoc.length - 2];
+                  const mom = cur != null && prev != null && prev !== 0 ? ((cur - prev) / prev) * 100 : null;
+                  const curLocs = P.locations[P.locations.length - 1];
+                  return (
+                    <Card
+                      title="ARR per Location — MoM"
+                      sub="Active ARR ÷ active locations-in-contract at each month-end (opp-level Locations field) · computed in the ARR_MoM_Segments sheet tab"
+                      accent={C.teal}
+                    >
+                      <div style={{ padding: "16px 20px" }}>
+                        <div style={{ display: "flex", gap: 14, alignItems: "stretch", marginBottom: 14 }}>
+                          <div style={{ background: "linear-gradient(135deg,#DBF1EE,#FBF7F1)", border: `1px solid ${C.bd}`, borderRadius: 12, padding: "14px 22px" }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: C.t3 }}>
+                              {P.months[P.months.length - 1]} · $ / location
+                            </div>
+                            <div style={{ fontSize: 34, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.teal, lineHeight: 1.1, marginTop: 4 }}>
+                              {cur != null ? "$" + cur.toFixed(0) : "—"}
+                            </div>
+                            <div style={{ fontSize: 12.5, marginTop: 6, fontWeight: 700, color: (mom ?? 0) >= 0 ? C.grn : C.red }}>
+                              {mom != null ? `${mom >= 0 ? "+" : ""}${mom.toFixed(1)}% MoM` : "—"}
+                              <span style={{ color: C.t3, fontWeight: 400 }}>{curLocs != null ? ` · ${Math.round(curLocs).toLocaleString()} active locations` : ""}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <LineTrendChart
+                          labels={P.months.map((m) => m.split(" ")[0])}
+                          series={[{ label: "$ / location", values: P.perLoc, color: C.teal }]}
+                          valueFormat="currency"
+                          showValues
+                        />
+                      </div>
+                    </Card>
+                  );
+                })()}
 
                 {/* ── Win rate US vs International ── */}
                 <Card

@@ -4,7 +4,7 @@
 //
 // Definitions (aligned with the rest of the dashboard):
 // - Won  = StageName Billing or Closed Won ("Outcome" column, precomputed in the pull)
-// - Window for ACV / cycle / win-rate = last 18 months by CloseDate
+// - Window for ACV / cycle / win-rate = last 12 months by CloseDate
 // - Cycle = Date Reached SQL -> Date Reached Closed Won (days)
 // - US = Deal Country "United States"; everything else = International
 // - ARR by Location Tier = point-in-time active ARR (live <= boundary < end) per
@@ -62,7 +62,7 @@ export function computeAcvInsights(rows: Row[]): AcvInsights | null {
   };
 
   const now = Date.now();
-  const windowStart = now - 548 * 86400000; // ~18 months
+  const windowStart = now - 365 * 86400000; // 12 months
   type Deal = {
     owner: string; outcome: string; seg: string; tier: string; us: boolean; region: string;
     arr: number; closeMs: number | null; cycle: number | null; liveMs: number | null; endMs: number | null;
@@ -163,7 +163,7 @@ export function computeAcvInsights(rows: Row[]): AcvInsights | null {
   })).filter((t) => t.values.some((v) => v > 0));
 
   return {
-    windowLabel: "last 18 months",
+    windowLabel: "last 12 months",
     totals: (({ count, avg, median: med, totalARR }) => ({ count, avg, median: med, totalARR }))(agg(wonW)),
     segments, geo, regions, byAE,
     arrByTier: { months, tiers },

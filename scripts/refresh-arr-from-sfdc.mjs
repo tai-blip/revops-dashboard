@@ -95,10 +95,11 @@ async function main() {
     x.ChannelofContact__c ?? "",
   ];
 
-  // 4) SOQL_Pull matrix — A-J layout unchanged (formulas depend on it), dims in K-P
+  // 4) SOQL_Pull matrix — A-J layout unchanged (formulas depend on it), dims in K-P,
+  //    locations-in-contract in Q (feeds the $/Location columns in ARR_MoM_Segments)
   const pull = [[
     "Id","AccountId","ARR (USD)","ContractLiveDate","ContractEndDate","RecordType","Status","Supersedes","NextSupersedingLive","EffectiveEndDate",
-    "Owner","Merchant Segment","Location Tier","Deal Country","Region","Channel of Contact",
+    "Owner","Merchant Segment","Location Tier","Deal Country","Region","Channel of Contact","Locations",
   ]];
   won.forEach((x, i) => {
     const r = i + 2;
@@ -110,6 +111,7 @@ async function main() {
       `=MINIFS($D$2:$D$${LAST},$B$2:$B$${LAST},B${r},$H$2:$H$${LAST},1,$D$2:$D$${LAST},">"&D${r})`,
       `=IF(H${r}=0,E${r},IF(I${r}=0,E${r},MIN(E${r},I${r})))`,
       ...dim(x),
+      x.Locations_in_Contract__c ?? 0,
     ]);
   });
 
@@ -172,10 +174,12 @@ async function main() {
     ...SEGS.map((s) => `Seg: ${s}`), "Seg: Unclassified",
     ...TIERS.map((t) => `Tier: ${t}`), "Tier: none",
     ...CHANNELS.map((c) => `Ch: ${c}`), "Ch: Other/Unknown",
+    "Active Locations","$ / Location",
   ]];
   segMonths.forEach((m, i) => {
     const r = i + 2;
-    // column letters: F..J segs, K uncl, L..Q tiers, R none, S..Y channels, Z other
+    // column letters: F..J segs, K uncl, L..Q tiers, R none, S..Y channels, Z other,
+    // AA active locations (SOQL_Pull col Q), AB = ARR / location
     seg.push([
       `=TEXT(B${r},"mmm yyyy")`, m.monthEnd,
       activeAt(r),
@@ -187,6 +191,42 @@ async function main() {
       `=C${r}-SUM(L${r}:Q${r})`,
       ...CHANNELS.map((c) => activeAt(r, `*(SOQL_Pull!$P$2:$P$${LAST}="${c}")`)),
       `=C${r}-SUM(S${r}:Y${r})`,
+      `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$B${r}+1)*(SOQL_Pull!$E$2:$E$${LAST}>$B${r}+1)*SOQL_Pull!$Q$2:$Q$${LAST})`,
+      `=IFERROR(C${r}/AA${r},"")`,
+    ]);
+  });
+
+  // 6c) ACV_MoM — avg ACV of deals WON in each month (last 12 months), by Segment /
+  //     Region / AE. AVERAGEIFS over SOQL_ClosedDeals so every number is verifiable
+  //     in-sheet. CloseDate basis; ARR>0 to keep $0 bookkeeping rows out of averages.
+  const REGIONS = ["North America","APAC - Developed","APAC - Emerging","MEA"];
+  const AES = [
+    ["James Burdick","James"],["Dorsa Mahmoudnia","Dorsa"],["Jed Rutstein","Jed"],
+    ["Jill Bucci","Jill"],["David Dubinski","Davi"],["Mathias Berthelemot","Mathias"],
+  ];
+  const nowD = new Date();
+  const acvMonths = [];
+  for (let k = 11; k >= 0; k--) {
+    const d = new Date(Date.UTC(nowD.getUTCFullYear(), nowD.getUTCMonth() - k, 1));
+    acvMonths.push(d.toISOString().slice(0, 10)); // month start
+  }
+  // SOQL_ClosedDeals cols: F Outcome, G Segment, J Region, C Owner, L ARR, N CloseDate
+  const avgIf = (r, dimCol, dimVal) =>
+    `=IFERROR(AVERAGEIFS(SOQL_ClosedDeals!$L$2:$L$${all.length + 1},SOQL_ClosedDeals!$F$2:$F$${all.length + 1},"Won",SOQL_ClosedDeals!$L$2:$L$${all.length + 1},">0",SOQL_ClosedDeals!$N$2:$N$${all.length + 1},">="&$B${r},SOQL_ClosedDeals!$N$2:$N$${all.length + 1},"<"&EDATE($B${r},1)${dimVal ? `,SOQL_ClosedDeals!$${dimCol}$2:$${dimCol}$${all.length + 1},"${dimVal}"` : ""}),"")`;
+  const acvTab = [[
+    "Month","Month-Start","All: Avg ACV",
+    ...SEGS.map((s) => `Seg: ${s}`),
+    ...REGIONS.map((s) => `Reg: ${s}`),
+    ...AES.map(([, short]) => `AE: ${short}`),
+  ]];
+  acvMonths.forEach((ms, i) => {
+    const r = i + 2;
+    acvTab.push([
+      `=TEXT(B${r},"mmm yyyy")`, ms,
+      avgIf(r, "", ""),
+      ...SEGS.map((s) => avgIf(r, "G", s)),
+      ...REGIONS.map((s) => avgIf(r, "J", s)),
+      ...AES.map(([full]) => avgIf(r, "C", full)),
     ]);
   });
 
@@ -194,18 +234,21 @@ async function main() {
   const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "sheets.properties(sheetId,title)" });
   const byTitle = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
   const reqs = [];
-  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_MoM_Segments"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
+  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_MoM_Segments","ACV_MoM"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
   reqs.push(
     { addSheet: { properties: { title: "SOQL_Pull" } } },
     { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 22 } } } },
     { addSheet: { properties: { title: "ARR_MoM_Rebuild" } } },
-    { addSheet: { properties: { title: "ARR_MoM_Segments" } } },
+    { addSheet: { properties: { title: "ARR_MoM_Segments", gridProperties: { rowCount: seg.length + 10, columnCount: 30 } } } },
+    { addSheet: { properties: { title: "ACV_MoM" } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_Pull!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pull } });
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_ClosedDeals!A1", valueInputOption: "RAW", requestBody: { values: closed } });
+  // USER_ENTERED so date columns land as real dates (the ACV_MoM AVERAGEIFS compare against them)
+  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_ClosedDeals!A1", valueInputOption: "USER_ENTERED", requestBody: { values: closed } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Rebuild!A1", valueInputOption: "USER_ENTERED", requestBody: { values: mom } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Segments!A1", valueInputOption: "USER_ENTERED", requestBody: { values: seg } });
+  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ACV_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: acvTab } });
 
   // 8) Report latest month + MAPE vs target
   const back = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `ARR_MoM_Rebuild!A2:G${months.length+1}`, valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];
