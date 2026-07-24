@@ -39,7 +39,7 @@ async function main() {
   const api = google.sheets({ version: "v4", auth: gAuth });
   const { token, instance } = await sfAuth();
 
-  const soql = `SELECT Id, Name, Owner.Name, Account.Name, StageName, AE_AM_Probability__c, Last_Forecasted_Date_Quarterly__c FROM Opportunity WHERE IsClosed = false AND StageName IN ${STAGES} AND (Last_Forecasted_Date_Quarterly__c < LAST_N_DAYS:${STALE_DAYS} OR Last_Forecasted_Date_Quarterly__c = null) ORDER BY Owner.Name, Last_Forecasted_Date_Quarterly__c NULLS FIRST`;
+  const soql = `SELECT Id, Name, AccountId, Owner.Name, Account.Name, StageName, Probability, RecordType.Name, convertCurrency(AnnualContractValueARR__c), CloseDate, AE_AM_Probability__c, Last_Forecasted_Date_Quarterly__c FROM Opportunity WHERE IsClosed = false AND StageName IN ${STAGES} AND (Last_Forecasted_Date_Quarterly__c < LAST_N_DAYS:${STALE_DAYS} OR Last_Forecasted_Date_Quarterly__c = null) ORDER BY Owner.Name, Last_Forecasted_Date_Quarterly__c NULLS FIRST`;
   const recs = await sfQueryAll(instance, token, soql);
 
   const today = new Date();
@@ -80,5 +80,63 @@ async function main() {
 
   console.log(`wrote "${TAB}": ${recs.length} flagged opps`);
   console.log("by rep:", repRows.map(([r, n]) => `${r} ${n}`).join(" | "));
+
+  // ── Also refresh the team-facing tracker ("Ops that hasn't been updated", the Drive
+  // link in the bi-weekly Opportunity Excellency email). Replaces the old per-tab
+  // Salesforce-connector imports (which drifted per tab and went stale). Keeps the
+  // sheet's structure: rep tabs get the same columns with col A now a clickable SFDC
+  // link; Summary keeps its Rep | Flagged Opps | <dated snapshot>... layout, with
+  // today's column written as static numbers so history stays frozen. ──
+  const TEAM_ID = "1wZ93z8rdYLWo6Js-Jd0Qh0tWsSJURmrTPHtnf-n34L0";
+  const AE_TABS = ["James Burdick", "Dorsa Mahmoudnia", "Jed Rutstein", "Jill Bucci", "David Dubinski", "Mathias Berthelemot"];
+  const oppLink = (id) => `=HYPERLINK("${instance}/lightning/r/Opportunity/${id}/view","${id}")`;
+  const detailHeader = ["Id", "Name", "AccountId", "StageName", "CloseDate", "Probability", "AnnualContractValueARR__c (USD)", "Account.Name", "RecordType.Name", "Owner.Name", "Last_Forecasted_Date_Quarterly__c", "Days Since"];
+  const detailRow = (r) => {
+    const d = r.Last_Forecasted_Date_Quarterly__c;
+    const ds = daysSince(d);
+    return [oppLink(r.Id), r.Name, r.AccountId ?? "", r.StageName, r.CloseDate ?? "", r.Probability ?? "", r.AnnualContractValueARR__c ?? "", r.Account?.Name ?? "", r.RecordType?.Name ?? "", r.Owner?.Name ?? "", d ?? "never", ds == null ? "never" : ds];
+  };
+
+  const teamMeta = await api.spreadsheets.get({ spreadsheetId: TEAM_ID, fields: "sheets.properties(sheetId,title)" });
+  const teamTabs = new Set(teamMeta.data.sheets.map((s) => s.properties.title));
+  const ensureTab = async (title) => {
+    if (teamTabs.has(title)) return;
+    await api.spreadsheets.batchUpdate({ spreadsheetId: TEAM_ID, requestBody: { requests: [{ addSheet: { properties: { title } } }] } });
+    teamTabs.add(title);
+  };
+
+  // Rep tabs: full rewrite each run, most-stale first (SOQL orders "never" to the top).
+  for (const rep of AE_TABS) {
+    const mine = recs.filter((r) => r.Owner?.Name === rep);
+    await ensureTab(rep);
+    await api.spreadsheets.values.clear({ spreadsheetId: TEAM_ID, range: `'${rep}'!A1:Z5000` });
+    await api.spreadsheets.values.update({
+      spreadsheetId: TEAM_ID, range: `'${rep}'!A1`, valueInputOption: "USER_ENTERED",
+      requestBody: { values: [
+        [`${rep} — ${mine.length} flagged (quarterly forecast ${STALE_DAYS}+ days old, or never set)`, "", `Updated ${stamp}, auto-refreshed daily`],
+        detailHeader,
+        ...mine.map(detailRow),
+      ] },
+    });
+  }
+
+  // Summary: write/refresh today's dated column (e.g. "24th Jul"); leave past columns alone.
+  await ensureTab("Summary");
+  const ordinal = (n) => { const s = ["th", "st", "nd", "rd"], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const label = `${ordinal(today.getUTCDate())} ${MONTHS[today.getUTCMonth()]}`;
+  const sum = await api.spreadsheets.values.get({ spreadsheetId: TEAM_ID, range: "'Summary'!A1:ZZ50" }).then((r) => r.data.values ?? []);
+  if (sum.length === 0) sum.push(["Rep"], ...AE_TABS.map((rep) => [rep]), ["TOTAL"]);
+  const header = sum[0];
+  const col = header.indexOf(label) !== -1 ? header.indexOf(label) : Math.max(header.length, 1);
+  const countFor = (name) => (name === "TOTAL" ? AE_TABS.reduce((t, rep) => t + (byRep[rep] ?? 0), 0) : name in byRep && AE_TABS.includes(name) ? byRep[name] : AE_TABS.includes(name) ? 0 : "");
+  const colValues = [[label], ...sum.slice(1).map((row) => [countFor(row[0])])];
+  const a1col = (i) => (i < 26 ? "" : String.fromCharCode(64 + Math.floor(i / 26))) + String.fromCharCode(65 + (i % 26));
+  await api.spreadsheets.values.update({
+    spreadsheetId: TEAM_ID, range: `'Summary'!${a1col(col)}1`, valueInputOption: "RAW",
+    requestBody: { values: colValues },
+  });
+  const othersCount = recs.filter((r) => !AE_TABS.includes(r.Owner?.Name)).length;
+  console.log(`team sheet refreshed: ${AE_TABS.length} rep tabs + Summary column "${label}" (owners without a tab: ${othersCount} opps)`);
 }
 main().catch((e) => { console.error("FAILED:", e.message); process.exit(1); });
