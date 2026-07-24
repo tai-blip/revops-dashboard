@@ -27,6 +27,9 @@ export type AcvInsights = {
   regions: { region: string; count: number; avg: number; median: number; totalARR: number }[];
   byAE: { owner: string; count: number; avg: number; median: number; totalARR: number }[];
   arrByTier: { months: string[]; tiers: { tier: string; values: number[] }[] };
+  // Bridges "won ARR in window" (the table) to today's Live ARR (the stock):
+  // Live ARR = recent still-active wins + older-vintage NB/Exp + active renewals.
+  reconcile: { liveARR: number; recentActive: number; olderActive: number; renewalsActive: number };
 };
 
 const median = (a: number[]) => {
@@ -167,10 +170,23 @@ export function computeAcvInsights(rows: Row[]): AcvInsights | null {
     ),
   })).filter((t) => t.values.some((v) => v > 0));
 
+  // Reconcile the table's "won ARR in window" (a flow) to today's Live ARR (a
+  // stock): Live ARR = still-active recent wins + older-vintage NB/Exp + renewals.
+  const activeNow = deals.filter((d) => {
+    if (d.outcome !== "Won" || d.liveMs == null) return false;
+    const end = d.endMs ?? Date.UTC(2099, 11, 31);
+    return d.liveMs <= now && end > now;
+  });
+  const sum = (list: Deal[]) => list.reduce((s, d) => s + d.arr, 0);
+  const renewalsActive = sum(activeNow.filter((d) => d.ren));
+  const recentActive = sum(activeNow.filter((d) => !d.ren && inWindow(d)));
+  const olderActive = sum(activeNow.filter((d) => !d.ren && !inWindow(d)));
+
   return {
     windowLabel: "last 12 months",
     totals: (({ count, avg, median: med, totalARR }) => ({ count, avg, median: med, totalARR }))(agg(wonW)),
     segments, geo, regions, byAE,
     arrByTier: { months, tiers },
+    reconcile: { liveARR: sum(activeNow), recentActive, olderActive, renewalsActive },
   };
 }

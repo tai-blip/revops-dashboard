@@ -121,6 +121,7 @@ type DashboardData = {
     regions: { region: string; count: number; avg: number; median: number; totalARR: number }[];
     byAE: { owner: string; count: number; avg: number; median: number; totalARR: number }[];
     arrByTier: { months: string[]; tiers: { tier: string; values: number[] }[] };
+    reconcile: { liveARR: number; recentActive: number; olderActive: number; renewalsActive: number };
   } | null;
   acvMoM?: {
     months: string[];
@@ -2419,6 +2420,11 @@ export default function Dashboard() {
                       </tr>
                     </tbody>
                   </table>
+                  {I.reconcile && (
+                    <div style={{ padding: "10px 16px 12px", fontSize: 12, color: C.t3, borderTop: `1px solid ${C.s1}` }}>
+                      Why this ≠ Live ARR ({kM(I.reconcile.liveARR)}): the table counts ARR <b>won</b> in the last 12 months; Live ARR also includes {kM(I.reconcile.olderActive)} of NB + Expansion won before this window and {kM(I.reconcile.renewalsActive)} of active renewals — while {kM(Math.max(0, I.totals.totalARR - I.reconcile.recentActive))} of these wins has since ended/churned.
+                    </div>
+                  )}
                 </Card>
 
                 {/* ── ACV by AE + by Region ── */}
