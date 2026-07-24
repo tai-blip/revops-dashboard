@@ -132,18 +132,61 @@ async function main() {
   }
 
   // 6) ARR_MoM_Rebuild matrix (boundary = 1st of next month = $B+1)
-  const mom = [["Month","Month-End","Active ARR — Rule A","Active ARR — Exact (renewal-netted)","Current series (target)","Rule A vs Target ($)","Rule A vs Target (%)","MoM Change ($) [Rule A]","MoM Growth (%) [Rule A]"]];
+  //    + churn (org's own marker: Status "Contracts Ended (Churned)", ending that month)
+  //    + active-ARR split by RecordType (New Business / Renewals / Expansion; K+L+M ≈ C)
+  const activeAt = (r, extra = "") =>
+    `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$B${r}+1)*(SOQL_Pull!$E$2:$E$${LAST}>$B${r}+1)${extra}*SOQL_Pull!$C$2:$C$${LAST})`;
+  const mom = [[
+    "Month","Month-End","Active ARR — Rule A","Active ARR — Exact (renewal-netted)","Current series (target)",
+    "Rule A vs Target ($)","Rule A vs Target (%)","MoM Change ($) [Rule A]","MoM Growth (%) [Rule A]",
+    "Churned ARR (in month)","Active — New Business","Active — Renewals","Active — Expansion",
+  ]];
   months.forEach((m, i) => {
     const r = i + 2;
     mom.push([
       `=TEXT(B${r},"mmm yyyy")`, m.monthEnd,
-      `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$B${r}+1)*(SOQL_Pull!$E$2:$E$${LAST}>$B${r}+1)*SOQL_Pull!$C$2:$C$${LAST})`,
+      activeAt(r),
       `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$B${r}+1)*(SOQL_Pull!$J$2:$J$${LAST}>$B${r}+1)*SOQL_Pull!$C$2:$C$${LAST})`,
       targetByYm[m.ym] ?? "",
       `=IFERROR(C${r}-E${r},"")`,
       `=IFERROR((C${r}-E${r})/E${r},"")`,
       r === 2 ? "" : `=C${r}-C${r-1}`,
       r === 2 ? "" : `=IFERROR((C${r}-C${r-1})/C${r-1},"")`,
+      `=SUMPRODUCT((SOQL_Pull!$E$2:$E$${LAST}>EOMONTH($B${r},-1))*(SOQL_Pull!$E$2:$E$${LAST}<=$B${r})*(SOQL_Pull!$G$2:$G$${LAST}="Contracts Ended (Churned)")*SOQL_Pull!$C$2:$C$${LAST})`,
+      activeAt(r, `*(SOQL_Pull!$F$2:$F$${LAST}="1.New Business")`),
+      activeAt(r, `*(SOQL_Pull!$F$2:$F$${LAST}="2.Renewals")`),
+      activeAt(r, `*(SOQL_Pull!$F$2:$F$${LAST}="3.Business Expansion")`),
+    ]);
+  });
+
+  // 6b) ARR_MoM_Segments — active ARR at each month-end (same boundary) split by
+  //     US/Intl, Merchant Segment, Location Tier, Channel of Contact. Jan-2025 →
+  //     present keeps the formula count light. "Unclassified/No tier/Other" are
+  //     derived (Total − named) so nothing is silently dropped.
+  const SEGS = ["Small","Medium","Mid-Market","Enterprise","Mega Enterprise"];
+  const TIERS = ["1 to 5","6 to 10","11 to 50","51 to 250","251 to 500","More than 500"];
+  const CHANNELS = ["Outbound (AE)","Conference (Attendee)","Inbound","External Referral","Sales Agency","Momos Employee Referral","Conference (Host)"];
+  const segMonths = months.filter((m) => m.ym >= "2025-01");
+  const seg = [[
+    "Month","Month-End","Total Active ARR","US","International",
+    ...SEGS.map((s) => `Seg: ${s}`), "Seg: Unclassified",
+    ...TIERS.map((t) => `Tier: ${t}`), "Tier: none",
+    ...CHANNELS.map((c) => `Ch: ${c}`), "Ch: Other/Unknown",
+  ]];
+  segMonths.forEach((m, i) => {
+    const r = i + 2;
+    // column letters: F..J segs, K uncl, L..Q tiers, R none, S..Y channels, Z other
+    seg.push([
+      `=TEXT(B${r},"mmm yyyy")`, m.monthEnd,
+      activeAt(r),
+      activeAt(r, `*(SOQL_Pull!$N$2:$N$${LAST}="United States")`),
+      activeAt(r, `*(SOQL_Pull!$N$2:$N$${LAST}<>"United States")`),
+      ...SEGS.map((s) => activeAt(r, `*(SOQL_Pull!$L$2:$L$${LAST}="${s}")`)),
+      `=C${r}-SUM(F${r}:J${r})`,
+      ...TIERS.map((t) => activeAt(r, `*(SOQL_Pull!$M$2:$M$${LAST}="${t}")`)),
+      `=C${r}-SUM(L${r}:Q${r})`,
+      ...CHANNELS.map((c) => activeAt(r, `*(SOQL_Pull!$P$2:$P$${LAST}="${c}")`)),
+      `=C${r}-SUM(S${r}:Y${r})`,
     ]);
   });
 
@@ -151,16 +194,18 @@ async function main() {
   const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "sheets.properties(sheetId,title)" });
   const byTitle = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
   const reqs = [];
-  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
+  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_MoM_Segments"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
   reqs.push(
     { addSheet: { properties: { title: "SOQL_Pull" } } },
     { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 22 } } } },
     { addSheet: { properties: { title: "ARR_MoM_Rebuild" } } },
+    { addSheet: { properties: { title: "ARR_MoM_Segments" } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_Pull!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pull } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_ClosedDeals!A1", valueInputOption: "RAW", requestBody: { values: closed } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Rebuild!A1", valueInputOption: "USER_ENTERED", requestBody: { values: mom } });
+  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Segments!A1", valueInputOption: "USER_ENTERED", requestBody: { values: seg } });
 
   // 8) Report latest month + MAPE vs target
   const back = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `ARR_MoM_Rebuild!A2:G${months.length+1}`, valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];
