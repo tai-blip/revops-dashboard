@@ -77,8 +77,13 @@ async function main() {
   const won = all.filter((x) => x.StageName !== "Closed Lost");
   console.log("SF pull:", all.length, "opps (", won.length, "won/billing,", all.length - won.length, "lost ) from", instance);
 
-  // 2) Targets = current manual "ARR MoM Progression" series (Month serial in A, Total ARR in B)
-  const mp = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: "'ARR MoM Progression'!A2:B400", valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];
+  // 2) Reference series for the variance columns. The manual "ARR MoM Progression"
+  //    tab was retired 2026-07-24 (ARR_MoM_Rebuild is canonical); if it's absent the
+  //    target column simply stays blank.
+  const mp = await api.spreadsheets.values
+    .get({ spreadsheetId: SHEET_ID, range: "'ARR MoM Progression'!A2:B400", valueRenderOption: "UNFORMATTED_VALUE" })
+    .then((r) => r.data.values || [])
+    .catch(() => []);
   const targetByYm = {};
   for (const row of mp) { if (typeof row[0] === "number" && typeof row[1] === "number") targetByYm[ser2ym(row[0])] = row[1]; }
 

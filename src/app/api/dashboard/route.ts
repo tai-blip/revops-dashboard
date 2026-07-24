@@ -52,7 +52,9 @@ export async function GET() {
     const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, segmentsRows] =
       await Promise.all([
         getSheetValues("ARR & recurring revenue"),
-        getSheetValues("ARR MoM Progression", "A1:D400"),
+        // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
+        // tolerated here only as a fallback if it's ever restored.
+        getSheetValues("ARR MoM Progression", "A1:D400").catch(() => [] as (string | number | null)[][]),
         getSheetValues("AE attainment"),
         getSheetValues("Pipeline"),
         getSheetValues("Pipeline - WoW", "A1:BI400"),
