@@ -13,6 +13,8 @@ export function BarTrendChart({
   barColors,
   lineOverlay,
   lineOverlayOwnScale,
+  axisLeftLabel,
+  axisRightLabel,
   showValues,
   trendline,
   trendColor,
@@ -29,6 +31,9 @@ export function BarTrendChart({
   // needed when the two series live on very different magnitudes (e.g. avg ACV
   // in $k over cumulative ARR bars in $M). Hover tooltip shows true values.
   lineOverlayOwnScale?: boolean;
+  // Rotated captions explaining each scale (left = bars, right = overlay line).
+  axisLeftLabel?: string;
+  axisRightLabel?: string;
   showValues?: boolean;
   trendline?: boolean;
   trendColor?: string;
@@ -92,6 +97,30 @@ export function BarTrendChart({
         onMouseLeave={() => setHoverIdx(null)}
       >
         <line x1={padL} x2={W - padR} y1={padT + innerH} y2={padT + innerH} stroke={C.bd} />
+
+        {/* rotated scale captions: left = bars, right = overlay line */}
+        {axisLeftLabel && (
+          <text
+            transform={`translate(12, ${padT + innerH / 2}) rotate(-90)`}
+            textAnchor="middle"
+            fontSize={10}
+            fontWeight={700}
+            fill={C.t3}
+          >
+            {axisLeftLabel}
+          </text>
+        )}
+        {axisRightLabel && (
+          <text
+            transform={`translate(${W - 2}, ${padT + innerH / 2}) rotate(90)`}
+            textAnchor="middle"
+            fontSize={10}
+            fontWeight={700}
+            fill={lineOverlay?.color ?? C.t2}
+          >
+            {axisRightLabel}
+          </text>
+        )}
         {targetLine != null && (
           <g>
             <line
@@ -129,7 +158,7 @@ export function BarTrendChart({
                 fill="transparent"
                 onMouseEnter={() => setHoverIdx(i)}
               />
-              {showValues && (
+              {showValues && v !== 0 && (
                 <text
                   x={padL + i * gap + gap / 2}
                   y={y(v) - 4}
@@ -191,19 +220,30 @@ export function BarTrendChart({
               />
             ))}
             {lineOverlayOwnScale &&
-              lineOverlay.values.map((v, i) => (
-                <text
-                  key={"lv" + i}
-                  x={padL + i * gap + gap / 2}
-                  y={yLine(v) - 8}
-                  textAnchor="middle"
-                  fontSize={8.5}
-                  fontWeight={700}
-                  fill={lineOverlay.color}
-                >
-                  {compact(v)}
-                </text>
-              ))}
+              lineOverlay.values.map((v, i) => {
+                if (v === 0) return null; // no-deal filler months: no label noise
+                // If this label (above the point) would land on the bar's label,
+                // flip it below the point so the two never overprint.
+                const barV = values[i];
+                const barLabelY = showValues && barV !== 0 ? y(barV) - 4 : null;
+                const above = yLine(v) - 8;
+                const below = yLine(v) + 15;
+                const clear = (pos: number) => barLabelY == null || Math.abs(pos - barLabelY) >= 13;
+                const labelY = clear(above) ? above : clear(below) ? below : (barLabelY as number) - 14;
+                return (
+                  <text
+                    key={"lv" + i}
+                    x={padL + i * gap + gap / 2}
+                    y={labelY}
+                    textAnchor="middle"
+                    fontSize={8.5}
+                    fontWeight={700}
+                    fill={lineOverlay.color}
+                  >
+                    {compact(v)}
+                  </text>
+                );
+              })}
           </g>
         )}
       </svg>

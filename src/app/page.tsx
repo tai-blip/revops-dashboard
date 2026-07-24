@@ -214,15 +214,17 @@ function MomProgressCard({
           showValues
           lineOverlay={{ label: "Avg ACV", values: active.values.map((v) => v ?? 0), color: accent }}
           lineOverlayOwnScale
+          axisLeftLabel="Cumulative won ARR ($) — bars"
+          axisRightLabel="Avg ACV per deal ($) — line"
         />
-        <div style={{ display: "flex", gap: 18, marginTop: 8, fontSize: 11.5, color: C.t2 }}>
+        <div style={{ display: "flex", gap: 18, marginTop: 8, fontSize: 11.5, color: C.t2, flexWrap: "wrap" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <span style={{ width: 11, height: 11, borderRadius: 2, background: C.s2, border: `1px solid ${C.bd}`, display: "inline-block" }} />
-            Cumulative won ARR — {active.name}
+            Bars: running total of won ARR for {active.name} across the 12 months
           </span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <span style={{ width: 11, height: 3, background: accent, display: "inline-block" }} />
-            Avg ACV per month
+            Line: average ACV per deal won that month (own scale — size of a typical deal, not volume)
           </span>
         </div>
         <div style={{ overflowX: "auto", marginTop: 10 }}>
