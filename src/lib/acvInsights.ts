@@ -66,7 +66,8 @@ export function computeAcvInsights(rows: Row[]): AcvInsights | null {
   type Deal = {
     owner: string; outcome: string; seg: string; tier: string; us: boolean; region: string;
     arr: number; closeMs: number | null; cycle: number | null; liveMs: number | null; endMs: number | null;
-    nb: boolean; // New Business record type (win-rate basis — renewals/expansion excluded)
+    nb: boolean; // New Business record type (win-rate basis)
+    ren: boolean; // Renewal record type (excluded from ALL ACV math — auto-generated, not a new deal)
   };
   const deals: Deal[] = [];
   for (let i = 1; i < rows.length; i++) {
@@ -88,11 +89,15 @@ export function computeAcvInsights(rows: Row[]): AcvInsights | null {
       liveMs: toMs(r[cLive]),
       endMs: toMs(r[cEnd]),
       nb: /New Business/i.test(String(r[cRt] ?? "")),
+      ren: /Renewal/i.test(String(r[cRt] ?? "")),
     });
   }
 
   const inWindow = (d: Deal) => d.closeMs != null && d.closeMs >= windowStart && d.closeMs <= now;
-  const wonW = deals.filter((d) => d.outcome === "Won" && inWindow(d) && d.arr > 0);
+  // ACV basis = New Business + Expansion. Renewals are excluded everywhere ACV is
+  // computed — they are auto-generated re-signings, not new deal sizes (and they
+  // made AM-owned rows look like big ACV books).
+  const wonW = deals.filter((d) => d.outcome === "Won" && inWindow(d) && d.arr > 0 && !d.ren);
   const lostW = deals.filter((d) => d.outcome === "Lost" && inWindow(d));
 
   const agg = (list: Deal[]) => {

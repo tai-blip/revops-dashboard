@@ -199,6 +199,7 @@ async function main() {
   // 6c) ACV_MoM — avg ACV of deals WON in each month (last 12 months), by Segment /
   //     Region / AE. AVERAGEIFS over SOQL_ClosedDeals so every number is verifiable
   //     in-sheet. CloseDate basis; ARR>0 to keep $0 bookkeeping rows out of averages.
+  //     Renewals are EXCLUDED (col D) — ACV counts New Business + Expansion only.
   const REGIONS = ["North America","APAC - Developed","APAC - Emerging","MEA"];
   const AES = [
     ["James Burdick","James"],["Dorsa Mahmoudnia","Dorsa"],["Jed Rutstein","Jed"],
@@ -212,7 +213,7 @@ async function main() {
   }
   // SOQL_ClosedDeals cols: F Outcome, G Segment, J Region, C Owner, L ARR, N CloseDate
   const avgIf = (r, dimCol, dimVal) =>
-    `=IFERROR(AVERAGEIFS(SOQL_ClosedDeals!$L$2:$L$${all.length + 1},SOQL_ClosedDeals!$F$2:$F$${all.length + 1},"Won",SOQL_ClosedDeals!$L$2:$L$${all.length + 1},">0",SOQL_ClosedDeals!$N$2:$N$${all.length + 1},">="&$B${r},SOQL_ClosedDeals!$N$2:$N$${all.length + 1},"<"&EDATE($B${r},1)${dimVal ? `,SOQL_ClosedDeals!$${dimCol}$2:$${dimCol}$${all.length + 1},"${dimVal}"` : ""}),"")`;
+    `=IFERROR(AVERAGEIFS(SOQL_ClosedDeals!$L$2:$L$${all.length + 1},SOQL_ClosedDeals!$F$2:$F$${all.length + 1},"Won",SOQL_ClosedDeals!$D$2:$D$${all.length + 1},"<>2.Renewals",SOQL_ClosedDeals!$L$2:$L$${all.length + 1},">0",SOQL_ClosedDeals!$N$2:$N$${all.length + 1},">="&$B${r},SOQL_ClosedDeals!$N$2:$N$${all.length + 1},"<"&EDATE($B${r},1)${dimVal ? `,SOQL_ClosedDeals!$${dimCol}$2:$${dimCol}$${all.length + 1},"${dimVal}"` : ""}),"")`;
   const acvTab = [[
     "Month","Month-Start","All: Avg ACV",
     ...SEGS.map((s) => `Seg: ${s}`),

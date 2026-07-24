@@ -642,15 +642,33 @@ export default function Dashboard() {
           { label: "Lowest AE", value: bottom ? gp(bottom.pctOfQuota) : "—", sub: bottom ? `${bottom.name} · ${fmt(bottom.actual)}` : undefined, tone: "bad" as const },
         ],
       },
-      acv: {
-        sentence: `Average won deal is ${fmt(data.acv.avg)} (median ${fmt(data.acv.median)}) across ${data.acv.count} wins in 18 months. YTD win rate: ${data.winRateYtd.winRate != null ? pct(data.winRateYtd.winRate) : "—"} on ${data.winRateYtd.closedCount} closed New Business deals${data.winRateYtd.medianCycle != null ? `, median cycle ${data.winRateYtd.medianCycle}d SQL→close` : ""}.`,
-        stats: [
-          { label: "Avg deal size", value: fmt(data.acv.avg), sub: "won, last 18mo" },
-          { label: "Median deal size", value: fmt(data.acv.median), sub: "less outlier skew" },
-          { label: "Win rate YTD", value: data.winRateYtd.winRate != null ? pct(data.winRateYtd.winRate) : "—", sub: `${data.winRateYtd.wonCount} of ${data.winRateYtd.closedCount} New Biz` },
-          { label: "Median cycle", value: data.winRateYtd.medianCycle != null ? `${data.winRateYtd.medianCycle}d` : "—", sub: "SQL → close" },
-        ],
-      },
+      acv: (() => {
+        // Current-month $/Location for the exec-summary strip (moved up from the
+        // ARR-per-Location card at Tai's request).
+        const PL = data.perLocation;
+        const plCur = PL?.perLoc[PL.perLoc.length - 1] ?? null;
+        const plPrev = PL?.perLoc[PL.perLoc.length - 2] ?? null;
+        const plMom = plCur != null && plPrev != null && plPrev !== 0 ? ((plCur - plPrev) / plPrev) * 100 : null;
+        const plLocs = PL?.locations[PL.locations.length - 1] ?? null;
+        const plMonth = PL?.months[PL.months.length - 1] ?? "";
+        return {
+          sentence: `Average won deal is ${fmt(data.acv.avg)} (median ${fmt(data.acv.median)}) across ${data.acv.count} wins in 18 months. YTD win rate: ${data.winRateYtd.winRate != null ? pct(data.winRateYtd.winRate) : "—"} on ${data.winRateYtd.closedCount} closed New Business deals${data.winRateYtd.medianCycle != null ? `, median cycle ${data.winRateYtd.medianCycle}d SQL→close` : ""}.`,
+          stats: [
+            { label: "Avg deal size", value: fmt(data.acv.avg), sub: "won, last 18mo" },
+            { label: "Median deal size", value: fmt(data.acv.median), sub: "less outlier skew" },
+            { label: "Win rate YTD", value: data.winRateYtd.winRate != null ? pct(data.winRateYtd.winRate) : "—", sub: `${data.winRateYtd.wonCount} of ${data.winRateYtd.closedCount} New Biz` },
+            { label: "Median cycle", value: data.winRateYtd.medianCycle != null ? `${data.winRateYtd.medianCycle}d` : "—", sub: "SQL → close" },
+            ...(plCur != null
+              ? [{
+                  label: `$ / Location · ${plMonth}`,
+                  value: "$" + plCur.toFixed(0),
+                  sub: `${plMom != null ? `${plMom >= 0 ? "+" : ""}${plMom.toFixed(1)}% MoM` : ""}${plLocs != null ? ` · ${Math.round(plLocs).toLocaleString()} locations` : ""}`,
+                  tone: (plMom ?? 0) >= 0 ? ("good" as const) : ("bad" as const),
+                }]
+              : []),
+          ],
+        };
+      })(),
     };
   }, [data, execSummary, wowMetrics]);
 
@@ -2254,52 +2272,12 @@ export default function Dashboard() {
 
             {I && (
               <>
-                {/* ── ACV by Deal Segment (incl. sales cycle by segment) ── */}
-                <Card
-                  title="ACV & Sales Cycle by Deal Segment"
-                  sub={`Won deals (Billing + Closed Won), ${I.windowLabel} · segments from SFDC Merchant Segment · cycle = SQL → Closed Won`}
-                  accent={C.coral}
-                >
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ background: C.s1, borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Segment</Th>
-                        <Th># Won</Th>
-                        <Th>Avg ACV</Th>
-                        <Th>Median ACV</Th>
-                        <Th>Total ARR</Th>
-                        <Th>Median Cycle</Th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {I.segments.map((s) => (
-                        <tr key={s.seg} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                          <Td l bold>{s.seg}</Td>
-                          <Td mono>{s.count}</Td>
-                          <Td mono color={C.navy2}>{kM(s.avg)}</Td>
-                          <Td mono bold>{kM(s.median)}</Td>
-                          <Td mono>{kM(s.totalARR)}</Td>
-                          <Td mono color={C.purp}>{s.medianCycle != null ? `${s.medianCycle}d` : "—"}{s.cycleN ? <span style={{ color: C.t3, fontWeight: 400 }}> · n={s.cycleN}</span> : null}</Td>
-                        </tr>
-                      ))}
-                      <tr style={{ background: C.s1, borderTop: `2px solid ${C.navy}` }}>
-                        <Td l bold>All segments</Td>
-                        <Td mono bold>{I.totals.count}</Td>
-                        <Td mono bold color={C.navy2}>{kM(I.totals.avg)}</Td>
-                        <Td mono bold>{kM(I.totals.median)}</Td>
-                        <Td mono bold>{kM(I.totals.totalARR)}</Td>
-                        <Td mono>—</Td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </Card>
-
                 {/* ── ACV progression MoM (sheet-computed in the ACV_MoM tab) ── */}
                 {data.acvMoM && (
                   <>
                     <MomProgressCard
                       title="ACV Progression — by Deal Segment"
-                      sub="Avg ACV of deals won each month, last 12 months · computed in the ACV_MoM sheet tab · click a pill or row to chart it"
+                      sub="Avg ACV of New Business + Expansion won each month (renewals excluded), last 12 months · computed in the ACV_MoM sheet tab · click a pill or row to chart it"
                       months={data.acvMoM.months}
                       series={[{ name: "All", values: data.acvMoM.all }, ...(data.acvMoM.groups.find((g) => g.key === "segment")?.series ?? [])]}
                       accent={C.navy}
@@ -2321,49 +2299,28 @@ export default function Dashboard() {
                   </>
                 )}
 
-                {/* ── $ per Location (ARR / active locations in contract) ── */}
-                {data.perLocation && (() => {
-                  const P = data.perLocation;
-                  const cur = P.perLoc[P.perLoc.length - 1];
-                  const prev = P.perLoc[P.perLoc.length - 2];
-                  const mom = cur != null && prev != null && prev !== 0 ? ((cur - prev) / prev) * 100 : null;
-                  const curLocs = P.locations[P.locations.length - 1];
-                  return (
-                    <Card
-                      title="ARR per Location — MoM"
-                      sub="Active ARR ÷ active locations-in-contract at each month-end (opp-level Locations field) · computed in the ARR_MoM_Segments sheet tab"
-                      accent={C.teal}
-                    >
-                      <div style={{ padding: "16px 20px" }}>
-                        <div style={{ display: "flex", gap: 14, alignItems: "stretch", marginBottom: 14 }}>
-                          <div style={{ background: "linear-gradient(135deg,#DBF1EE,#FBF7F1)", border: `1px solid ${C.bd}`, borderRadius: 12, padding: "14px 22px" }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: C.t3 }}>
-                              {P.months[P.months.length - 1]} · $ / location
-                            </div>
-                            <div style={{ fontSize: 34, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.teal, lineHeight: 1.1, marginTop: 4 }}>
-                              {cur != null ? "$" + cur.toFixed(0) : "—"}
-                            </div>
-                            <div style={{ fontSize: 12.5, marginTop: 6, fontWeight: 700, color: (mom ?? 0) >= 0 ? C.grn : C.red }}>
-                              {mom != null ? `${mom >= 0 ? "+" : ""}${mom.toFixed(1)}% MoM` : "—"}
-                              <span style={{ color: C.t3, fontWeight: 400 }}>{curLocs != null ? ` · ${Math.round(curLocs).toLocaleString()} active locations` : ""}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <LineTrendChart
-                          labels={P.months.map((m) => m.split(" ")[0])}
-                          series={[{ label: "$ / location", values: P.perLoc, color: C.teal }]}
-                          valueFormat="currency"
-                          showValues
-                        />
-                      </div>
-                    </Card>
-                  );
-                })()}
+                {/* ── $ per Location trend (current-month box lives in the exec summary) ── */}
+                {data.perLocation && (
+                  <Card
+                    title="ARR per Location — MoM"
+                    sub="Active ARR ÷ active locations-in-contract at each month-end (opp-level Locations field) · computed in the ARR_MoM_Segments sheet tab"
+                    accent={C.teal}
+                  >
+                    <div style={{ padding: "16px 20px" }}>
+                      <LineTrendChart
+                        labels={data.perLocation.months.map((m) => m.split(" ")[0])}
+                        series={[{ label: "$ / location", values: data.perLocation.perLoc, color: C.teal }]}
+                        valueFormat="currency"
+                        showValues
+                      />
+                    </div>
+                  </Card>
+                )}
 
                 {/* ── Win rate US vs International ── */}
                 <Card
                   title="Win Rate & ACV — US vs International"
-                  sub={`${I.windowLabel} · US = Deal Country "United States" · win rate on New Business only (won / won+lost); ACV on all won deals in the geo`}
+                  sub={`${I.windowLabel} · US = Deal Country "United States" · win rate on New Business only (won / won+lost); ACV on New Business + Expansion (renewals excluded)`}
                 >
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
                     {I.geo.map((g, gi) => (
@@ -2405,9 +2362,49 @@ export default function Dashboard() {
                   </div>
                 </Card>
 
+                {/* ── ACV by Deal Segment (incl. sales cycle by segment) ── */}
+                <Card
+                  title="ACV & Sales Cycle by Deal Segment"
+                  sub={`New Business + Expansion won, ${I.windowLabel} (renewals excluded) · segments from SFDC Merchant Segment · cycle = SQL → Closed Won`}
+                  accent={C.coral}
+                >
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: C.s1, borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Segment</Th>
+                        <Th># Won</Th>
+                        <Th>Avg ACV</Th>
+                        <Th>Median ACV</Th>
+                        <Th>Total ARR</Th>
+                        <Th>Median Cycle</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {I.segments.map((s) => (
+                        <tr key={s.seg} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <Td l bold>{s.seg}</Td>
+                          <Td mono>{s.count}</Td>
+                          <Td mono color={C.navy2}>{kM(s.avg)}</Td>
+                          <Td mono bold>{kM(s.median)}</Td>
+                          <Td mono>{kM(s.totalARR)}</Td>
+                          <Td mono color={C.purp}>{s.medianCycle != null ? `${s.medianCycle}d` : "—"}{s.cycleN ? <span style={{ color: C.t3, fontWeight: 400 }}> · n={s.cycleN}</span> : null}</Td>
+                        </tr>
+                      ))}
+                      <tr style={{ background: C.s1, borderTop: `2px solid ${C.navy}` }}>
+                        <Td l bold>All segments</Td>
+                        <Td mono bold>{I.totals.count}</Td>
+                        <Td mono bold color={C.navy2}>{kM(I.totals.avg)}</Td>
+                        <Td mono bold>{kM(I.totals.median)}</Td>
+                        <Td mono bold>{kM(I.totals.totalARR)}</Td>
+                        <Td mono>—</Td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </Card>
+
                 {/* ── ACV by AE + by Region ── */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                  <Card title="ACV by AE" sub={`Won deals, ${I.windowLabel}`}>
+                  <Card title="ACV by AE" sub={`New Business + Expansion won, ${I.windowLabel} (renewals excluded)`}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead>
                         <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
@@ -2429,7 +2426,7 @@ export default function Dashboard() {
                       </tbody>
                     </table>
                   </Card>
-                  <Card title="ACV by Region" sub={`Won deals, ${I.windowLabel} · SFDC Region`}>
+                  <Card title="ACV by Region" sub={`New Business + Expansion won, ${I.windowLabel} (renewals excluded) · SFDC Region`}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead>
                         <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
@@ -2454,7 +2451,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* ── Deal size distribution (kept from previous version) ── */}
-                <Card title="Deal Size Distribution" sub={`Won deals, ${I.windowLabel}`}>
+                <Card title="Deal Size Distribution" sub="All won deals incl. renewals, last 18 months (Query 2 basis)">
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
                       <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
