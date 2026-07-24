@@ -12,6 +12,7 @@ export function BarTrendChart({
   barColor,
   barColors,
   lineOverlay,
+  lineOverlayOwnScale,
   showValues,
   trendline,
   trendColor,
@@ -24,6 +25,10 @@ export function BarTrendChart({
   barColor?: string;
   barColors?: (string | undefined)[];
   lineOverlay?: { label: string; values: number[]; color: string };
+  // Scale the overlay line against its own max instead of the bars' axis —
+  // needed when the two series live on very different magnitudes (e.g. avg ACV
+  // in $k over cumulative ARR bars in $M). Hover tooltip shows true values.
+  lineOverlayOwnScale?: boolean;
   showValues?: boolean;
   trendline?: boolean;
   trendColor?: string;
@@ -43,11 +48,14 @@ export function BarTrendChart({
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
-  const max = Math.max(...values, ...(lineOverlay?.values ?? []), targetLine ?? 0, 1) * 1.1;
+  const max = Math.max(...values, ...(lineOverlay && !lineOverlayOwnScale ? lineOverlay.values : []), targetLine ?? 0, 1) * 1.1;
   const barW = (innerW / labels.length) * 0.65;
   const gap = innerW / labels.length;
 
   const y = (v: number) => padT + innerH - (v / max) * innerH;
+  // independent y-scale for the overlay line when requested
+  const lineMax = lineOverlay && lineOverlayOwnScale ? Math.max(...lineOverlay.values.filter((v) => v != null), 1) * 1.15 : max;
+  const yLine = (v: number) => (lineOverlayOwnScale ? padT + innerH - (v / lineMax) * innerH : y(v));
   const fmtVal = (v: number) => (valueFormat === "currency" ? fmt(v) : String(v));
 
   const hovered = hoverIdx != null ? { label: labels[hoverIdx], value: values[hoverIdx] } : null;
@@ -167,7 +175,7 @@ export function BarTrendChart({
           <g>
             <polyline
               points={lineOverlay.values
-                .map((v, i) => `${(padL + i * gap + gap / 2).toFixed(1)},${y(v).toFixed(1)}`)
+                .map((v, i) => `${(padL + i * gap + gap / 2).toFixed(1)},${yLine(v).toFixed(1)}`)
                 .join(" ")}
               fill="none"
               stroke={lineOverlay.color}
@@ -177,11 +185,25 @@ export function BarTrendChart({
               <circle
                 key={i}
                 cx={padL + i * gap + gap / 2}
-                cy={y(v)}
+                cy={yLine(v)}
                 r={hoverIdx === i ? 4.5 : 3}
                 fill={lineOverlay.color}
               />
             ))}
+            {lineOverlayOwnScale &&
+              lineOverlay.values.map((v, i) => (
+                <text
+                  key={"lv" + i}
+                  x={padL + i * gap + gap / 2}
+                  y={yLine(v) - 8}
+                  textAnchor="middle"
+                  fontSize={8.5}
+                  fontWeight={700}
+                  fill={lineOverlay.color}
+                >
+                  {compact(v)}
+                </text>
+              ))}
           </g>
         )}
       </svg>

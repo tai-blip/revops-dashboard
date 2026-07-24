@@ -125,7 +125,8 @@ type DashboardData = {
   acvMoM?: {
     months: string[];
     all: (number | null)[];
-    groups: { key: "segment" | "region" | "ae"; series: { name: string; values: (number | null)[] }[] }[];
+    allSums: (number | null)[];
+    groups: { key: "segment" | "region" | "ae"; series: { name: string; values: (number | null)[]; sums: (number | null)[] }[] }[];
   } | null;
   perLocation?: {
     months: string[];
@@ -175,7 +176,7 @@ function MomProgressCard({
   title: string;
   sub: string;
   months: string[];
-  series: { name: string; values: (number | null)[] }[];
+  series: { name: string; values: (number | null)[]; sums?: (number | null)[] }[];
   accent: string;
 }) {
   const [sel, setSel] = useState(0);
@@ -184,6 +185,9 @@ function MomProgressCard({
     v == null ? "—" : Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : Math.abs(v) >= 1e3 ? "$" + (v / 1e3).toFixed(1) + "k" : "$" + Math.round(v);
   const active = series[Math.min(sel, series.length - 1)];
   if (!series.length) return null;
+  // cumulative won ARR of the selected series (bars behind the avg-ACV line)
+  let running = 0;
+  const cumulative = shortMonths.map((_, i) => (running += active.sums?.[i] ?? 0));
   return (
     <Card title={title} sub={sub}>
       <div style={{ padding: "12px 20px 16px" }}>
@@ -202,12 +206,25 @@ function MomProgressCard({
             </button>
           ))}
         </div>
-        <LineTrendChart
+        <BarTrendChart
           labels={shortMonths}
-          series={[{ label: active.name, values: active.values, color: accent }]}
+          values={cumulative}
           valueFormat="currency"
+          barColor={C.s2}
           showValues
+          lineOverlay={{ label: "Avg ACV", values: active.values.map((v) => v ?? 0), color: accent }}
+          lineOverlayOwnScale
         />
+        <div style={{ display: "flex", gap: 18, marginTop: 8, fontSize: 11.5, color: C.t2 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 11, height: 11, borderRadius: 2, background: C.s2, border: `1px solid ${C.bd}`, display: "inline-block" }} />
+            Cumulative won ARR — {active.name}
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 11, height: 3, background: accent, display: "inline-block" }} />
+            Avg ACV per month
+          </span>
+        </div>
         <div style={{ overflowX: "auto", marginTop: 10 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
@@ -2279,7 +2296,7 @@ export default function Dashboard() {
                       title="ACV Progression — by Deal Segment"
                       sub="Avg ACV of New Business + Expansion won each month (renewals excluded), last 12 months · computed in the ACV_MoM sheet tab · click a pill or row to chart it"
                       months={data.acvMoM.months}
-                      series={[{ name: "All", values: data.acvMoM.all }, ...(data.acvMoM.groups.find((g) => g.key === "segment")?.series ?? [])]}
+                      series={[{ name: "All", values: data.acvMoM.all, sums: data.acvMoM.allSums }, ...(data.acvMoM.groups.find((g) => g.key === "segment")?.series ?? [])]}
                       accent={C.navy}
                     />
                     <MomProgressCard
@@ -2290,8 +2307,8 @@ export default function Dashboard() {
                       accent={C.teal}
                     />
                     <MomProgressCard
-                      title="ACV Progression — by AE"
-                      sub="Avg ACV of deals won each month, last 12 months · computed in the ACV_MoM sheet tab"
+                      title="ACV Progression — by AE/AM"
+                      sub="Avg ACV of New Business + Expansion won each month (renewals excluded) · AMs included · computed in the ACV_MoM sheet tab"
                       months={data.acvMoM.months}
                       series={data.acvMoM.groups.find((g) => g.key === "ae")?.series ?? []}
                       accent={C.purp}

@@ -63,7 +63,7 @@ export async function GET() {
         // Tolerate absence so the dashboard still loads if the pull hasn't run.
         getSheetValues("SOQL_ClosedDeals", "A1:T4000").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_MoM_Rebuild", "A1:M400").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("ACV_MoM", "A1:S20").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ACV_MoM", "A1:AZ20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_MoM_Segments", "A1:AB40").catch(() => [] as (string | number | null)[][]),
       ]);
 

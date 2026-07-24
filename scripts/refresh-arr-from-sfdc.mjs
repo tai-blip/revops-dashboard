@@ -204,6 +204,9 @@ async function main() {
   const AES = [
     ["James Burdick","James"],["Dorsa Mahmoudnia","Dorsa"],["Jed Rutstein","Jed"],
     ["Jill Bucci","Jill"],["David Dubinski","Davi"],["Mathias Berthelemot","Mathias"],
+    // AMs (their NB+Expansion deals only — renewals are excluded from ACV math)
+    ["Ben Conway","Ben"],["Jesse Brennan","Jesse"],["Eufthlyn Ng","Euth"],
+    ["Lara Keresztes","Lara"],["Jan Onal","Jan"],
   ];
   const nowD = new Date();
   const acvMonths = [];
@@ -212,13 +215,23 @@ async function main() {
     acvMonths.push(d.toISOString().slice(0, 10)); // month start
   }
   // SOQL_ClosedDeals cols: F Outcome, G Segment, J Region, C Owner, L ARR, N CloseDate
+  const dealIfs = (r, dimCol, dimVal) =>
+    `SOQL_ClosedDeals!$F$2:$F$${all.length + 1},"Won",SOQL_ClosedDeals!$D$2:$D$${all.length + 1},"<>2.Renewals",SOQL_ClosedDeals!$L$2:$L$${all.length + 1},">0",SOQL_ClosedDeals!$N$2:$N$${all.length + 1},">="&$B${r},SOQL_ClosedDeals!$N$2:$N$${all.length + 1},"<"&EDATE($B${r},1)${dimVal ? `,SOQL_ClosedDeals!$${dimCol}$2:$${dimCol}$${all.length + 1},"${dimVal}"` : ""}`;
   const avgIf = (r, dimCol, dimVal) =>
-    `=IFERROR(AVERAGEIFS(SOQL_ClosedDeals!$L$2:$L$${all.length + 1},SOQL_ClosedDeals!$F$2:$F$${all.length + 1},"Won",SOQL_ClosedDeals!$D$2:$D$${all.length + 1},"<>2.Renewals",SOQL_ClosedDeals!$L$2:$L$${all.length + 1},">0",SOQL_ClosedDeals!$N$2:$N$${all.length + 1},">="&$B${r},SOQL_ClosedDeals!$N$2:$N$${all.length + 1},"<"&EDATE($B${r},1)${dimVal ? `,SOQL_ClosedDeals!$${dimCol}$2:$${dimCol}$${all.length + 1},"${dimVal}"` : ""}),"")`;
+    `=IFERROR(AVERAGEIFS(SOQL_ClosedDeals!$L$2:$L$${all.length + 1},${dealIfs(r, dimCol, dimVal)}),"")`;
+  const sumIf = (r, dimCol, dimVal) =>
+    `=SUMIFS(SOQL_ClosedDeals!$L$2:$L$${all.length + 1},${dealIfs(r, dimCol, dimVal)})`;
   const acvTab = [[
     "Month","Month-Start","All: Avg ACV",
     ...SEGS.map((s) => `Seg: ${s}`),
     ...REGIONS.map((s) => `Reg: ${s}`),
     ...AES.map(([, short]) => `AE: ${short}`),
+    // monthly WON ARR (NB+Expansion) — the dashboard accumulates these into the
+    // cumulative bars behind each avg-ACV trend line
+    "Sum All",
+    ...SEGS.map((s) => `Sum Seg: ${s}`),
+    ...REGIONS.map((s) => `Sum Reg: ${s}`),
+    ...AES.map(([, short]) => `Sum AE: ${short}`),
   ]];
   acvMonths.forEach((ms, i) => {
     const r = i + 2;
@@ -228,6 +241,10 @@ async function main() {
       ...SEGS.map((s) => avgIf(r, "G", s)),
       ...REGIONS.map((s) => avgIf(r, "J", s)),
       ...AES.map(([full]) => avgIf(r, "C", full)),
+      sumIf(r, "", ""),
+      ...SEGS.map((s) => sumIf(r, "G", s)),
+      ...REGIONS.map((s) => sumIf(r, "J", s)),
+      ...AES.map(([full]) => sumIf(r, "C", full)),
     ]);
   });
 
@@ -241,7 +258,7 @@ async function main() {
     { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 22 } } } },
     { addSheet: { properties: { title: "ARR_MoM_Rebuild" } } },
     { addSheet: { properties: { title: "ARR_MoM_Segments", gridProperties: { rowCount: seg.length + 10, columnCount: 30 } } } },
-    { addSheet: { properties: { title: "ACV_MoM" } } },
+    { addSheet: { properties: { title: "ACV_MoM", gridProperties: { rowCount: 20, columnCount: 50 } } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_Pull!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pull } });

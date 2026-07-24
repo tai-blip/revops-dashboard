@@ -139,7 +139,11 @@ export function parseArrMomRebuildTab(rows: Row[]): ArrMomPoint[] {
 export type AcvMomData = {
   months: string[]; // display labels e.g. "Jul 2026"
   all: (number | null)[];
-  groups: { key: "segment" | "region" | "ae"; series: { name: string; values: (number | null)[] }[] }[];
+  allSums: (number | null)[];
+  groups: {
+    key: "segment" | "region" | "ae";
+    series: { name: string; values: (number | null)[]; sums: (number | null)[] }[];
+  }[];
 };
 
 export function parseAcvMomTab(rows: Row[]): AcvMomData | null {
@@ -148,14 +152,21 @@ export function parseAcvMomTab(rows: Row[]): AcvMomData | null {
   const data = rows.slice(1).filter((r) => r?.[0]);
   const months = data.map((r) => String(r[0]));
   const colVals = (c: number) => data.map((r) => (typeof r[c] === "number" ? (r[c] as number) : null));
+  const findCol = (name: string) => header.findIndex((h) => h === name);
+  // avg columns are "Seg: X"; their monthly won-ARR twins are "Sum Seg: X"
   const group = (prefix: string) =>
     header
       .map((h, c) => ({ h, c }))
       .filter(({ h }) => h.startsWith(prefix))
-      .map(({ h, c }) => ({ name: h.slice(prefix.length), values: colVals(c) }));
+      .map(({ h, c }) => {
+        const sumCol = findCol(`Sum ${h}`);
+        return { name: h.slice(prefix.length), values: colVals(c), sums: sumCol >= 0 ? colVals(sumCol) : months.map(() => null) };
+      });
+  const sumAll = findCol("Sum All");
   return {
     months,
     all: colVals(2),
+    allSums: sumAll >= 0 ? colVals(sumAll) : months.map(() => null),
     groups: [
       { key: "segment", series: group("Seg: ") },
       { key: "region", series: group("Reg: ") },
