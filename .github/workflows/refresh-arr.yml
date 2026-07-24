@@ -24,7 +24,10 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci
+      - name: SF imports (Query 1/2 + LiveARR — replaces Coefficient)
+        run: node scripts/refresh-sf-imports.mjs
       - name: ARR MoM (SFDC → Sheet)
+        if: always()
         run: node scripts/refresh-arr-from-sfdc.mjs
       - name: Lead-conversion compliance
         if: always()
@@ -35,3 +38,6 @@ jobs:
       - name: Opps without a contact
         if: always()
         run: node scripts/refresh-opps-without-contact.mjs
+      - name: Sheet health check
+        if: always()
+        run: node scripts/check-sheet.mjs
