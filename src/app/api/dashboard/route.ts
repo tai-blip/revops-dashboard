@@ -7,6 +7,7 @@ import {
   parsePipelineTab,
   parsePipelineWowTab,
 } from "@/lib/parse";
+import { computeAcvInsights } from "@/lib/acvInsights";
 import {
   parseQuery1,
   parseQuery2,
@@ -45,7 +46,7 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows] =
+    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows] =
       await Promise.all([
         getSheetValues("ARR & recurring revenue"),
         getSheetValues("ARR MoM Progression", "A1:D400"),
@@ -55,6 +56,9 @@ export async function GET() {
         getSheetValues("Query 1", "A1:Z1000"),
         getSheetValues("Query 2", "A1:Z2000"),
         getSheetValues("Forecasting", "A1:T45"),
+        // Daily SFDC pull (all closed deals + dimensions) — powers ACV & Deal Size.
+        // Tolerate absence so the dashboard still loads if the pull hasn't run.
+        getSheetValues("SOQL_ClosedDeals", "A1:T4000").catch(() => [] as (string | number | null)[][]),
       ]);
 
     const arr = parseArrTab(arrRows);
@@ -135,6 +139,7 @@ export async function GET() {
     const currentYear = new Date().getUTCFullYear();
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
     const acv = computeAcvDistribution(closedDeals);
+    const acvInsights = computeAcvInsights(closedDealsRows);
 
     // Who Does What — open deals grouped by owner, flagged if stale (>60d since last stage change)
     const now = new Date();
@@ -190,6 +195,7 @@ export async function GET() {
       winRates: { derived: winRates.derived, n: winRates.n, overall: winRates.overall },
       winRateYtd,
       acv,
+      acvInsights,
       whoDoesWhat: byOwner,
       cwSplitByOwner,
       coverageByOwner,

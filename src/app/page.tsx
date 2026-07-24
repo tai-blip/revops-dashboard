@@ -6,6 +6,7 @@ import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
 import { GroupedBarChart } from "@/lib/GroupedBarChart";
+import { StackedBarChart } from "@/lib/StackedBarChart";
 import { Sparkline, DeltaPill, wowDeltaPct, fmtMetricValue } from "@/lib/Sparkline";
 import { PlanChart } from "@/lib/PlanChart";
 import { TabHeader } from "@/lib/TabHeader";
@@ -112,6 +113,15 @@ type DashboardData = {
     median: number;
     count: number;
   };
+  acvInsights?: {
+    windowLabel: string;
+    totals: { count: number; avg: number; median: number; totalARR: number };
+    segments: { seg: string; count: number; avg: number; median: number; totalARR: number; medianCycle: number | null; cycleN: number }[];
+    geo: { label: string; wonCount: number; lostCount: number; winRate: number | null; avg: number; median: number; totalARR: number }[];
+    regions: { region: string; count: number; avg: number; median: number; totalARR: number }[];
+    byAE: { owner: string; count: number; avg: number; median: number; totalARR: number }[];
+    arrByTier: { months: string[]; tiers: { tier: string; values: number[] }[] };
+  } | null;
   whoDoesWhat: Record<
     string,
     { openCount: number; openArr: number; staleCount: number; staleArr: number }
@@ -2129,62 +2139,188 @@ export default function Dashboard() {
         </div>
       )}
 
-      {tab === "acv" && (
-        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          {tabSummaries && (
-            <TabHeader label="ACV & Deal Size" sentence={tabSummaries.acv.sentence} stats={tabSummaries.acv.stats} />
-          )}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 20 }}>
-            <Card title="Average Deal Size">
-              <div style={{ padding: 20 }}>
-                <KV label="Across all won deals (18mo)" v={fmt(data.acv.avg)} />
-              </div>
-            </Card>
-            <Card title="Median Deal Size">
-              <div style={{ padding: 20 }}>
-                <KV label="Less skewed by outliers" v={fmt(data.acv.median)} />
-              </div>
-            </Card>
-            <Card title="Win Rate (YTD)">
-              <div style={{ padding: 20 }}>
-                <KV
-                  label={`${data.winRateYtd.wonCount} of ${data.winRateYtd.closedCount} closed New Biz`}
-                  v={data.winRateYtd.winRate != null ? pct(data.winRateYtd.winRate) : "—"}
-                  color={C.navy}
-                />
-              </div>
-            </Card>
+      {tab === "acv" && (() => {
+        const I = data.acvInsights;
+        const kM = (n: number) => {
+          const a = Math.abs(n);
+          if (a >= 1e6) return "$" + (a / 1e6).toFixed(2) + "M";
+          if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
+          return "$" + Math.round(a);
+        };
+        const TIER_COLORS = [C.navy, C.teal, C.coral, C.purp, C.ylw, C.red, C.navy2];
+        return (
+          <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+            {tabSummaries && (
+              <TabHeader label="ACV & Deal Size" sentence={tabSummaries.acv.sentence} stats={tabSummaries.acv.stats} />
+            )}
+
+            {!I && (
+              <Card title="ACV insights unavailable" sub="The SOQL_ClosedDeals tab hasn't been populated yet — run the daily SFDC refresh.">
+                <div style={{ padding: 20, color: C.t3, fontSize: 13 }}>Falling back once the pull runs.</div>
+              </Card>
+            )}
+
+            {I && (
+              <>
+                {/* ── ACV by Deal Segment (incl. sales cycle by segment) ── */}
+                <Card
+                  title="ACV & Sales Cycle by Deal Segment"
+                  sub={`Won deals (Billing + Closed Won), ${I.windowLabel} · segments from SFDC Merchant Segment · cycle = SQL → Closed Won`}
+                  accent={C.coral}
+                >
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: C.s1, borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Segment</Th>
+                        <Th># Won</Th>
+                        <Th>Avg ACV</Th>
+                        <Th>Median ACV</Th>
+                        <Th>Total ARR</Th>
+                        <Th>Median Cycle</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {I.segments.map((s) => (
+                        <tr key={s.seg} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <Td l bold>{s.seg}</Td>
+                          <Td mono>{s.count}</Td>
+                          <Td mono color={C.navy2}>{kM(s.avg)}</Td>
+                          <Td mono bold>{kM(s.median)}</Td>
+                          <Td mono>{kM(s.totalARR)}</Td>
+                          <Td mono color={C.purp}>{s.medianCycle != null ? `${s.medianCycle}d` : "—"}{s.cycleN ? <span style={{ color: C.t3, fontWeight: 400 }}> · n={s.cycleN}</span> : null}</Td>
+                        </tr>
+                      ))}
+                      <tr style={{ background: C.s1, borderTop: `2px solid ${C.navy}` }}>
+                        <Td l bold>All segments</Td>
+                        <Td mono bold>{I.totals.count}</Td>
+                        <Td mono bold color={C.navy2}>{kM(I.totals.avg)}</Td>
+                        <Td mono bold>{kM(I.totals.median)}</Td>
+                        <Td mono bold>{kM(I.totals.totalARR)}</Td>
+                        <Td mono>—</Td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </Card>
+
+                {/* ── Win rate US vs International ── */}
+                <Card
+                  title="Win Rate & ACV — US vs International"
+                  sub={`${I.windowLabel} · US = Deal Country "United States" · win rate on New Business only (won / won+lost); ACV on all won deals in the geo`}
+                >
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+                    {I.geo.map((g, gi) => (
+                      <div key={g.label} style={{ padding: "18px 24px", borderLeft: gi ? `1px solid ${C.s1}` : "none" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: gi ? C.teal : C.navy }}>{g.label}</div>
+                        <div style={{ fontSize: 34, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: gi ? C.teal : C.navy, margin: "6px 0 2px" }}>
+                          {g.winRate != null ? pct(g.winRate) : "—"}
+                        </div>
+                        <div style={{ fontSize: 12.5, color: C.t2 }}>{g.wonCount} won · {g.lostCount} lost</div>
+                        <div style={{ display: "flex", gap: 28, marginTop: 12 }}>
+                          <KV label="Avg ACV" v={kM(g.avg)} />
+                          <KV label="Median ACV" v={kM(g.median)} />
+                          <KV label="Won ARR" v={kM(g.totalARR)} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+
+                {/* ── ARR by Location Tier — MoM this year ── */}
+                <Card
+                  title={`ARR by Location Tier — ${new Date().getUTCFullYear()} MoM`}
+                  sub="Point-in-time active ARR at each month-end, split by SFDC Location Tiers (locations in contract)"
+                  accent={C.purp}
+                >
+                  <div style={{ padding: "16px 20px" }}>
+                    <StackedBarChart
+                      labels={I.arrByTier.months}
+                      series={I.arrByTier.tiers.map((t, i) => ({ label: t.tier, values: t.values, color: TIER_COLORS[i % TIER_COLORS.length] }))}
+                    />
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10, fontSize: 11.5, color: C.t2 }}>
+                      {I.arrByTier.tiers.map((t, i) => (
+                        <span key={t.tier} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ width: 11, height: 11, borderRadius: 2, background: TIER_COLORS[i % TIER_COLORS.length], display: "inline-block" }} />
+                          {t.tier} · {kM(t.values[t.values.length - 1] ?? 0)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </Card>
+
+                {/* ── ACV by AE + by Region ── */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  <Card title="ACV by AE" sub={`Won deals, ${I.windowLabel}`}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                          <Th l>AE</Th>
+                          <Th># Won</Th>
+                          <Th>Median ACV</Th>
+                          <Th>Total ARR</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {I.byAE.slice(0, 10).map((a) => (
+                          <tr key={a.owner} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                            <Td l bold>{a.owner}</Td>
+                            <Td mono>{a.count}</Td>
+                            <Td mono>{kM(a.median)}</Td>
+                            <Td mono bold color={C.navy2}>{kM(a.totalARR)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Card>
+                  <Card title="ACV by Region" sub={`Won deals, ${I.windowLabel} · SFDC Region`}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                          <Th l>Region</Th>
+                          <Th># Won</Th>
+                          <Th>Median ACV</Th>
+                          <Th>Total ARR</Th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {I.regions.map((r) => (
+                          <tr key={r.region} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                            <Td l bold>{r.region}</Td>
+                            <Td mono>{r.count}</Td>
+                            <Td mono>{kM(r.median)}</Td>
+                            <Td mono bold color={C.navy2}>{kM(r.totalARR)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Card>
+                </div>
+
+                {/* ── Deal size distribution (kept from previous version) ── */}
+                <Card title="Deal Size Distribution" sub={`Won deals, ${I.windowLabel}`}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Range</Th>
+                        <Th># Deals</Th>
+                        <Th>Total ARR</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.acv.buckets.map((b) => (
+                        <tr key={b.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <Td l bold>{b.label}</Td>
+                          <Td mono>{b.count}</Td>
+                          <Td mono>{fmt(b.arr)}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Card>
+              </>
+            )}
           </div>
-
-          <Card title="Avg Sales Cycle (YTD)" sub="Days from SQL to close, won New Business deals">
-            <div style={{ padding: 20, display: "flex", gap: 40 }}>
-              <KV label="Average" v={data.winRateYtd.avgCycle != null ? `${data.winRateYtd.avgCycle.toFixed(0)}d` : "—"} />
-              <KV label="Median" v={data.winRateYtd.medianCycle != null ? `${data.winRateYtd.medianCycle}d` : "—"} />
-            </div>
-          </Card>
-
-          <Card title="Deal Size Distribution">
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                  <Th l>Range</Th>
-                  <Th># Deals</Th>
-                  <Th>Total ARR</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.acv.buckets.map((b) => (
-                  <tr key={b.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                    <Td l bold>{b.label}</Td>
-                    <Td mono>{b.count}</Td>
-                    <Td mono>{fmt(b.arr)}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-        </div>
-      )}
+        );
+      })()}
 
       {tab === "productarr" && (() => {
         const monthly = data.arr.monthly.filter((p) => p.label.startsWith("2026-"));
