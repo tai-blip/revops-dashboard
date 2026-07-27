@@ -371,9 +371,9 @@ function PerLocationCard({
   expansion,
 }: {
   months: string[];
-  total: number[];
-  newBiz: number[];
-  expansion: number[];
+  total: (number | null)[];
+  newBiz: (number | null)[];
+  expansion: (number | null)[];
 }) {
   const rows = [
     { label: "Total (book)", values: total, color: C.navy },
@@ -2778,8 +2778,14 @@ export default function Dashboard() {
                     <tbody>
                       {M.aeBreakdown.slice(0, 10).map((a) => (
                         <tr key={a.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                          <Td l bold>{a.name}</Td><Td mono>{a.deals}</Td><Td mono>{kM(a.newArr)}</Td>
-                          <td style={{ textAlign: "right", padding: "10px 16px" }}>{annPill(a.annualPctArr)}</td><Td mono>{kM(a.annualCash)}</Td>
+                          <Td l bold>{a.name}</Td><Td mono>{a.deals}</Td><Td mono>{a.deals === 0 ? "—" : kM(a.newArr)}</Td>
+                          {a.deals === 0 ? (
+                            <td colSpan={2} style={{ textAlign: "right", padding: "10px 16px", fontSize: 12, fontStyle: "italic", color: C.t3 }}>no won deals yet</td>
+                          ) : (
+                            <>
+                              <td style={{ textAlign: "right", padding: "10px 16px" }}>{annPill(a.annualPctArr)}</td><Td mono>{kM(a.annualCash)}</Td>
+                            </>
+                          )}
                         </tr>
                       ))}
                     </tbody>

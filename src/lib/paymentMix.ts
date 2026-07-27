@@ -154,6 +154,14 @@ export function computePaymentMix(rows: Row[]): PaymentMix | null {
     name, deals: list.length, newArr: sum(list), annualPctArr: annualPct(list),
     annualCash: sum(list.filter((d) => d.term === "Annual")), avgAcv: list.length ? sum(list) / list.length : 0,
   })).sort((a, b) => b.newArr - a.newArr);
+  // Active AEs with zero won deals this year still belong on the roster (their
+  // pipeline just hasn't gone live yet) — append them so no one looks "missing".
+  const AE_ALWAYS_SHOW = ["Jill Bucci"];
+  for (const name of AE_ALWAYS_SHOW) {
+    if (!aeBreakdown.some((a) => a.name === name)) {
+      aeBreakdown.push({ name, deals: 0, newArr: 0, annualPctArr: 0, annualCash: 0, avgAcv: 0 });
+    }
+  }
   const renYtd = ytd.filter((d) => d.isRen);
   const csmBreakdown = [...groupBy(renYtd, (d) => d.am)].filter(([name]) => !CSM_EXCLUDE.has(name)).map(([name, list]) => ({
     name, deals: list.length, renArr: sum(list), annualPctArr: annualPct(list),
