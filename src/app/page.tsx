@@ -166,7 +166,7 @@ const TABS = [
   ["health", "Deal Health"],
   ["attainment", "AE Attainment"],
   ["acv", "ACV & Deal Size"],
-  ["paymentmix", "Payment Mix Report"],
+  ["paymentmix", "Payment Mix"],
   ["productarr", "Product ARR"],
 ] as const;
 
@@ -332,21 +332,25 @@ function PaymentMixMomentumCard({
           <div style={{ fontSize: 12.5, color: C.t2 }}>YoY {pill(yoy)}</div>
           <div style={{ fontSize: 12, color: C.t3 }}>{s.term}: {short[n - 1]} {kFmt(cur)}</div>
         </div>
+        {/* ARR $ per month for ALL three terms (selected term highlighted),
+            then a MoM% row for the selected term. Click a term row to chart it. */}
         <div style={{ overflowX: "auto", marginTop: 10 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                <th style={{ textAlign: "left", padding: "5px 8px", color: C.t3, fontWeight: 700 }}>{s.term} ARR</th>
+                <th style={{ textAlign: "left", padding: "5px 8px", color: C.t3, fontWeight: 700 }}>ARR by term ($)</th>
                 {short.map((m, i) => <th key={i} style={{ textAlign: "right", padding: "5px 8px", color: C.t3, fontWeight: 700 }}>{m}</th>)}
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td style={{ padding: "5px 8px", fontWeight: 700 }}>$</td>
-                {s.arr.map((v, i) => <td key={i} style={{ padding: "5px 8px", textAlign: "right", fontFamily: "var(--font-dm-mono)" }}>{v ? kFmt(v) : "—"}</td>)}
-              </tr>
-              <tr>
-                <td style={{ padding: "5px 8px", color: C.t3 }}>MoM%</td>
+              {series.map((row, ri) => (
+                <tr key={row.term} onClick={() => setSel(ri)} style={{ cursor: "pointer", background: ri === sel ? C.s1 : "transparent", borderBottom: `1px solid ${C.s1}` }}>
+                  <td style={{ padding: "5px 8px", fontWeight: ri === sel ? 800 : 600, color: ri === sel ? accent : C.t2 }}>{row.term}</td>
+                  {row.arr.map((v, i) => <td key={i} style={{ padding: "5px 8px", textAlign: "right", fontFamily: "var(--font-dm-mono)", fontWeight: ri === sel ? 700 : 400 }}>{v ? kFmt(v) : "—"}</td>)}
+                </tr>
+              ))}
+              <tr style={{ borderTop: `1px solid ${C.bd}` }}>
+                <td style={{ padding: "5px 8px", color: C.t3 }}>{s.term} MoM%</td>
                 {s.arr.map((v, i) => { const d = i === 0 ? null : pctD(v, s.arr[i - 1]); return <td key={i} style={{ padding: "5px 8px", textAlign: "right" }}>{d == null ? "—" : <span style={{ color: d >= 0 ? C.grn : C.red }}>{d >= 0 ? "+" : ""}{d.toFixed(0)}%</span>}</td>; })}
               </tr>
             </tbody>
@@ -354,6 +358,87 @@ function PaymentMixMomentumCard({
         </div>
       </div>
     </Card>
+  );
+}
+
+// $/Location per month — one line at a time (toggle), with a table of all three
+// series below. Modeled on the Pipeline Progression chart so the three lines
+// don't overlap into an unreadable tangle of value labels.
+function PerLocationCard({
+  months,
+  total,
+  newBiz,
+  expansion,
+}: {
+  months: string[];
+  total: number[];
+  newBiz: number[];
+  expansion: number[];
+}) {
+  const rows = [
+    { label: "Total (book)", values: total, color: C.navy },
+    { label: "New Business", values: newBiz, color: C.coral },
+    { label: "Expansion", values: expansion, color: C.teal },
+  ];
+  const [sel, setSel] = useState(0);
+  const active = rows[Math.min(sel, rows.length - 1)];
+  const short = months.map((m) => m.split(" ")[0]);
+  return (
+    <div style={{ padding: "16px 20px" }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {rows.map((r, i) => (
+          <button
+            key={r.label}
+            onClick={() => setSel(i)}
+            style={{
+              padding: "5px 12px", fontSize: 12, fontWeight: 600, borderRadius: 6,
+              border: `1px solid ${i === sel ? r.color : C.bd}`,
+              background: i === sel ? r.color : "#fff",
+              color: i === sel ? "#fff" : C.t2, cursor: "pointer",
+            }}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
+      <LineTrendChart
+        labels={short}
+        series={[{ label: active.label, values: active.values, color: active.color }]}
+        valueFormat="currency"
+        showValues
+      />
+
+      <div style={{ overflowX: "auto", marginTop: 16 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+              <Th l>$ / Location</Th>
+              {short.map((m) => <Th key={m}>{m}</Th>)}
+              <Th>MoM</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr
+                key={r.label}
+                onClick={() => setSel(i)}
+                style={{ borderBottom: `1px solid ${C.s1}`, cursor: "pointer", background: i === sel ? C.s1 : "transparent" }}
+              >
+                <Td l bold={i === sel}>
+                  <span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: r.color, marginRight: 7, verticalAlign: "middle" }} />
+                  {r.label}
+                </Td>
+                {r.values.map((v, j) => <Td key={j} mono>{v == null ? "—" : fmt(v)}</Td>)}
+                <td style={{ textAlign: "right", padding: "10px 16px" }}>
+                  <DeltaPill delta={wowDeltaPct(r.values)} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -2419,18 +2504,12 @@ export default function Dashboard() {
                     sub="Total = active-book ARR ÷ active locations ÷ 12 · New Biz / Expansion = ARR of those deals won that month ÷ their locations ÷ 12 · sheet-computed (ARR_per_Location_MoM tab)"
                     accent={C.teal}
                   >
-                    <div style={{ padding: "16px 20px" }}>
-                      <LineTrendChart
-                        labels={data.perLocation.months.map((m) => m.split(" ")[0])}
-                        series={[
-                          { label: "Total (book)", values: data.perLocation.total, color: C.navy },
-                          { label: "New Business", values: data.perLocation.newBiz, color: C.coral },
-                          { label: "Expansion", values: data.perLocation.expansion, color: C.teal },
-                        ]}
-                        valueFormat="currency"
-                        showValues
-                      />
-                    </div>
+                    <PerLocationCard
+                      months={data.perLocation.months}
+                      total={data.perLocation.total}
+                      newBiz={data.perLocation.newBiz}
+                      expansion={data.perLocation.expansion}
+                    />
                   </Card>
                 )}
 
@@ -2607,7 +2686,18 @@ export default function Dashboard() {
           if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
           return "$" + Math.round(n);
         };
-        const pctColor = (p: number) => (p >= 66 ? C.grn : p >= 33 ? C.ylw : C.red);
+        // Annual-mix % badge — underperformers (<50%) get a solid red block so they
+        // pop; at/above 50% is a soft green pill. 50% is the annual-mix target line.
+        const annPill = (p: number) => {
+          const low = p < 50;
+          return (
+            <span style={{
+              display: "inline-block", minWidth: 46, textAlign: "center", padding: "3px 9px",
+              borderRadius: 6, fontFamily: "var(--font-dm-mono)", fontWeight: 800, fontSize: 12.5,
+              background: low ? C.red : C.grnBg, color: low ? "#fff" : C.grn,
+            }}>{p.toFixed(0)}%</span>
+          );
+        };
         const stat = (labelTxt: string, big: string, sub: string, tone?: string) => (
           <div style={{ background: C.card, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "14px 18px" }}>
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: C.t3 }}>{labelTxt}</div>
@@ -2618,7 +2708,7 @@ export default function Dashboard() {
         return (
           <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
             <TabHeader
-              label="Payment Mix Report"
+              label="Payment Mix"
               sentence={M
                 ? `${M.monthLabel}: New Business is ${M.headline.newAnnualPct.toFixed(0)}% annual mix (${M.headline.nbAnnualDeals}/${M.headline.nbTotalDeals} deals), Renewals ${M.headline.renAnnualPct.toFixed(0)}% (${M.headline.renAnnualDeals}/${M.headline.renTotalDeals}). Annual cash collected: ${kM(M.headline.annualCashTotal)}.`
                 : "Payment-term monitoring — annual vs quarterly vs monthly. Awaiting the SOQL_PaymentMix pull."}
@@ -2689,7 +2779,7 @@ export default function Dashboard() {
                       {M.aeBreakdown.slice(0, 10).map((a) => (
                         <tr key={a.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
                           <Td l bold>{a.name}</Td><Td mono>{a.deals}</Td><Td mono>{kM(a.newArr)}</Td>
-                          <Td mono color={pctColor(a.annualPctArr)}>{a.annualPctArr.toFixed(0)}%</Td><Td mono>{kM(a.annualCash)}</Td>
+                          <td style={{ textAlign: "right", padding: "10px 16px" }}>{annPill(a.annualPctArr)}</td><Td mono>{kM(a.annualCash)}</Td>
                         </tr>
                       ))}
                     </tbody>
@@ -2702,7 +2792,7 @@ export default function Dashboard() {
                       {M.csmBreakdown.slice(0, 10).map((a) => (
                         <tr key={a.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
                           <Td l bold>{a.name}</Td><Td mono>{a.deals}</Td><Td mono>{kM(a.renArr)}</Td>
-                          <Td mono color={pctColor(a.annualPctArr)}>{a.annualPctArr.toFixed(0)}%</Td><Td mono>{kM(a.annualCash)}</Td>
+                          <td style={{ textAlign: "right", padding: "10px 16px" }}>{annPill(a.annualPctArr)}</td><Td mono>{kM(a.annualCash)}</Td>
                         </tr>
                       ))}
                     </tbody>
