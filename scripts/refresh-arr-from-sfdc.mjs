@@ -47,12 +47,22 @@ const gAuth = new google.auth.JWT({
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
-const SOQL = `SELECT Id, Name, AccountId, Owner.Name, RecordType.Name, StageName, Status__c,
+const SOQL = `SELECT Id, Name, AccountId, Account.Name, Owner.Name, RecordType.Name, StageName, Status__c,
   convertCurrency(AnnualContractValueARR__c),
   Merchant_Segment__c, Location_Tiers__c, DealCountry__c, Region__c, ChannelofContact__c,
   Locations_in_Contract__c, CloseDate, Date_Reached_SQL__c, Date_Reached_Closed_Won__c,
-  Date_Reached_Closed_Lost__c, ContractLiveDate__c, ContractEndDate__c, CreatedDate
+  Date_Reached_Closed_Lost__c, ContractLiveDate__c, ContractEndDate__c, CreatedDate,
+  PaymentTerms__c, AccountManager__r.Name
   FROM Opportunity WHERE StageName IN ('Billing','Closed Won','Closed Lost')`.replace(/\s+/g, " ");
+
+// Normalize the messy PaymentTerms__c picklist into Annual / Quarterly / Monthly / Other.
+function normTerm(v) {
+  const s = String(v ?? "").toLowerCase();
+  if (s.startsWith("annual")) return "Annual";
+  if (s.startsWith("quarter")) return "Quarterly";
+  if (s.startsWith("monthly")) return "Monthly";
+  return "Other/Unknown";
+}
 
 function monthList(startY, startM /*1-based*/) {
   const now = new Date();
@@ -86,6 +96,31 @@ async function main() {
     .catch(() => []);
   const targetByYm = {};
   for (const row of mp) { if (typeof row[0] === "number" && typeof row[1] === "number") targetByYm[ser2ym(row[0])] = row[1]; }
+
+  // 2b) SOQL_PaymentMix — the "database" for the Payment Mix Report. Won deals with
+  //     normalized payment term + Account Manager + ARR/dates/type, plus a per-account
+  //     "Prev Term" (payment term of that account's most recent EARLIER won deal) used
+  //     for the upcoming-renewals annual-conversion flag.
+  const wonSorted = [...won].sort((a, b) => String(a.ContractLiveDate__c ?? "").localeCompare(String(b.ContractLiveDate__c ?? "")));
+  const prevTermByAcct = {}; // last seen term per account as we walk chronologically
+  const prevTermFor = {};    // opp Id -> term of the account's prior won deal
+  for (const x of wonSorted) {
+    prevTermFor[x.Id] = prevTermByAcct[x.AccountId] ?? "";
+    prevTermByAcct[x.AccountId] = normTerm(x.PaymentTerms__c);
+  }
+  const pmix = [[
+    "Id","Opportunity","Account","Type","Payment Term","ARR (USD)","Owner","Account Manager",
+    "Region","Deal Country","ContractLiveDate","ContractEndDate","Prev Term (N-1)",
+  ]];
+  for (const x of won) {
+    pmix.push([
+      x.Id, x.Name, x.Account?.Name ?? "",
+      x.RecordType?.Name ?? "", normTerm(x.PaymentTerms__c), x.AnnualContractValueARR__c ?? 0,
+      x.Owner?.Name ?? "", x.AccountManager__r?.Name ?? "",
+      x.Region__c ?? "", x.DealCountry__c ?? "",
+      x.ContractLiveDate__c ?? "", x.ContractEndDate__c ?? "", prevTermFor[x.Id] ?? "",
+    ]);
+  }
 
   // 3) Month rows (Apr 2021 -> current month)
   const months = monthList(2021, 4);
@@ -286,7 +321,7 @@ async function main() {
   const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "sheets.properties(sheetId,title)" });
   const byTitle = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
   const reqs = [];
-  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
+  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
   reqs.push(
     { addSheet: { properties: { title: "SOQL_Pull" } } },
     { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 22 } } } },
@@ -294,6 +329,7 @@ async function main() {
     { addSheet: { properties: { title: "ARR_MoM_Segments", gridProperties: { rowCount: seg.length + 10, columnCount: 30 } } } },
     { addSheet: { properties: { title: "ACV_MoM", gridProperties: { rowCount: 20, columnCount: 50 } } } },
     { addSheet: { properties: { title: "ARR_per_Location_MoM", gridProperties: { rowCount: 20, columnCount: 12 } } } },
+    { addSheet: { properties: { title: "SOQL_PaymentMix", gridProperties: { rowCount: pmix.length + 10, columnCount: 14 } } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_Pull!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pull } });
@@ -303,6 +339,7 @@ async function main() {
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Segments!A1", valueInputOption: "USER_ENTERED", requestBody: { values: seg } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ACV_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: acvTab } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_per_Location_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: perLoc } });
+  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_PaymentMix!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pmix } });
 
   // 8) Report latest month + MAPE vs target
   const back = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `ARR_MoM_Rebuild!A2:G${months.length+1}`, valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];
