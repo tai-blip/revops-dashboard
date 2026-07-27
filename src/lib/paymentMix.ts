@@ -23,10 +23,10 @@ export type PaymentMix = {
     nb: { term: string; deals: number; arr: number }[];
     ren: { term: string; deals: number; arr: number }[];
   };
-  momentum: {                         // last 6 months × term, NB and Renewals
+  momentum: {                         // Jan(current yr)→now × term, NB and Renewals
     months: string[];
-    nb: { term: string; arr: number[]; annualPct: number[] }[];
-    ren: { term: string; arr: number[]; annualPct: number[] }[];
+    nb: { term: string; arr: number[]; pct: number[]; yoyArr: number[] }[];
+    ren: { term: string; arr: number[]; pct: number[]; yoyArr: number[] }[];
   };
   flags: { type: "NB" | "Renewal"; rep: string; opp: string; term: string; arr: number }[]; // current-month non-annual
   aeBreakdown: { name: string; deals: number; newArr: number; annualPctArr: number; annualCash: number; avgAcv: number }[];
@@ -109,20 +109,23 @@ export function computePaymentMix(rows: Row[]): PaymentMix | null {
     TERMS.map((t) => ({ term: t, deals: list.filter((d) => d.term === t).length, arr: sum(list.filter((d) => d.term === t)) }));
   const byTerm = { nb: termTable(nbCur), ren: termTable(renCur) };
 
-  // ---- Momentum (last 6 months × term) ----
-  const monthsBack: { y: number; m0: number }[] = [];
-  for (let k = 5; k >= 0; k--) {
-    const d = new Date(Date.UTC(curY, curM - k, 1));
-    monthsBack.push({ y: d.getUTCFullYear(), m0: d.getUTCMonth() });
-  }
+  // ---- Momentum: Jan (current year) → current month, per type × term.
+  //      arr = $ that month on that term; pct = that term's share of the type's ARR
+  //      that month; yoyArr = same month one year earlier (for YoY delta). ----
+  const ytdM: { y: number; m0: number }[] = [];
+  for (let m0 = 0; m0 <= curM; m0++) ytdM.push({ y: curY, m0 });
   const momentumFor = (pred: (d: Deal) => boolean) =>
     TERMS.map((t) => ({
       term: t,
-      arr: monthsBack.map(({ y, m0 }) => sum(deals.filter((d) => pred(d) && d.term === t && inMonth(d, y, m0)))),
-      annualPct: monthsBack.map(({ y, m0 }) => annualPct(deals.filter((d) => pred(d) && inMonth(d, y, m0)))),
+      arr: ytdM.map(({ y, m0 }) => sum(deals.filter((d) => pred(d) && d.term === t && inMonth(d, y, m0)))),
+      pct: ytdM.map(({ y, m0 }) => {
+        const tot = sum(deals.filter((d) => pred(d) && inMonth(d, y, m0)));
+        return tot ? sum(deals.filter((d) => pred(d) && d.term === t && inMonth(d, y, m0))) / tot * 100 : 0;
+      }),
+      yoyArr: ytdM.map(({ y, m0 }) => sum(deals.filter((d) => pred(d) && d.term === t && inMonth(d, y - 1, m0)))),
     }));
   const momentum = {
-    months: monthsBack.map(({ y, m0 }) => label(y, m0)),
+    months: ytdM.map(({ y, m0 }) => label(y, m0)),
     nb: momentumFor((d) => d.isNB),
     ren: momentumFor((d) => d.isRen),
   };
@@ -141,13 +144,18 @@ export function computePaymentMix(rows: Row[]): PaymentMix | null {
     for (const d of list) { const k = key(d) || "(unassigned)"; (m.get(k) ?? m.set(k, []).get(k)!).push(d); }
     return m;
   };
+  // AE view excludes departed/non-AE owners (Tai's call); CSM view excludes the
+  // "System" automation user (auto-renewals with no CSM assigned — see the report's
+  // misattribution flag; it's not a real person).
+  const AE_EXCLUDE = new Set(["Osman Mubarak", "Dorsa Mahmoudnia"]);
+  const CSM_EXCLUDE = new Set(["System", "(unassigned)"]);
   const nbYtd = ytd.filter((d) => d.isNB);
-  const aeBreakdown = [...groupBy(nbYtd, (d) => d.owner)].map(([name, list]) => ({
+  const aeBreakdown = [...groupBy(nbYtd, (d) => d.owner)].filter(([name]) => !AE_EXCLUDE.has(name)).map(([name, list]) => ({
     name, deals: list.length, newArr: sum(list), annualPctArr: annualPct(list),
     annualCash: sum(list.filter((d) => d.term === "Annual")), avgAcv: list.length ? sum(list) / list.length : 0,
   })).sort((a, b) => b.newArr - a.newArr);
   const renYtd = ytd.filter((d) => d.isRen);
-  const csmBreakdown = [...groupBy(renYtd, (d) => d.am)].map(([name, list]) => ({
+  const csmBreakdown = [...groupBy(renYtd, (d) => d.am)].filter(([name]) => !CSM_EXCLUDE.has(name)).map(([name, list]) => ({
     name, deals: list.length, renArr: sum(list), annualPctArr: annualPct(list),
     annualCash: sum(list.filter((d) => d.term === "Annual")),
   })).sort((a, b) => b.renArr - a.renArr);

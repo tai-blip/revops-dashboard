@@ -144,7 +144,7 @@ type DashboardData = {
       newArr: number; newAnnualPct: number; renArr: number; renAnnualPct: number; annualCashTotal: number;
     };
     byTerm: { nb: { term: string; deals: number; arr: number }[]; ren: { term: string; deals: number; arr: number }[] };
-    momentum: { months: string[]; nb: { term: string; arr: number[]; annualPct: number[] }[]; ren: { term: string; arr: number[]; annualPct: number[] }[] };
+    momentum: { months: string[]; nb: { term: string; arr: number[]; pct: number[]; yoyArr: number[] }[]; ren: { term: string; arr: number[]; pct: number[]; yoyArr: number[] }[] };
     flags: { type: "NB" | "Renewal"; rep: string; opp: string; term: string; arr: number }[];
     aeBreakdown: { name: string; deals: number; newArr: number; annualPctArr: number; annualCash: number; avgAcv: number }[];
     csmBreakdown: { name: string; deals: number; renArr: number; annualPctArr: number; annualCash: number }[];
@@ -271,6 +271,84 @@ function MomProgressCard({
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// Payment-mix momentum for one deal type (New Business OR Renewals): toggle
+// Annual/Quarterly/Monthly; $ ARR bars with values on top + % share trend line
+// (own scale); Jan→now table with MoM/QoQ/YoY deltas, headlining MoM%.
+function PaymentMixMomentumCard({
+  title,
+  months,
+  series,
+  accent,
+}: {
+  title: string;
+  months: string[];
+  series: { term: string; arr: number[]; pct: number[]; yoyArr: number[] }[];
+  accent: string;
+}) {
+  const [sel, setSel] = useState(0);
+  const short = months.map((m) => m.split(" ")[0]);
+  const s = series[Math.min(sel, series.length - 1)];
+  const kFmt = (v: number) => (Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : Math.abs(v) >= 1e3 ? "$" + Math.round(v / 1e3) + "k" : "$" + Math.round(v));
+  const pctD = (a: number, b: number | null) => (b == null || b === 0 ? null : ((a - b) / b) * 100);
+  const n = s.arr.length;
+  const cur = s.arr[n - 1] ?? 0, prev = s.arr[n - 2] ?? null;
+  const mom = pctD(cur, prev);
+  const q1 = s.arr.slice(-3).reduce((x, y) => x + y, 0), q0 = s.arr.slice(-6, -3).reduce((x, y) => x + y, 0);
+  const qoq = q0 ? ((q1 - q0) / q0) * 100 : null;
+  const yoy = pctD(cur, s.yoyArr[n - 1] ?? null);
+  const pill = (v: number | null) =>
+    v == null ? <span style={{ color: C.t3 }}>—</span> : <span style={{ color: v >= 0 ? C.grn : C.red, fontWeight: 700 }}>{v >= 0 ? "+" : ""}{v.toFixed(0)}%</span>;
+  return (
+    <Card title={title} sub="Toggle a term · bars = $ ARR that month, line = % share of the type · Jan→now">
+      <div style={{ padding: "12px 20px 16px" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          {series.map((x, i) => (
+            <button key={x.term} onClick={() => setSel(i)} style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${C.bd}`, cursor: "pointer", background: i === sel ? C.navy : "#fff", color: i === sel ? "#fff" : C.t2 }}>{x.term}</button>
+          ))}
+        </div>
+        <BarTrendChart
+          labels={short}
+          values={s.arr}
+          valueFormat="currency"
+          barColor={C.s2}
+          showValues
+          lineOverlay={{ label: `${s.term} % share`, values: s.pct, color: accent }}
+          lineOverlayOwnScale
+          axisLeftLabel="ARR ($) — bars"
+          axisRightLabel="% share — line"
+        />
+        {/* Jan→now delta summary, headlining MoM% */}
+        <div style={{ display: "flex", gap: 20, marginTop: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+          <div><span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3 }}>MoM </span><span style={{ fontSize: 18 }}>{pill(mom)}</span></div>
+          <div style={{ fontSize: 12.5, color: C.t2 }}>QoQ {pill(qoq)}</div>
+          <div style={{ fontSize: 12.5, color: C.t2 }}>YoY {pill(yoy)}</div>
+          <div style={{ fontSize: 12, color: C.t3 }}>{s.term}: {short[n - 1]} {kFmt(cur)}</div>
+        </div>
+        <div style={{ overflowX: "auto", marginTop: 10 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                <th style={{ textAlign: "left", padding: "5px 8px", color: C.t3, fontWeight: 700 }}>{s.term} ARR</th>
+                {short.map((m, i) => <th key={i} style={{ textAlign: "right", padding: "5px 8px", color: C.t3, fontWeight: 700 }}>{m}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style={{ padding: "5px 8px", fontWeight: 700 }}>$</td>
+                {s.arr.map((v, i) => <td key={i} style={{ padding: "5px 8px", textAlign: "right", fontFamily: "var(--font-dm-mono)" }}>{v ? kFmt(v) : "—"}</td>)}
+              </tr>
+              <tr>
+                <td style={{ padding: "5px 8px", color: C.t3 }}>MoM%</td>
+                {s.arr.map((v, i) => { const d = i === 0 ? null : pctD(v, s.arr[i - 1]); return <td key={i} style={{ padding: "5px 8px", textAlign: "right" }}>{d == null ? "—" : <span style={{ color: d >= 0 ? C.grn : C.red }}>{d >= 0 ? "+" : ""}{d.toFixed(0)}%</span>}</td>; })}
+              </tr>
             </tbody>
           </table>
         </div>
@@ -2580,20 +2658,10 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              {/* Momentum — annual mix % over last 6 months (NB + Renewal lines) */}
-              <Card title="Annual-mix momentum" sub="Share of ARR on annual terms, last 6 months · New Business vs Renewals">
-                <div style={{ padding: "16px 20px" }}>
-                  <LineTrendChart
-                    labels={M.momentum.months.map((m) => m.split(" ")[0])}
-                    series={[
-                      { label: "New Business", values: M.momentum.nb.find((t) => t.term === "Annual")?.annualPct ?? [], color: C.navy },
-                      { label: "Renewals", values: M.momentum.ren.find((t) => t.term === "Annual")?.annualPct ?? [], color: C.teal },
-                    ]}
-                    valueFormat="percent"
-                    showValues
-                  />
-                </div>
-              </Card>
+              {/* Payment Mix Momentum — two cards (NB / Renewals), term toggle,
+                  $ bars + % share line, MoM/QoQ/YoY deltas (like the email's YTD) */}
+              <PaymentMixMomentumCard title="Payment Mix Momentum — New Business" months={M.momentum.months} series={M.momentum.nb} accent={C.navy} />
+              <PaymentMixMomentumCard title="Payment Mix Momentum — Renewals" months={M.momentum.months} series={M.momentum.ren} accent={C.teal} />
 
               {/* Flags — current-month non-annual */}
               {M.flags.length > 0 && (
