@@ -47,7 +47,7 @@ const gAuth = new google.auth.JWT({
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
-const SOQL = `SELECT Id, Name, AccountId, Account.Name, Owner.Name, RecordType.Name, StageName, Status__c,
+const SOQL = `SELECT Id, Name, AccountId, Account.Name, Account.Payment_Terms__c, Owner.Name, RecordType.Name, StageName, Status__c,
   convertCurrency(AnnualContractValueARR__c),
   Merchant_Segment__c, Location_Tiers__c, DealCountry__c, Region__c, ChannelofContact__c,
   Locations_in_Contract__c, CloseDate, Date_Reached_SQL__c, Date_Reached_Closed_Won__c,
@@ -110,15 +110,18 @@ async function main() {
   }
   const pmix = [[
     "Id","Opportunity","Account","Type","Payment Term","ARR (USD)","Owner","Account Manager",
-    "Region","Deal Country","ContractLiveDate","ContractEndDate","Prev Term (N-1)",
+    "Region","Deal Country","ContractLiveDate","ContractEndDate","Prev Term",
   ]];
   for (const x of won) {
+    // Prior term = the account's authoritative current arrangement (Account.Payment_Terms__c),
+    // falling back to the reconstructed N-1 (prior won deal on the account) when blank.
+    const acctTerm = x.Account?.Payment_Terms__c ? normTerm(x.Account.Payment_Terms__c) : "";
     pmix.push([
       x.Id, x.Name, x.Account?.Name ?? "",
       x.RecordType?.Name ?? "", normTerm(x.PaymentTerms__c), x.AnnualContractValueARR__c ?? 0,
       x.Owner?.Name ?? "", x.AccountManager__r?.Name ?? "",
       x.Region__c ?? "", x.DealCountry__c ?? "",
-      x.ContractLiveDate__c ?? "", x.ContractEndDate__c ?? "", prevTermFor[x.Id] ?? "",
+      x.ContractLiveDate__c ?? "", x.ContractEndDate__c ?? "", acctTerm || prevTermFor[x.Id] || "",
     ]);
   }
 
