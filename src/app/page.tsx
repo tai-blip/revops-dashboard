@@ -320,7 +320,7 @@ function PaymentMixMomentumCard({
           valueFormat="currency"
           barColor={C.s2}
           showValues
-          lineOverlay={{ label: `${s.term} % share`, values: s.pct, color: accent }}
+          lineOverlay={{ label: `${s.term} % share`, values: s.pct, color: accent, format: "percent" }}
           lineOverlayOwnScale
           axisLeftLabel="ARR ($) — bars"
           axisRightLabel="% share — line"
@@ -2807,17 +2807,29 @@ export default function Dashboard() {
               </div>
 
               {/* Upcoming renewals — next 90 days */}
-              <Card title="Upcoming Renewals — Next 90 Days" sub="Top 10 by ARR · ⚑ = prior term was Monthly/Quarterly (annual-conversion target)" accent={C.purp}>
+              <Card title="Upcoming Renewals — Next 90 Days" sub="Top 10 by ARR · ⚑ = prior term Monthly/Quarterly (annual-conversion target) · Monthly = biggest upside" accent={C.purp}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Account</Th><Th l>CSM</Th><Th>ARR</Th><Th>Prev Term</Th><Th>End Date</Th></tr></thead>
                   <tbody>
-                    {M.upcoming.map((u, i) => (
-                      <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                        <Td l bold>{u.convert ? "⚑ " : ""}{u.account}</Td><Td l>{u.csm}</Td>
-                        <Td mono>{kM(u.arr)}</Td>
-                        <Td color={u.convert ? C.coralDk : C.t2}>{u.prevTerm}</Td><Td mono>{u.endDate}</Td>
-                      </tr>
-                    ))}
+                    {M.upcoming.map((u, i) => {
+                      const isMonthly = u.prevTerm === "Monthly";
+                      const isQuarterly = u.prevTerm === "Quarterly";
+                      // Prev-term block: Monthly = solid coral (prime conversion target),
+                      // Quarterly = soft coral pill, anything else = plain text.
+                      const termCell = isMonthly || isQuarterly ? (
+                        <span style={{
+                          display: "inline-block", padding: "3px 10px", borderRadius: 6, fontWeight: 800, fontSize: 12.5,
+                          background: isMonthly ? C.coral : C.coralSoft, color: isMonthly ? "#fff" : C.coralDk,
+                        }}>{u.prevTerm}</span>
+                      ) : <span style={{ color: C.t2 }}>{u.prevTerm}</span>;
+                      return (
+                        <tr key={i} style={{ borderBottom: `1px solid ${C.s1}`, background: isMonthly ? C.coralSoft : "transparent" }}>
+                          <Td l bold>{u.convert ? "⚑ " : ""}{u.account}</Td><Td l>{u.csm}</Td>
+                          <Td mono>{kM(u.arr)}</Td>
+                          <td style={{ textAlign: "right", padding: "10px 16px" }}>{termCell}</td><Td mono>{u.endDate}</Td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </Card>

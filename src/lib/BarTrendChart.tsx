@@ -26,7 +26,7 @@ export function BarTrendChart({
   targetLabel?: string;
   barColor?: string;
   barColors?: (string | undefined)[];
-  lineOverlay?: { label: string; values: number[]; color: string };
+  lineOverlay?: { label: string; values: number[]; color: string; format?: "currency" | "percent" | "number" };
   // Scale the overlay line against its own max instead of the bars' axis —
   // needed when the two series live on very different magnitudes (e.g. avg ACV
   // in $k over cumulative ARR bars in $M). Hover tooltip shows true values.
@@ -74,6 +74,13 @@ export function BarTrendChart({
     if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
     return "$" + Math.round(a);
   };
+
+  // Formatter for the overlay line's own values (may be a different unit than the
+  // bars — e.g. a % share line over $ bars). Falls back to the bar formatter.
+  const fmtLine = (v: number) =>
+    lineOverlay?.format === "percent" ? `${Math.round(v)}%`
+    : lineOverlay?.format === "currency" ? fmt(v)
+    : compact(v);
 
   // Least-squares linear trendline over the bar values.
   const trendVals = (() => {
@@ -240,7 +247,7 @@ export function BarTrendChart({
                     fontWeight={700}
                     fill={lineOverlay.color}
                   >
-                    {compact(v)}
+                    {fmtLine(v)}
                   </text>
                 );
               })}
@@ -274,7 +281,7 @@ export function BarTrendChart({
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                 <span style={{ color: "#C7D0E0" }}>{lineOverlay.label}</span>
                 <span style={{ fontFamily: "var(--font-dm-mono)" }}>
-                  {fmtVal(lineOverlay.values[hoverIdx] ?? 0)}
+                  {fmtLine(lineOverlay.values[hoverIdx] ?? 0)}
                 </span>
               </div>
             </>
