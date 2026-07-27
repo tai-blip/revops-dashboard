@@ -207,7 +207,7 @@ async function main() {
   //     Renewals are EXCLUDED (col D) — ACV counts New Business + Expansion only.
   const REGIONS = ["North America","APAC - Developed","APAC - Emerging","MEA"];
   const AES = [
-    ["James Burdick","James"],["Dorsa Mahmoudnia","Dorsa"],["Jed Rutstein","Jed"],
+    ["James Burdick","James"],["Jed Rutstein","Jed"],
     ["Jill Bucci","Jill"],["David Dubinski","Davi"],["Mathias Berthelemot","Mathias"],
     // AMs (their NB+Expansion deals only — renewals are excluded from ACV math)
     ["Ben Conway","Ben"],["Jesse Brennan","Jesse"],["Eufthlyn Ng","Euth"],

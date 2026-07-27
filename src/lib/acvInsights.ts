@@ -137,8 +137,10 @@ export function computeAcvInsights(rows: Row[]): AcvInsights | null {
     .map((region) => ({ region, ...agg(wonW.filter((d) => d.region === region)) }))
     .sort((a, b) => b.totalARR - a.totalARR);
 
-  // by AE
+  // by AE — excludes non-selling / departed owners so the view is the active AE team
+  const EXCLUDE_AE = new Set(["Osman Mubarak", "Dorsa Mahmoudnia", "Jed Tong"]);
   const byAE = Array.from(new Set(wonW.map((d) => d.owner).filter(Boolean)))
+    .filter((owner) => !EXCLUDE_AE.has(owner))
     .map((owner) => ({ owner, ...agg(wonW.filter((d) => d.owner === owner)) }))
     .sort((a, b) => b.totalARR - a.totalARR);
 
