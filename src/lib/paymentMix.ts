@@ -10,6 +10,12 @@ type Row = (string | number | null)[];
 const TERMS = ["Annual", "Quarterly", "Monthly"] as const;
 type Term = (typeof TERMS)[number];
 
+export type MomentumTerm = {
+  term: string;
+  arr: number[]; pct: number[]; yoyArr: number[];        // by $ ARR
+  deals: number[]; dealPct: number[]; yoyDeals: number[]; // by # of deals
+};
+
 export type PaymentMix = {
   monthLabel: string;                 // e.g. "Jul 2026" (latest complete-ish month)
   headline: {
@@ -24,9 +30,11 @@ export type PaymentMix = {
     ren: { term: string; deals: number; arr: number }[];
   };
   momentum: {                         // Jan(current yr)→now × term, NB and Renewals
+    // arr/pct/yoyArr = by $ ARR; deals/dealPct/yoyDeals = by # of deals (same math,
+    // count instead of sum) so the chart can toggle between $ and deal-count views.
     months: string[];
-    nb: { term: string; arr: number[]; pct: number[]; yoyArr: number[] }[];
-    ren: { term: string; arr: number[]; pct: number[]; yoyArr: number[] }[];
+    nb: MomentumTerm[];
+    ren: MomentumTerm[];
   };
   flags: { type: "NB" | "Renewal"; rep: string; opp: string; term: string; arr: number }[]; // current-month non-annual
   aeBreakdown: { name: string; deals: number; newArr: number; annualPctArr: number; annualCash: number; avgAcv: number }[];
@@ -114,7 +122,8 @@ export function computePaymentMix(rows: Row[]): PaymentMix | null {
   //      that month; yoyArr = same month one year earlier (for YoY delta). ----
   const ytdM: { y: number; m0: number }[] = [];
   for (let m0 = 0; m0 <= curM; m0++) ytdM.push({ y: curY, m0 });
-  const momentumFor = (pred: (d: Deal) => boolean) =>
+  const count = (list: Deal[]) => list.length;
+  const momentumFor = (pred: (d: Deal) => boolean): MomentumTerm[] =>
     TERMS.map((t) => ({
       term: t,
       arr: ytdM.map(({ y, m0 }) => sum(deals.filter((d) => pred(d) && d.term === t && inMonth(d, y, m0)))),
@@ -123,6 +132,13 @@ export function computePaymentMix(rows: Row[]): PaymentMix | null {
         return tot ? sum(deals.filter((d) => pred(d) && d.term === t && inMonth(d, y, m0))) / tot * 100 : 0;
       }),
       yoyArr: ytdM.map(({ y, m0 }) => sum(deals.filter((d) => pred(d) && d.term === t && inMonth(d, y - 1, m0)))),
+      // Same three metrics by deal COUNT instead of $ ARR (drives the $/# toggle).
+      deals: ytdM.map(({ y, m0 }) => count(deals.filter((d) => pred(d) && d.term === t && inMonth(d, y, m0)))),
+      dealPct: ytdM.map(({ y, m0 }) => {
+        const tot = count(deals.filter((d) => pred(d) && inMonth(d, y, m0)));
+        return tot ? count(deals.filter((d) => pred(d) && d.term === t && inMonth(d, y, m0))) / tot * 100 : 0;
+      }),
+      yoyDeals: ytdM.map(({ y, m0 }) => count(deals.filter((d) => pred(d) && d.term === t && inMonth(d, y - 1, m0)))),
     }));
   const momentum = {
     months: ytdM.map(({ y, m0 }) => label(y, m0)),

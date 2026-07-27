@@ -10,6 +10,7 @@ import { StackedBarChart } from "@/lib/StackedBarChart";
 import { Sparkline, DeltaPill, wowDeltaPct, fmtMetricValue } from "@/lib/Sparkline";
 import { PlanChart } from "@/lib/PlanChart";
 import { TabHeader } from "@/lib/TabHeader";
+import type { MomentumTerm } from "@/lib/paymentMix";
 import {
   TARGETS,
   PLAN_MONTHS,
@@ -144,7 +145,7 @@ type DashboardData = {
       newArr: number; newAnnualPct: number; renArr: number; renAnnualPct: number; annualCashTotal: number;
     };
     byTerm: { nb: { term: string; deals: number; arr: number }[]; ren: { term: string; deals: number; arr: number }[] };
-    momentum: { months: string[]; nb: { term: string; arr: number[]; pct: number[]; yoyArr: number[] }[]; ren: { term: string; arr: number[]; pct: number[]; yoyArr: number[] }[] };
+    momentum: { months: string[]; nb: MomentumTerm[]; ren: MomentumTerm[] };
     flags: { type: "NB" | "Renewal"; rep: string; opp: string; term: string; arr: number }[];
     aeBreakdown: { name: string; deals: number; newArr: number; annualPctArr: number; annualCash: number; avgAcv: number }[];
     csmBreakdown: { name: string; deals: number; renArr: number; annualPctArr: number; annualCash: number }[];
@@ -290,39 +291,54 @@ function PaymentMixMomentumCard({
 }: {
   title: string;
   months: string[];
-  series: { term: string; arr: number[]; pct: number[]; yoyArr: number[] }[];
+  series: MomentumTerm[];
   accent: string;
 }) {
   const [sel, setSel] = useState(0);
+  const [mode, setMode] = useState<"value" | "count">("value"); // $ vs # of deals
   const short = months.map((m) => m.split(" ")[0]);
   const s = series[Math.min(sel, series.length - 1)];
+  const isVal = mode === "value";
+  // Metric-dependent accessors: $ ARR view vs deal-count view.
+  const valsOf = (row: MomentumTerm) => (isVal ? row.arr : row.deals);
+  const pctsOf = (row: MomentumTerm) => (isVal ? row.pct : row.dealPct);
+  const yoyOf = (row: MomentumTerm) => (isVal ? row.yoyArr : row.yoyDeals);
   const kFmt = (v: number) => (Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(2) + "M" : Math.abs(v) >= 1e3 ? "$" + Math.round(v / 1e3) + "k" : "$" + Math.round(v));
+  const nFmt = (v: number) => String(Math.round(v));
+  const fmtV = isVal ? kFmt : nFmt;
   const pctD = (a: number, b: number | null) => (b == null || b === 0 ? null : ((a - b) / b) * 100);
-  const n = s.arr.length;
-  const cur = s.arr[n - 1] ?? 0, prev = s.arr[n - 2] ?? null;
+  const vals = valsOf(s), pcts = pctsOf(s), yoyArr = yoyOf(s);
+  const n = vals.length;
+  const cur = vals[n - 1] ?? 0, prev = vals[n - 2] ?? null;
   const mom = pctD(cur, prev);
-  const q1 = s.arr.slice(-3).reduce((x, y) => x + y, 0), q0 = s.arr.slice(-6, -3).reduce((x, y) => x + y, 0);
+  const q1 = vals.slice(-3).reduce((x, y) => x + y, 0), q0 = vals.slice(-6, -3).reduce((x, y) => x + y, 0);
   const qoq = q0 ? ((q1 - q0) / q0) * 100 : null;
-  const yoy = pctD(cur, s.yoyArr[n - 1] ?? null);
+  const yoy = pctD(cur, yoyArr[n - 1] ?? null);
   const pill = (v: number | null) =>
     v == null ? <span style={{ color: C.t3 }}>—</span> : <span style={{ color: v >= 0 ? C.grn : C.red, fontWeight: 700 }}>{v >= 0 ? "+" : ""}{v.toFixed(0)}%</span>;
+  const btn = (activeCond: boolean) => ({ padding: "5px 12px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${C.bd}`, cursor: "pointer", background: activeCond ? C.navy : "#fff", color: activeCond ? "#fff" : C.t2 } as const);
   return (
-    <Card title={title} sub="Toggle a term · bars = $ ARR that month, line = % share of the type · Jan→now">
+    <Card title={title} sub={`Toggle a term · bars = ${isVal ? "$ ARR" : "# of deals"} that month, line = % share of the type · Jan→now`}>
       <div style={{ padding: "12px 20px 16px" }}>
-        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
           {series.map((x, i) => (
-            <button key={x.term} onClick={() => setSel(i)} style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, borderRadius: 6, border: `1px solid ${C.bd}`, cursor: "pointer", background: i === sel ? C.navy : "#fff", color: i === sel ? "#fff" : C.t2 }}>{x.term}</button>
+            <button key={x.term} onClick={() => setSel(i)} style={btn(i === sel)}>{x.term}</button>
           ))}
+          {/* $ vs # of deals metric toggle */}
+          <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+            <button onClick={() => setMode("value")} style={btn(isVal)}>$</button>
+            <button onClick={() => setMode("count")} style={btn(!isVal)}># of deals</button>
+          </div>
         </div>
         <BarTrendChart
           labels={short}
-          values={s.arr}
-          valueFormat="currency"
+          values={vals}
+          valueFormat={isVal ? "currency" : "number"}
           barColor={C.s2}
           showValues
-          lineOverlay={{ label: `${s.term} % share`, values: s.pct, color: accent, format: "percent" }}
+          lineOverlay={{ label: `${s.term} % share`, values: pcts, color: accent, format: "percent" }}
           lineOverlayOwnScale
-          axisLeftLabel="ARR ($) — bars"
+          axisLeftLabel={isVal ? "ARR ($) — bars" : "# deals — bars"}
           axisRightLabel="% share — line"
         />
         {/* Jan→now delta summary, headlining MoM% */}
@@ -330,15 +346,15 @@ function PaymentMixMomentumCard({
           <div><span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3 }}>MoM </span><span style={{ fontSize: 18 }}>{pill(mom)}</span></div>
           <div style={{ fontSize: 12.5, color: C.t2 }}>QoQ {pill(qoq)}</div>
           <div style={{ fontSize: 12.5, color: C.t2 }}>YoY {pill(yoy)}</div>
-          <div style={{ fontSize: 12, color: C.t3 }}>{s.term}: {short[n - 1]} {kFmt(cur)}</div>
+          <div style={{ fontSize: 12, color: C.t3 }}>{s.term}: {short[n - 1]} {fmtV(cur)}{isVal ? "" : " deals"}</div>
         </div>
-        {/* ARR $ per month for ALL three terms (selected term highlighted),
-            then a MoM% row for the selected term. Click a term row to chart it. */}
+        {/* Per month for ALL three terms (selected highlighted), then a MoM% row
+            for the selected term. Values follow the $/# toggle. Click a row to chart it. */}
         <div style={{ overflowX: "auto", marginTop: 10 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                <th style={{ textAlign: "left", padding: "5px 8px", color: C.t3, fontWeight: 700 }}>ARR by term ($)</th>
+                <th style={{ textAlign: "left", padding: "5px 8px", color: C.t3, fontWeight: 700 }}>{isVal ? "ARR by term ($)" : "Deals by term (#)"}</th>
                 {short.map((m, i) => <th key={i} style={{ textAlign: "right", padding: "5px 8px", color: C.t3, fontWeight: 700 }}>{m}</th>)}
               </tr>
             </thead>
@@ -346,12 +362,12 @@ function PaymentMixMomentumCard({
               {series.map((row, ri) => (
                 <tr key={row.term} onClick={() => setSel(ri)} style={{ cursor: "pointer", background: ri === sel ? C.s1 : "transparent", borderBottom: `1px solid ${C.s1}` }}>
                   <td style={{ padding: "5px 8px", fontWeight: ri === sel ? 800 : 600, color: ri === sel ? accent : C.t2 }}>{row.term}</td>
-                  {row.arr.map((v, i) => <td key={i} style={{ padding: "5px 8px", textAlign: "right", fontFamily: "var(--font-dm-mono)", fontWeight: ri === sel ? 700 : 400 }}>{v ? kFmt(v) : "—"}</td>)}
+                  {valsOf(row).map((v, i) => <td key={i} style={{ padding: "5px 8px", textAlign: "right", fontFamily: "var(--font-dm-mono)", fontWeight: ri === sel ? 700 : 400 }}>{v ? fmtV(v) : "—"}</td>)}
                 </tr>
               ))}
               <tr style={{ borderTop: `1px solid ${C.bd}` }}>
                 <td style={{ padding: "5px 8px", color: C.t3 }}>{s.term} MoM%</td>
-                {s.arr.map((v, i) => { const d = i === 0 ? null : pctD(v, s.arr[i - 1]); return <td key={i} style={{ padding: "5px 8px", textAlign: "right" }}>{d == null ? "—" : <span style={{ color: d >= 0 ? C.grn : C.red }}>{d >= 0 ? "+" : ""}{d.toFixed(0)}%</span>}</td>; })}
+                {vals.map((v, i) => { const d = i === 0 ? null : pctD(v, vals[i - 1]); return <td key={i} style={{ padding: "5px 8px", textAlign: "right" }}>{d == null ? "—" : <span style={{ color: d >= 0 ? C.grn : C.red }}>{d >= 0 ? "+" : ""}{d.toFixed(0)}%</span>}</td>; })}
               </tr>
             </tbody>
           </table>
