@@ -11,6 +11,7 @@ import {
   parsePipelineWowTab,
 } from "@/lib/parse";
 import { computeAcvInsights } from "@/lib/acvInsights";
+import { computePaymentMix } from "@/lib/paymentMix";
 import {
   parseQuery1,
   parseQuery2,
@@ -49,7 +50,7 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows] =
+    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows] =
       await Promise.all([
         getSheetValues("ARR & recurring revenue"),
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
@@ -67,6 +68,7 @@ export async function GET() {
         getSheetValues("ARR_MoM_Rebuild", "A1:M400").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ACV_MoM", "A1:AZ20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_per_Location_MoM", "A1:K20").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("SOQL_PaymentMix", "A1:M2000").catch(() => [] as (string | number | null)[][]),
       ]);
 
     const arr = parseArrTab(arrRows);
@@ -153,6 +155,7 @@ export async function GET() {
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
     const acv = computeAcvDistribution(closedDeals);
     const acvInsights = computeAcvInsights(closedDealsRows);
+    const paymentMix = computePaymentMix(paymentMixRows);
 
     // Who Does What — open deals grouped by owner, flagged if stale (>60d since last stage change)
     const now = new Date();
@@ -211,6 +214,7 @@ export async function GET() {
       acvInsights,
       acvMoM,
       perLocation,
+      paymentMix,
       whoDoesWhat: byOwner,
       cwSplitByOwner,
       coverageByOwner,

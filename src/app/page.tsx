@@ -136,6 +136,20 @@ type DashboardData = {
     expansion: (number | null)[];
     locations: (number | null)[];
   } | null;
+  paymentMix?: {
+    monthLabel: string;
+    headline: {
+      nbAnnualDeals: number; nbTotalDeals: number; nbAnnualCash: number;
+      renAnnualDeals: number; renTotalDeals: number; renAnnualCash: number;
+      newArr: number; newAnnualPct: number; renArr: number; renAnnualPct: number; annualCashTotal: number;
+    };
+    byTerm: { nb: { term: string; deals: number; arr: number }[]; ren: { term: string; deals: number; arr: number }[] };
+    momentum: { months: string[]; nb: { term: string; arr: number[]; annualPct: number[] }[]; ren: { term: string; arr: number[]; annualPct: number[] }[] };
+    flags: { type: "NB" | "Renewal"; rep: string; opp: string; term: string; arr: number }[];
+    aeBreakdown: { name: string; deals: number; newArr: number; annualPctArr: number; annualCash: number; avgAcv: number }[];
+    csmBreakdown: { name: string; deals: number; renArr: number; annualPctArr: number; annualCash: number }[];
+    upcoming: { account: string; csm: string; arr: number; prevTerm: string; convert: boolean; endDate: string }[];
+  } | null;
   whoDoesWhat: Record<
     string,
     { openCount: number; openArr: number; staleCount: number; staleArr: number }
@@ -152,6 +166,7 @@ const TABS = [
   ["health", "Deal Health"],
   ["attainment", "AE Attainment"],
   ["acv", "ACV & Deal Size"],
+  ["paymentmix", "Payment Mix Report"],
   ["productarr", "Product ARR"],
 ] as const;
 
@@ -2502,6 +2517,147 @@ export default function Dashboard() {
                 </Card>
               </>
             )}
+          </div>
+        );
+      })()}
+
+      {tab === "paymentmix" && (() => {
+        const M = data.paymentMix;
+        const kM = (n: number) => {
+          const a = Math.abs(n);
+          if (a >= 1e6) return "$" + (a / 1e6).toFixed(2) + "M";
+          if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
+          return "$" + Math.round(n);
+        };
+        const pctColor = (p: number) => (p >= 66 ? C.grn : p >= 33 ? C.ylw : C.red);
+        const stat = (labelTxt: string, big: string, sub: string, tone?: string) => (
+          <div style={{ background: C.card, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "14px 18px" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: C.t3 }}>{labelTxt}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: tone ?? C.navy, marginTop: 4, lineHeight: 1.1 }}>{big}</div>
+            <div style={{ fontSize: 12, color: C.t2, marginTop: 4 }}>{sub}</div>
+          </div>
+        );
+        return (
+          <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+            <TabHeader
+              label="Payment Mix Report"
+              sentence={M
+                ? `${M.monthLabel}: New Business is ${M.headline.newAnnualPct.toFixed(0)}% annual mix (${M.headline.nbAnnualDeals}/${M.headline.nbTotalDeals} deals), Renewals ${M.headline.renAnnualPct.toFixed(0)}% (${M.headline.renAnnualDeals}/${M.headline.renTotalDeals}). Annual cash collected: ${kM(M.headline.annualCashTotal)}.`
+                : "Payment-term monitoring — annual vs quarterly vs monthly. Awaiting the SOQL_PaymentMix pull."}
+              stats={M ? [
+                { label: "New ARR (mo)", value: kM(M.headline.newArr), sub: `${M.headline.newAnnualPct.toFixed(0)}% annual` },
+                { label: "Renewal ARR (mo)", value: kM(M.headline.renArr), sub: `${M.headline.renAnnualPct.toFixed(0)}% annual` },
+                { label: "Annual cash", value: kM(M.headline.annualCashTotal), sub: `NB ${kM(M.headline.nbAnnualCash)} · Ren ${kM(M.headline.renAnnualCash)}` },
+                { label: "NB annual upfront", value: `${M.headline.nbTotalDeals ? Math.round(M.headline.nbAnnualDeals / M.headline.nbTotalDeals * 100) : 0}%`, sub: `${M.headline.nbAnnualDeals} of ${M.headline.nbTotalDeals} deals` },
+              ] : []}
+            />
+
+            {!M && (
+              <Card title="Payment Mix unavailable" sub="The SOQL_PaymentMix tab hasn't been populated yet — run the daily SFDC refresh.">
+                <div style={{ padding: 20, color: C.t3, fontSize: 13 }}>Falling back once the pull runs.</div>
+              </Card>
+            )}
+
+            {M && (<>
+              {/* By payment term — current month, NB + Renewals */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                {([["New Business", M.byTerm.nb, M.headline.nbAnnualCash] as const, ["Renewals", M.byTerm.ren, M.headline.renAnnualCash] as const]).map(([ttl, tbl, cash]) => (
+                  <Card key={ttl} title={`${ttl} · by Payment Term`} sub={`${M.monthLabel} · Contract Live Date`}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead><tr style={{ background: C.s1, borderBottom: `1px solid ${C.bd}` }}><Th l>Term</Th><Th># Deals</Th><Th>ARR</Th></tr></thead>
+                      <tbody>
+                        {tbl.map((t) => (
+                          <tr key={t.term} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                            <Td l bold>{t.term}</Td><Td mono>{t.deals}</Td><Td mono>{kM(t.arr)}</Td>
+                          </tr>
+                        ))}
+                        <tr style={{ background: C.s1, borderTop: `2px solid ${C.navy}` }}>
+                          <Td l bold>Annual cash collected</Td><Td>{""}</Td><Td mono bold color={C.grn}>{kM(cash)}</Td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Momentum — annual mix % over last 6 months (NB + Renewal lines) */}
+              <Card title="Annual-mix momentum" sub="Share of ARR on annual terms, last 6 months · New Business vs Renewals">
+                <div style={{ padding: "16px 20px" }}>
+                  <LineTrendChart
+                    labels={M.momentum.months.map((m) => m.split(" ")[0])}
+                    series={[
+                      { label: "New Business", values: M.momentum.nb.find((t) => t.term === "Annual")?.annualPct ?? [], color: C.navy },
+                      { label: "Renewals", values: M.momentum.ren.find((t) => t.term === "Annual")?.annualPct ?? [], color: C.teal },
+                    ]}
+                    valueFormat="percent"
+                    showValues
+                  />
+                </div>
+              </Card>
+
+              {/* Flags — current-month non-annual */}
+              {M.flags.length > 0 && (
+                <Card title={`⚑ Monthly / Quarterly deals — ${M.monthLabel}`} sub="Non-annual closings this month, by rep · annual-conversion coaching targets" accent={C.coral}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Type</Th><Th l>Rep</Th><Th l>Opportunity</Th><Th>Term</Th><Th>ARR</Th></tr></thead>
+                    <tbody>
+                      {M.flags.map((f, i) => (
+                        <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <Td l>{f.type}</Td><Td l bold>{f.rep}</Td><Td l>{f.opp}</Td>
+                          <Td color={C.coralDk}>{f.term}</Td><Td mono>{kM(f.arr)}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Card>
+              )}
+
+              {/* AE + CSM breakdowns (YTD) */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <Card title="AE Breakdown — New ARR" sub="Amount × Opportunity Owner · YTD">
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>AE</Th><Th>Deals</Th><Th>New ARR</Th><Th>Ann %</Th><Th>Ann Cash</Th></tr></thead>
+                    <tbody>
+                      {M.aeBreakdown.slice(0, 10).map((a) => (
+                        <tr key={a.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <Td l bold>{a.name}</Td><Td mono>{a.deals}</Td><Td mono>{kM(a.newArr)}</Td>
+                          <Td mono color={pctColor(a.annualPctArr)}>{a.annualPctArr.toFixed(0)}%</Td><Td mono>{kM(a.annualCash)}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Card>
+                <Card title="CSM Breakdown — Renewal ARR" sub="Amount × Account Manager · YTD">
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>CSM</Th><Th>Deals</Th><Th>Renewal ARR</Th><Th>Ann %</Th><Th>Ann Cash</Th></tr></thead>
+                    <tbody>
+                      {M.csmBreakdown.slice(0, 10).map((a) => (
+                        <tr key={a.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <Td l bold>{a.name}</Td><Td mono>{a.deals}</Td><Td mono>{kM(a.renArr)}</Td>
+                          <Td mono color={pctColor(a.annualPctArr)}>{a.annualPctArr.toFixed(0)}%</Td><Td mono>{kM(a.annualCash)}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Card>
+              </div>
+
+              {/* Upcoming renewals — next 90 days */}
+              <Card title="Upcoming Renewals — Next 90 Days" sub="Top 10 by ARR · ⚑ = prior term was Monthly/Quarterly (annual-conversion target)" accent={C.purp}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Account</Th><Th l>CSM</Th><Th>ARR</Th><Th>Prev Term</Th><Th>End Date</Th></tr></thead>
+                  <tbody>
+                    {M.upcoming.map((u, i) => (
+                      <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                        <Td l bold>{u.convert ? "⚑ " : ""}{u.account}</Td><Td l>{u.csm}</Td>
+                        <Td mono>{kM(u.arr)}</Td>
+                        <Td color={u.convert ? C.coralDk : C.t2}>{u.prevTerm}</Td><Td mono>{u.endDate}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            </>)}
           </div>
         );
       })()}
