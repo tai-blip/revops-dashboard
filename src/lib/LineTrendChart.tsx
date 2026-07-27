@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { C, fmt } from "./ui";
 
 type Series = { label: string; values: (number | null)[]; color: string };
@@ -82,31 +82,40 @@ export function LineTrendChart({
           )
         )}
 
-        {/* on-point value labels (compact $k/$M), for single/dual-series charts */}
+        {/* on-point value labels — colored by series, placed above/below to avoid
+            overlap (skipped if there's genuinely no room). */}
         {showValues &&
-          series.map((s) =>
-            s.values.map((v, i) =>
-              v != null ? (
-                <text
-                  key={"lbl" + s.label + i}
-                  x={x(i)}
-                  y={y(v) - 9}
-                  textAnchor="middle"
-                  fontSize={9}
-                  fontWeight={700}
-                  fill={C.t1}
-                >
-                  {valueFormat === "currency"
-                    ? Math.abs(v) >= 1e6
-                      ? "$" + (v / 1e6).toFixed(2) + "M"
-                      : Math.abs(v) >= 1e3
-                      ? "$" + Math.round(v / 1e3) + "k"
-                      : "$" + Math.round(v)
-                    : fmtVal(v)}
-                </text>
-              ) : null
-            )
-          )}
+          (() => {
+            const compactLbl = (v: number) =>
+              valueFormat === "currency"
+                ? Math.abs(v) >= 1e6
+                  ? "$" + (v / 1e6).toFixed(2) + "M"
+                  : Math.abs(v) >= 1e3
+                  ? "$" + Math.round(v / 1e3) + "k"
+                  : "$" + Math.round(v)
+                : fmtVal(v);
+            const placed: { x: number; y: number }[] = [];
+            const clash = (px: number, py: number) =>
+              placed.some((p) => Math.abs(p.x - px) < 16 && Math.abs(p.y - py) < 11);
+            const els: ReactNode[] = [];
+            series.forEach((s) =>
+              s.values.forEach((v, i) => {
+                if (v == null) return;
+                const px = x(i);
+                const above = y(v) - 9;
+                const below = y(v) + 15;
+                const ly = !clash(px, above) ? above : !clash(px, below) ? below : null;
+                if (ly == null) return; // no room — drop rather than overprint
+                placed.push({ x: px, y: ly });
+                els.push(
+                  <text key={"lbl" + s.label + i} x={px} y={ly} textAnchor="middle" fontSize={8.5} fontWeight={700} fill={s.color}>
+                    {compactLbl(v)}
+                  </text>
+                );
+              })
+            );
+            return <g>{els}</g>;
+          })()}
 
         {labels.map((l, i) => (
           <rect

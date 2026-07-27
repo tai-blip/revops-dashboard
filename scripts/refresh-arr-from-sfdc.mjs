@@ -253,17 +253,47 @@ async function main() {
     ]);
   });
 
+  // 6d) ARR_per_Location_MoM — $/location/MONTH, 3 series, all sheet-computed:
+  //   Total   = active-book ARR ÷ active locations ÷ 12 (SOQL_Pull, boundary = 1st of next month)
+  //   New Biz = ARR of New Business deals WON that month ÷ their locations ÷ 12 (SOQL_ClosedDeals)
+  //   Expansion = same for Business Expansion deals won that month
+  // Raw components kept in cols F–K so every $/loc is checkable.
+  const CD = all.length + 1;
+  const sumifsCD = (col, rt, r) =>
+    `SUMIFS(SOQL_ClosedDeals!$${col}$2:$${col}$${CD},SOQL_ClosedDeals!$F$2:$F$${CD},"Won",SOQL_ClosedDeals!$D$2:$D$${CD},"${rt}",SOQL_ClosedDeals!$N$2:$N$${CD},">="&$B${r},SOQL_ClosedDeals!$N$2:$N$${CD},"<"&EDATE($B${r},1))`;
+  const perLoc = [[
+    "Month","Month-Start","$/loc/mo — Total (active book)","$/loc/mo — New Business","$/loc/mo — Expansion",
+    "Total ARR","Total Locations","NB ARR (won this mo)","NB Locations","Expansion ARR (won this mo)","Expansion Locations",
+  ]];
+  acvMonths.forEach((ms, i) => {
+    const r = i + 2;
+    const bnd = `EDATE($B${r},1)`; // active as of end of this month = 1st of next month
+    perLoc.push([
+      `=TEXT(B${r},"mmm yyyy")`, ms,
+      `=IFERROR(F${r}/G${r}/12,"")`,  // Total  $/loc/mo
+      `=IFERROR(H${r}/I${r}/12,"")`,  // New Biz $/loc/mo
+      `=IFERROR(J${r}/K${r}/12,"")`,  // Expansion $/loc/mo
+      `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=${bnd})*(SOQL_Pull!$E$2:$E$${LAST}>${bnd})*SOQL_Pull!$C$2:$C$${LAST})`,
+      `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=${bnd})*(SOQL_Pull!$E$2:$E$${LAST}>${bnd})*SOQL_Pull!$Q$2:$Q$${LAST})`,
+      `=${sumifsCD("L", "1.New Business", r)}`,
+      `=${sumifsCD("M", "1.New Business", r)}`,
+      `=${sumifsCD("L", "3.Business Expansion", r)}`,
+      `=${sumifsCD("M", "3.Business Expansion", r)}`,
+    ]);
+  });
+
   // 7) Create-or-replace + bulk write (one values.update per tab)
   const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "sheets.properties(sheetId,title)" });
   const byTitle = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
   const reqs = [];
-  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_MoM_Segments","ACV_MoM"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
+  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
   reqs.push(
     { addSheet: { properties: { title: "SOQL_Pull" } } },
     { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 22 } } } },
     { addSheet: { properties: { title: "ARR_MoM_Rebuild" } } },
     { addSheet: { properties: { title: "ARR_MoM_Segments", gridProperties: { rowCount: seg.length + 10, columnCount: 30 } } } },
     { addSheet: { properties: { title: "ACV_MoM", gridProperties: { rowCount: 20, columnCount: 50 } } } },
+    { addSheet: { properties: { title: "ARR_per_Location_MoM", gridProperties: { rowCount: 20, columnCount: 12 } } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_Pull!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pull } });
@@ -272,6 +302,7 @@ async function main() {
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Rebuild!A1", valueInputOption: "USER_ENTERED", requestBody: { values: mom } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Segments!A1", valueInputOption: "USER_ENTERED", requestBody: { values: seg } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ACV_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: acvTab } });
+  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_per_Location_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: perLoc } });
 
   // 8) Report latest month + MAPE vs target
   const back = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `ARR_MoM_Rebuild!A2:G${months.length+1}`, valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];

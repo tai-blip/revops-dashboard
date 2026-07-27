@@ -49,7 +49,7 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, segmentsRows] =
+    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows] =
       await Promise.all([
         getSheetValues("ARR & recurring revenue"),
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
@@ -66,7 +66,7 @@ export async function GET() {
         getSheetValues("SOQL_ClosedDeals", "A1:T4000").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_MoM_Rebuild", "A1:M400").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ACV_MoM", "A1:AZ20").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("ARR_MoM_Segments", "A1:AB40").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_per_Location_MoM", "A1:K20").catch(() => [] as (string | number | null)[][]),
       ]);
 
     const arr = parseArrTab(arrRows);
@@ -75,7 +75,7 @@ export async function GET() {
     const arrMomRebuild = parseArrMomRebuildTab(arrMomRebuildRows);
     const arrMom = arrMomRebuild.length ? arrMomRebuild : parseArrMomProgressionTab(arrMomRows);
     const acvMoM = parseAcvMomTab(acvMomRows);
-    const perLocation = parsePerLocation(segmentsRows);
+    const perLocation = parsePerLocation(perLocRows);
     const aeAttainment = parseAeAttainmentTab(aeRows);
     const pipeline = parsePipelineTab(pipelineRows);
     const pipelineWow = parsePipelineWowTab(pipelineWowRows);

@@ -175,25 +175,26 @@ export function parseAcvMomTab(rows: Row[]): AcvMomData | null {
   };
 }
 
-// "$ / Location" series from the ARR_MoM_Segments tab (last 13 rows ≈ 12 months
-// + current). Cols: A label, C total ARR, AA active locations, AB $/location.
+// "$ / Location per MONTH" from the ARR_per_Location_MoM tab (3 series, sheet-computed).
+// Cols: A month, C Total $/loc/mo, D New Business, E Expansion, G Total active locations.
 export type PerLocationData = {
   months: string[];
-  perLoc: (number | null)[];
+  total: (number | null)[];
+  newBiz: (number | null)[];
+  expansion: (number | null)[];
   locations: (number | null)[];
-  arr: (number | null)[];
 };
 
 export function parsePerLocation(rows: Row[]): PerLocationData | null {
-  const data = rows.slice(1).filter((r) => r?.[0] && typeof r[2] === "number");
+  const data = rows.slice(1).filter((r) => r?.[0]);
   if (!data.length) return null;
-  const tail = data.slice(-13);
   const num = (v: string | number | null) => (typeof v === "number" ? v : null);
   return {
-    months: tail.map((r) => String(r[0])),
-    perLoc: tail.map((r) => num(r[27])),
-    locations: tail.map((r) => num(r[26])),
-    arr: tail.map((r) => num(r[2])),
+    months: data.map((r) => String(r[0])),
+    total: data.map((r) => num(r[2])),
+    newBiz: data.map((r) => num(r[3])),
+    expansion: data.map((r) => num(r[4])),
+    locations: data.map((r) => num(r[6])),
   };
 }
 

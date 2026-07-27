@@ -131,9 +131,10 @@ type DashboardData = {
   } | null;
   perLocation?: {
     months: string[];
-    perLoc: (number | null)[];
+    total: (number | null)[];
+    newBiz: (number | null)[];
+    expansion: (number | null)[];
     locations: (number | null)[];
-    arr: (number | null)[];
   } | null;
   whoDoesWhat: Record<
     string,
@@ -663,11 +664,10 @@ export default function Dashboard() {
         ],
       },
       acv: (() => {
-        // Current-month $/Location for the exec-summary strip (moved up from the
-        // ARR-per-Location card at Tai's request).
+        // Current-month $/Location (Total, per MONTH) for the exec-summary strip.
         const PL = data.perLocation;
-        const plCur = PL?.perLoc[PL.perLoc.length - 1] ?? null;
-        const plPrev = PL?.perLoc[PL.perLoc.length - 2] ?? null;
+        const plCur = PL?.total[PL.total.length - 1] ?? null;
+        const plPrev = PL?.total[PL.total.length - 2] ?? null;
         const plMom = plCur != null && plPrev != null && plPrev !== 0 ? ((plCur - plPrev) / plPrev) * 100 : null;
         const plLocs = PL?.locations[PL.locations.length - 1] ?? null;
         const plMonth = PL?.months[PL.months.length - 1] ?? "";
@@ -680,8 +680,8 @@ export default function Dashboard() {
             { label: "Median cycle", value: data.winRateYtd.medianCycle != null ? `${data.winRateYtd.medianCycle}d` : "—", sub: "SQL → close" },
             ...(plCur != null
               ? [{
-                  label: `$ / Location · ${plMonth}`,
-                  value: "$" + plCur.toFixed(0),
+                  label: `$ / Location / mo · ${plMonth}`,
+                  value: "$" + plCur.toFixed(2),
                   sub: `${plMom != null ? `${plMom >= 0 ? "+" : ""}${plMom.toFixed(1)}% MoM` : ""}${plLocs != null ? ` · ${Math.round(plLocs).toLocaleString()} locations` : ""}`,
                   tone: (plMom ?? 0) >= 0 ? ("good" as const) : ("bad" as const),
                 }]
@@ -2319,17 +2319,21 @@ export default function Dashboard() {
                   </>
                 )}
 
-                {/* ── $ per Location trend (current-month box lives in the exec summary) ── */}
+                {/* ── $/Location per month — Total vs New Business vs Expansion ── */}
                 {data.perLocation && (
                   <Card
-                    title="ARR per Location — MoM"
-                    sub="Active ARR ÷ active locations-in-contract at each month-end (opp-level Locations field) · computed in the ARR_MoM_Segments sheet tab"
+                    title="$ / Location per Month — Total · New Business · Expansion"
+                    sub="Total = active-book ARR ÷ active locations ÷ 12 · New Biz / Expansion = ARR of those deals won that month ÷ their locations ÷ 12 · sheet-computed (ARR_per_Location_MoM tab)"
                     accent={C.teal}
                   >
                     <div style={{ padding: "16px 20px" }}>
                       <LineTrendChart
                         labels={data.perLocation.months.map((m) => m.split(" ")[0])}
-                        series={[{ label: "$ / location", values: data.perLocation.perLoc, color: C.teal }]}
+                        series={[
+                          { label: "Total (book)", values: data.perLocation.total, color: C.navy },
+                          { label: "New Business", values: data.perLocation.newBiz, color: C.coral },
+                          { label: "Expansion", values: data.perLocation.expansion, color: C.teal },
+                        ]}
                         valueFormat="currency"
                         showValues
                       />
