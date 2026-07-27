@@ -3,10 +3,14 @@ import { getSheetValues } from "@/lib/sheets";
 import {
   parseArrTab,
   parseArrMomProgressionTab,
+  parseArrMomRebuildTab,
+  parseAcvMomTab,
+  parsePerLocation,
   parseAeAttainmentTab,
   parsePipelineTab,
   parsePipelineWowTab,
 } from "@/lib/parse";
+import { computeAcvInsights } from "@/lib/acvInsights";
 import {
   parseQuery1,
   parseQuery2,
@@ -45,20 +49,33 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows] =
+    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, segmentsRows] =
       await Promise.all([
         getSheetValues("ARR & recurring revenue"),
-        getSheetValues("ARR MoM Progression", "A1:D400"),
+        // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
+        // tolerated here only as a fallback if it's ever restored.
+        getSheetValues("ARR MoM Progression", "A1:D400").catch(() => [] as (string | number | null)[][]),
         getSheetValues("AE attainment"),
         getSheetValues("Pipeline"),
         getSheetValues("Pipeline - WoW", "A1:BI400"),
         getSheetValues("Query 1", "A1:Z1000"),
         getSheetValues("Query 2", "A1:Z2000"),
         getSheetValues("Forecasting", "A1:T45"),
+        // Daily SFDC pull (all closed deals + dimensions) — powers ACV & Deal Size.
+        // Tolerate absence so the dashboard still loads if the pull hasn't run.
+        getSheetValues("SOQL_ClosedDeals", "A1:T4000").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_MoM_Rebuild", "A1:M400").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ACV_MoM", "A1:AZ20").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_MoM_Segments", "A1:AB40").catch(() => [] as (string | number | null)[][]),
       ]);
 
     const arr = parseArrTab(arrRows);
-    const arrMom = parseArrMomProgressionTab(arrMomRows);
+    // Command ARR chart source: the automated SFDC rebuild (Rule A). Fall back to
+    // the manual "ARR MoM Progression" tab if the rebuild hasn't been written yet.
+    const arrMomRebuild = parseArrMomRebuildTab(arrMomRebuildRows);
+    const arrMom = arrMomRebuild.length ? arrMomRebuild : parseArrMomProgressionTab(arrMomRows);
+    const acvMoM = parseAcvMomTab(acvMomRows);
+    const perLocation = parsePerLocation(segmentsRows);
     const aeAttainment = parseAeAttainmentTab(aeRows);
     const pipeline = parsePipelineTab(pipelineRows);
     const pipelineWow = parsePipelineWowTab(pipelineWowRows);
@@ -135,6 +152,7 @@ export async function GET() {
     const currentYear = new Date().getUTCFullYear();
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
     const acv = computeAcvDistribution(closedDeals);
+    const acvInsights = computeAcvInsights(closedDealsRows);
 
     // Who Does What — open deals grouped by owner, flagged if stale (>60d since last stage change)
     const now = new Date();
@@ -190,6 +208,9 @@ export async function GET() {
       winRates: { derived: winRates.derived, n: winRates.n, overall: winRates.overall },
       winRateYtd,
       acv,
+      acvInsights,
+      acvMoM,
+      perLocation,
       whoDoesWhat: byOwner,
       cwSplitByOwner,
       coverageByOwner,

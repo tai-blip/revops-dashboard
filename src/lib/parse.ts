@@ -115,6 +115,88 @@ export function parseArrMomProgressionTab(rows: Row[]): ArrMomPoint[] {
   return out;
 }
 
+// "ARR_MoM_Rebuild" tab — the automated SFDC-sourced Total-ARR series (Rule A),
+// written daily by scripts/refresh-arr-from-sfdc.mjs. Replaces the manual
+// Tableau-download series as the driver of the Command ARR chart.
+// Cols: A label, B month-end (serial), C Rule A, H MoM change $, I MoM growth (fraction).
+export function parseArrMomRebuildTab(rows: Row[]): ArrMomPoint[] {
+  const out: ArrMomPoint[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (r?.[1] == null || typeof r[2] !== "number" || r[2] <= 0) continue;
+    out.push({
+      label: sheetsSerialToISODate(r[1]).slice(0, 7),
+      totalARR: r[2],
+      momChange: typeof r[7] === "number" ? r[7] : 0,
+      momGrowth: typeof r[8] === "number" ? r[8] * 100 : 0, // sheet stores a fraction; keep % units like the manual tab
+    });
+  }
+  return out;
+}
+
+// "ACV_MoM" tab — avg ACV of deals won each month, by Segment / Region / AE
+// (sheet-computed AVERAGEIFS so the numbers are auditable in the workbook).
+export type AcvMomData = {
+  months: string[]; // display labels e.g. "Jul 2026"
+  all: (number | null)[];
+  allSums: (number | null)[];
+  groups: {
+    key: "segment" | "region" | "ae";
+    series: { name: string; values: (number | null)[]; sums: (number | null)[] }[];
+  }[];
+};
+
+export function parseAcvMomTab(rows: Row[]): AcvMomData | null {
+  if (rows.length < 2) return null;
+  const header = rows[0].map((h) => String(h ?? ""));
+  const data = rows.slice(1).filter((r) => r?.[0]);
+  const months = data.map((r) => String(r[0]));
+  const colVals = (c: number) => data.map((r) => (typeof r[c] === "number" ? (r[c] as number) : null));
+  const findCol = (name: string) => header.findIndex((h) => h === name);
+  // avg columns are "Seg: X"; their monthly won-ARR twins are "Sum Seg: X"
+  const group = (prefix: string) =>
+    header
+      .map((h, c) => ({ h, c }))
+      .filter(({ h }) => h.startsWith(prefix))
+      .map(({ h, c }) => {
+        const sumCol = findCol(`Sum ${h}`);
+        return { name: h.slice(prefix.length), values: colVals(c), sums: sumCol >= 0 ? colVals(sumCol) : months.map(() => null) };
+      });
+  const sumAll = findCol("Sum All");
+  return {
+    months,
+    all: colVals(2),
+    allSums: sumAll >= 0 ? colVals(sumAll) : months.map(() => null),
+    groups: [
+      { key: "segment", series: group("Seg: ") },
+      { key: "region", series: group("Reg: ") },
+      { key: "ae", series: group("AE: ") },
+    ],
+  };
+}
+
+// "$ / Location" series from the ARR_MoM_Segments tab (last 13 rows ≈ 12 months
+// + current). Cols: A label, C total ARR, AA active locations, AB $/location.
+export type PerLocationData = {
+  months: string[];
+  perLoc: (number | null)[];
+  locations: (number | null)[];
+  arr: (number | null)[];
+};
+
+export function parsePerLocation(rows: Row[]): PerLocationData | null {
+  const data = rows.slice(1).filter((r) => r?.[0] && typeof r[2] === "number");
+  if (!data.length) return null;
+  const tail = data.slice(-13);
+  const num = (v: string | number | null) => (typeof v === "number" ? v : null);
+  return {
+    months: tail.map((r) => String(r[0])),
+    perLoc: tail.map((r) => num(r[27])),
+    locations: tail.map((r) => num(r[26])),
+    arr: tail.map((r) => num(r[2])),
+  };
+}
+
 export function parseAeAttainmentTab(rows: Row[]) {
   const headerIdx = rows.findIndex((r) => r[0] === "AE");
   if (headerIdx === -1) return { reps: [], monthlyTeamActual: [] };
