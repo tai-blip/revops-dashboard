@@ -56,7 +56,11 @@ export async function GET() {
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
         // tolerated here only as a fallback if it's ever restored.
         getSheetValues("ARR MoM Progression", "A1:D400").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("AE attainment"),
+        // "AE Attainment (Official)" = leadership's exact filter (New Business,
+        // Stage Billing/Closed Won, by Contract Live Date, excl Sri/Jesse). Replaces
+        // the old "AE attainment" tab, which keyed on Status and missed Billing-stage
+        // New Business deals (e.g. Yoshinoya), understating reps' Q3 numbers.
+        getSheetValues("AE Attainment (Official)"),
         getSheetValues("Pipeline"),
         getSheetValues("Pipeline - WoW", "A1:BI400"),
         getSheetValues("Query 1", "A1:Z1000"),
