@@ -231,7 +231,7 @@ async function main() {
     blocks.push({ type: "section", text: { type: "mrkdwn", text: `*📈 Pipeline progression — week ${wowLatest} (vs prior week)*\n${wowMetrics.map(wowStr).join("\n")}\n_latest week may still be in progress_` } });
   }
 
-  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Won-ARR book: ${fmtUsd(wonArrTotal)} · source: SOQL_PaymentMix · ARR_MoM_Rebuild · AE attainment · Pipeline - WoW · auto-posted after the daily SFDC → Sheet refresh` }] });
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `source: ARR_MoM_Rebuild · SOQL_PaymentMix · AE attainment · Pipeline - WoW · auto-posted after the daily SFDC → Sheet refresh` }] });
 
   const text = `RevOps Daily Digest — ${dLabel}: Live ARR ${fmtUsd(liveArr)}${arrDelta == null ? "" : ` (${signed(arrDelta)})`}, ${newWon.length} newly won.`;
 
