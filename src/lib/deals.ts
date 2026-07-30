@@ -480,7 +480,11 @@ export function computeForecastTab(
     string,
     { openPipe: number; potNB: number; potExp: number; closedWon: number; potential: number }
   >,
-  stageRows?: ForecastingStageRow[]
+  stageRows?: ForecastingStageRow[],
+  // Per-AE canonical Q3 New Business (official attainment actual). When present for an
+  // owner, it overrides the sheet/close-date "Closed Won" so the Forecast tab matches
+  // the AE Attainment tab. AMs/leads (absent here) keep their sheet-derived value.
+  attByOwner?: Record<string, number>
 ) {
   const rosterNames = new Set(roster.map((r) => r.name));
 
@@ -507,7 +511,12 @@ export function computeForecastTab(
 
   const rows: ForecastRow[] = roster.map((a) => {
     const s = sheetRows?.[a.name];
-    const cw = s ? s.closedWon : (cwByOwner[a.name]?.nb ?? 0) + (cwByOwner[a.name]?.exp ?? 0);
+    const cw =
+      attByOwner?.[a.name] != null
+        ? attByOwner[a.name]
+        : s
+        ? s.closedWon
+        : (cwByOwner[a.name]?.nb ?? 0) + (cwByOwner[a.name]?.exp ?? 0);
     const potNB = s ? s.potNB : openByOwner[a.name]?.potNB ?? 0;
     const potExp = s ? s.potExp : openByOwner[a.name]?.potExp ?? 0;
     const openPipe = s ? s.openPipe : openByOwner[a.name]?.pipe ?? 0;

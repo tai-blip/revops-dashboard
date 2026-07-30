@@ -142,6 +142,10 @@ export async function GET() {
     // Year-end projection uses the sheet's "Weighted Pipeline by Deal Stage"
     // (Potential ARR) so the projection + gap match the warehouse.
     const forecastStageRows = parseForecastingStages(forecastingRows);
+    // Forecast "Closed Won" = each AE's Booked ARR from the AE Attainment tab, so the
+    // forecast and the AE Attainment tab tell the same story (potential/variance recompute).
+    const attByOwner: Record<string, number> = {};
+    for (const r of aeAttainment.reps) attByOwner[r.name] = r.actual;
     const forecastTab = computeForecastTab(
       openDeals,
       closedDeals,
@@ -153,7 +157,8 @@ export async function GET() {
       winRates.rates,
       nextQ,
       forecastSheetRows,
-      forecastStageRows
+      forecastStageRows,
+      attByOwner
     );
     const currentYear = new Date().getUTCFullYear();
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
