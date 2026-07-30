@@ -123,6 +123,42 @@ async function main() {
   const wonIds = deals.map((d) => d.id);
   const wonArrTotal = deals.reduce((s, d) => s + d.arr, 0);
 
+  // AE Attainment (Q3) — from the "AE attainment" tab: A=AE, B=Q3 quota,
+  // C=% of quota, D=Q3 actual. Team = Σactual / Σquota.
+  const aeRows = await getValues("AE attainment!A1:AZ80");
+  const aeHi = aeRows.findIndex((r) => r[0] === "AE");
+  const aeReps = [];
+  if (aeHi !== -1) {
+    for (let i = aeHi + 1; i < aeRows.length; i++) {
+      const r = aeRows[i];
+      if (!r?.[0] || typeof r[0] !== "string") break;
+      aeReps.push({ name: String(r[0]), quota: Number(r[1] || 0), actual: Number(r[3] || 0) });
+    }
+  }
+  const aeTeamQuota = aeReps.reduce((s, r) => s + r.quota, 0);
+  const aeTeamActual = aeReps.reduce((s, r) => s + r.actual, 0);
+  const aeTeamPct = aeTeamQuota ? Math.round((aeTeamActual / aeTeamQuota) * 100) : 0;
+
+  // Pipeline progression WoW — from "Pipeline - WoW": latest week vs prior week
+  // for the core funnel metrics (skip the pre-computed "WoW Δ%" helper rows).
+  const wowRows = await getValues("Pipeline - WoW!A1:BI80");
+  const wowHi = wowRows.findIndex((r) => r[0] === "Metric");
+  let wowLabels = [], wowMetrics = [];
+  if (wowHi !== -1) {
+    wowLabels = (wowRows[wowHi] || []).slice(1).filter((v) => typeof v === "string");
+    for (let i = wowHi + 1; i < wowRows.length; i++) {
+      const r = wowRows[i];
+      if (!r?.[0] || typeof r[0] !== "string") break;
+      const name = String(r[0]);
+      if (/Δ|WoW/i.test(name)) continue; // skip helper delta rows
+      const vals = r.slice(1, wowLabels.length + 1).map((v) => (typeof v === "number" ? v : null));
+      const last = vals[vals.length - 1], prev = vals[vals.length - 2];
+      const wow = prev == null || prev === 0 || last == null ? null : ((last - prev) / Math.abs(prev)) * 100;
+      wowMetrics.push({ name, last, wow, money: /\$|ARR/i.test(name) });
+    }
+  }
+  const wowLatest = wowLabels[wowLabels.length - 1] || "";
+
   // 3) Previous snapshot (last row of the log).
   const log = await getValues(`${LOG_TAB}!A2:H2000`);
   const prev = log.length ? log[log.length - 1] : null;
@@ -172,7 +208,30 @@ async function main() {
       blocks.push({ type: "section", text: { type: "mrkdwn", text: `*⚠️ ${dropped.length} deal(s) left the won set* (churn or re-stage) — worth a look.` } });
     }
   }
-  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Won-ARR book: ${fmtUsd(wonArrTotal)} · source: SOQL_PaymentMix + ARR_MoM_Rebuild · auto-posted after the daily SFDC → Sheet refresh` }] });
+
+  // AE Attainment (Q3)
+  if (aeReps.length) {
+    const active = aeReps.filter((r) => r.actual > 0).sort((a, b) => b.actual - a.actual);
+    const zero = aeReps.length - active.length;
+    const lines = active.map((r) => `• *${r.name}* — ${fmtUsd(r.actual)}${r.quota ? ` (${Math.round((r.actual / r.quota) * 100)}% of quota)` : ""}`);
+    if (zero) lines.push(`_${zero} rep(s) yet to book in Q3_`);
+    blocks.push({ type: "divider" });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `*🎯 AE Attainment — Q3:* ${fmtUsd(aeTeamActual)} / ${fmtUsd(aeTeamQuota)} *(${aeTeamPct}%)*\n${lines.join("\n")}` } });
+  }
+
+  // Pipeline progression WoW
+  if (wowMetrics.length) {
+    const wowStr = (m) => {
+      const v = m.money ? fmtUsd(m.last || 0) : String(m.last ?? 0);
+      if (m.wow == null) return `• ${m.name}: ${v}`;
+      const arrow = m.wow > 0 ? "🟢 +" : m.wow < 0 ? "🔴 " : "⚪️ ";
+      return `• ${m.name}: ${v}  (${arrow}${Math.round(m.wow)}% WoW)`;
+    };
+    blocks.push({ type: "divider" });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `*📈 Pipeline progression — week ${wowLatest} (vs prior week)*\n${wowMetrics.map(wowStr).join("\n")}\n_latest week may still be in progress_` } });
+  }
+
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Won-ARR book: ${fmtUsd(wonArrTotal)} · source: SOQL_PaymentMix · ARR_MoM_Rebuild · AE attainment · Pipeline - WoW · auto-posted after the daily SFDC → Sheet refresh` }] });
 
   const text = `RevOps Daily Digest — ${dLabel}: Live ARR ${fmtUsd(liveArr)}${arrDelta == null ? "" : ` (${signed(arrDelta)})`}, ${newWon.length} newly won.`;
 
