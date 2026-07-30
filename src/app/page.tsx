@@ -1859,8 +1859,15 @@ export default function Dashboard() {
                   const expQ3 = sumQ3(data.pipelineWow.expansionArrMom, rep.name);
                   const cwq = data.cwSplitByOwner?.[rep.name] ?? { nb: 0, exp: 0 };
                   const attSplit = att != null && ((att.nb ?? 0) !== 0 || (att.exp ?? 0) !== 0);
+                  // The official AE attainment (att.actual) is New-Business-only by
+                  // definition, so its whole figure IS the NB split (Exp = 0) — this
+                  // keeps the "Closed Won" headline and its NB/Exp sub-line consistent.
+                  // Fall back to booked Net New / Expansion MoM sums, then the
+                  // AE-attainment split columns, then Query 2, for rows without it (AMs).
                   const cw =
-                    nbQ3 !== 0 || expQ3 !== 0
+                    att?.actual != null
+                      ? { nb: att.actual, exp: 0 }
+                      : nbQ3 !== 0 || expQ3 !== 0
                       ? { nb: nbQ3, exp: expQ3 }
                       : attSplit
                       ? { nb: att!.nb ?? 0, exp: att!.exp ?? 0 }
