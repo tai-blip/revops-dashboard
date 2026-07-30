@@ -74,6 +74,21 @@ async function main() {
     ["Id","Name","StageName","Annual_Contract_Value_ARR_Formula__c","Expected_Revenue_Quarter_AE__c","CloseDate","CreatedDate","Date_Reached_SQL__c","ChannelofContact__c","Owner.Name","RecordType.Name","LastStageChangeDate"],
     q1.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.CreatedDate), val(x.Date_Reached_SQL__c), val(x.ChannelofContact__c), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.LastStageChangeDate)]));
 
+  // ---- Open pipeline - SOQL pull: open opps in the exact 18-col layout the
+  //      "Pipeline" and "Pipeline - WoW" tab formulas expect. This tab used to be
+  //      a Coefficient import (went stale when the trial expired — the Pipeline
+  //      tabs were left pointing at it while everything else migrated to Query 1).
+  //      Refreshing it here makes Pipeline, Pipeline - WoW, coverage, and the
+  //      Slack digest's pipeline section all live again, with zero formula edits.
+  //      Column order is load-bearing: the funnel formulas key off I=SQL, J=SAL,
+  //      K=SQO date columns by position. Money fields pulled raw (no convertCurrency)
+  //      to match the basis the tab's formulas were built on.
+  const op = await sfQueryAll(instance, token,
+    `SELECT Id, Name, StageName, Annual_Contract_Value_ARR_Formula__c, Expected_Revenue_Quarter_AE__c, CloseDate, LastStageChangeDate, ChannelofContact__c, Date_Reached_SQL__c, Date_Reached_SAL__c, Date_Reached_SQO__c, Amount, Owner.Name, RecordType.Name, AnnualContractValueARR__c, Date_Reached_Trial__c, Managed_Services_Tier__c, Chat_Agent_Tier__c FROM Opportunity WHERE IsClosed = false`);
+  await writeTab(api, "Open pipeline - SOQL pull",
+    ["Id","Name","StageName","Annual_Contract_Value_ARR_Formula__c","Expected_Revenue_Quarter_AE__c","CloseDate","LastStageChangeDate","ChannelofContact__c","Date_Reached_SQL__c","Date_Reached_SAL__c","Date_Reached_SQO__c","Amount","Owner.Name","RecordType.Name","AnnualContractValueARR__c","Date_Reached_Trial__c","Managed_Services_Tier__c","Chat_Agent_Tier__c"],
+    op.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.LastStageChangeDate), val(x.ChannelofContact__c), val(x.Date_Reached_SQL__c), val(x.Date_Reached_SAL__c), val(x.Date_Reached_SQO__c), val(x.Amount), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.AnnualContractValueARR__c), val(x.Date_Reached_Trial__c), val(x.Managed_Services_Tier__c), val(x.Chat_Agent_Tier__c)]));
+
   // ---- Query 2: closed opportunities, last 18 months ----
   const q2 = await sfQueryAll(instance, token,
     `SELECT Id, Name, StageName, IsWon, Annual_Contract_Value_ARR_Formula__c, CreatedDate, CloseDate, Date_Reached_SQL__c, Owner.Name, RecordType.Name, ContractLiveDate__c FROM Opportunity WHERE IsClosed = true AND CloseDate = LAST_N_MONTHS:18`);
