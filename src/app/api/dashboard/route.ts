@@ -4,6 +4,7 @@ import {
   parseArrTab,
   parseArrMomProgressionTab,
   parseArrMomRebuildTab,
+  parseArrMomRebuildFull,
   parseAcvMomTab,
   parsePerLocation,
   parseAeAttainmentTab,
@@ -69,13 +70,34 @@ export async function GET() {
         // Daily SFDC pull (all closed deals + dimensions) — powers ACV & Deal Size.
         // Tolerate absence so the dashboard still loads if the pull hasn't run.
         getSheetValues("SOQL_ClosedDeals", "A1:T4000").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("ARR_MoM_Rebuild", "A1:M400").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_MoM_Rebuild", "A1:T400").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ACV_MoM", "A1:AZ20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_per_Location_MoM", "A1:K20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("SOQL_PaymentMix", "A1:M2000").catch(() => [] as (string | number | null)[][]),
       ]);
 
     const arr = parseArrTab(arrRows);
+    // Override the survivor-biased "ARR & recurring revenue" monthly metrics (New ARR
+    // flow, churn, product-line split) with the CORRECT full-book values from
+    // ARR_MoM_Rebuild (Rule A). The recurring tab reads LiveARR — which retroactively
+    // drops churned deals — so it understates history; the rebuild is the true
+    // point-in-time book (ties to Tableau). Matched by YYYY-MM; future months the
+    // rebuild doesn't compute keep the recurring values.
+    const arrFull = parseArrMomRebuildFull(arrMomRebuildRows);
+    const fullByLabel = new Map(arrFull.map((p) => [p.label, p]));
+    for (const m of arr.monthly) {
+      const fb = fullByLabel.get(m.label);
+      if (!fb) continue;
+      m.newBusiness = fb.newBusiness;
+      m.expansion = fb.expansion;
+      m.renewals = fb.renewals;
+      m.newARR = fb.newARR;
+      m.churnedARR = fb.churnedARR;
+      m.activeARR = fb.activeARR;
+      m.alfie = fb.alfie;
+      m.managedServices = fb.managedServices;
+      m.coreExisting = fb.coreExisting;
+    }
     // Command ARR chart source: the automated SFDC rebuild (Rule A). Fall back to
     // the manual "ARR MoM Progression" tab if the rebuild hasn't been written yet.
     const arrMomRebuild = parseArrMomRebuildTab(arrMomRebuildRows);

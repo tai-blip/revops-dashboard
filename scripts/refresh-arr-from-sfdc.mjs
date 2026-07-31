@@ -49,6 +49,7 @@ const gAuth = new google.auth.JWT({
 
 const SOQL = `SELECT Id, Name, AccountId, Account.Name, Account.Payment_Terms__c, Owner.Name, RecordType.Name, StageName, Status__c,
   convertCurrency(AnnualContractValueARR__c),
+  ChatAgent_Enabled__c, convertCurrency(Managed_Services_Year_1_Total__c),
   Merchant_Segment__c, Location_Tiers__c, DealCountry__c, Region__c, ChannelofContact__c,
   Locations_in_Contract__c, CloseDate, Date_Reached_SQL__c, Date_Reached_Closed_Won__c,
   Date_Reached_Closed_Lost__c, ContractLiveDate__c, ContractEndDate__c, CreatedDate,
@@ -146,6 +147,7 @@ async function main() {
   const pull = [[
     "Id","AccountId","ARR (USD)","ContractLiveDate","ContractEndDate","RecordType","Status","Supersedes","NextSupersedingLive","EffectiveEndDate",
     "Owner","Merchant Segment","Location Tier","Deal Country","Region","Channel of Contact","Locations",
+    "ChatAgent Enabled","Managed Services Y1 (USD)",  // R, S — feed the full-book product-line split
   ]];
   won.forEach((x, i) => {
     const r = i + 2;
@@ -158,6 +160,7 @@ async function main() {
       `=IF(H${r}=0,E${r},IF(I${r}=0,E${r},MIN(E${r},I${r})))`,
       ...dim(x),
       x.Locations_in_Contract__c ?? 0,
+      x.ChatAgent_Enabled__c === true, x.Managed_Services_Year_1_Total__c ?? 0,
     ]);
   });
 
@@ -184,10 +187,19 @@ async function main() {
   //    + active-ARR split by RecordType (New Business / Renewals / Expansion; K+L+M ≈ C)
   const activeAt = (r, extra = "") =>
     `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$B${r}+1)*(SOQL_Pull!$E$2:$E$${LAST}>$B${r}+1)${extra}*SOQL_Pull!$C$2:$C$${LAST})`;
+  // FLOW: ARR that went LIVE during this month (full book — counts a deal even if it
+  // later churned, unlike the survivor-only "ARR & recurring revenue" tab). Bounded by
+  // ContractLiveDate in (prev-month-end+1, this-month-end+1], same 1st-of-next boundary.
+  const addedAt = (r, extra = "") => {
+    const lb = r === 2 ? "0" : `$B${r - 1}+1`;
+    return `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}>${lb})*(SOQL_Pull!$D$2:$D$${LAST}<=$B${r}+1)${extra}*SOQL_Pull!$C$2:$C$${LAST})`;
+  };
   const mom = [[
     "Month","Month-End","Active ARR — Rule A","Active ARR — Exact (renewal-netted)","Current series (target)",
     "Rule A vs Target ($)","Rule A vs Target (%)","MoM Change ($) [Rule A]","MoM Growth (%) [Rule A]",
     "Churned ARR (in month)","Active — New Business","Active — Renewals","Active — Expansion",
+    "New Business Added","Expansion Added","Renewals Added","New ARR Added (NB+Exp)",
+    "Alfie ARR (Chat Agent)","Managed Services ARR","Core ARR",
   ]];
   months.forEach((m, i) => {
     const r = i + 2;
@@ -204,6 +216,17 @@ async function main() {
       activeAt(r, `*(SOQL_Pull!$F$2:$F$${LAST}="1.New Business")`),
       activeAt(r, `*(SOQL_Pull!$F$2:$F$${LAST}="2.Renewals")`),
       activeAt(r, `*(SOQL_Pull!$F$2:$F$${LAST}="3.Business Expansion")`),
+      // N–Q: monthly FLOW (added this month, full book)
+      addedAt(r, `*(SOQL_Pull!$F$2:$F$${LAST}="1.New Business")`),
+      addedAt(r, `*(SOQL_Pull!$F$2:$F$${LAST}="3.Business Expansion")`),
+      addedAt(r, `*(SOQL_Pull!$F$2:$F$${LAST}="2.Renewals")`),
+      `=N${r}+O${r}`,
+      // R–T: full-book product-line split (Alfie = full ARR of ChatAgent deals;
+      // MS = Managed Services Y1 revenue; Core = Active − Alfie − MS — same definition
+      // as the old recurring tab, now on the point-in-time full book.)
+      activeAt(r, `*(SOQL_Pull!$R$2:$R$${LAST}=TRUE)`),
+      `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$B${r}+1)*(SOQL_Pull!$E$2:$E$${LAST}>$B${r}+1)*SOQL_Pull!$S$2:$S$${LAST})`,
+      `=C${r}-R${r}-S${r}`,
     ]);
   });
 
