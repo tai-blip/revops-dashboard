@@ -2,14 +2,14 @@
 // Flags OPEN opps in SAL/SQL/SQO/Trial that need forecast attention — EITHER the
 // quarterly forecast datestamp (Last_Forecasted_Date_Quarterly__c) is 4+ weeks old / never
 // set, OR the AE/AM % probability value itself (AE_AM_Probability__c) is blank (it must be
-// filled at all times). Excludes brand-new opps (created < 4 weeks ago) so a rep isn't
-// dinged for an opp they haven't had a chance to forecast. Writes "Ops Excellence - Probability Freshness".
+// filled at all times). Excludes only brand-new opps (created in the last 2 weeks) so a rep
+// isn't dinged for an opp they haven't had a chance to forecast yet. Writes "Ops Excellence - Probability Freshness".
 // Run: node --env-file=.env scripts/refresh-probability-freshness.mjs
 import { google } from "googleapis";
 
 const STAGES = "('SAL','SQL','SQO','Trial')";
 const STALE_DAYS = 28;       // forecast counts as stale after 4 weeks with no update
-const MIN_AGE_DAYS = 28;     // exclude opps created within the last 4 weeks (too new to be "stale")
+const MIN_AGE_DAYS = 14;     // grace period: exclude opps created in the last 2 weeks only
 
 async function sfAuth() {
   const body = new URLSearchParams({ grant_type: "client_credentials", client_id: process.env.SF_CLIENT_ID, client_secret: process.env.SF_CLIENT_SECRET });
@@ -56,7 +56,7 @@ async function main() {
 
   const matrix = [
     ["AE/AM Probability Freshness — flagged Opportunities", "", "", `Updated ${stamp}`, "", "", ""],
-    [`${recs.length} open opps (SAL/SQL/SQO/Trial) needing forecast attention — forecast not updated in ${STALE_DAYS}+ days / never set, OR AE/AM % probability blank · excludes opps created < 4 weeks ago`, "", "", "", "", "", ""],
+    [`${recs.length} open opps (SAL/SQL/SQO/Trial) needing forecast attention — forecast not updated in ${STALE_DAYS}+ days / never set, OR AE/AM % probability blank · excludes only opps created in the last 2 weeks`, "", "", "", "", "", ""],
     [],
     ["Rep", "Flagged", "", "", "", "", ""],
     ...repRows.map(([rep, n]) => [rep, n, "", "", "", "", ""]),
@@ -116,7 +116,7 @@ async function main() {
     await api.spreadsheets.values.update({
       spreadsheetId: TEAM_ID, range: `'${rep}'!A1`, valueInputOption: "USER_ENTERED",
       requestBody: { values: [
-        [`${rep} — ${mine.length} flagged (forecast ${STALE_DAYS}+ days old / never set, or AE/AM % blank · excl. opps < 4 weeks old)`, "", `Updated ${stamp}, auto-refreshed daily`],
+        [`${rep} — ${mine.length} flagged (forecast ${STALE_DAYS}+ days old / never set, or AE/AM % blank · excl. opps created in the last 2 weeks)`, "", `Updated ${stamp}, auto-refreshed daily`],
         detailHeader,
         ...mine.map(detailRow),
       ] },
