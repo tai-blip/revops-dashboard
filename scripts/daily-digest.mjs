@@ -123,9 +123,9 @@ async function main() {
   const wonIds = deals.map((d) => d.id);
   const wonArrTotal = deals.reduce((s, d) => s + d.arr, 0);
 
-  // AE Attainment (Q3) — from the "AE attainment" tab: A=AE, B=Q3 quota,
+  // AE Attainment (Q3) — from the "AE Attainment (Official)" tab: A=AE, B=Q3 quota,
   // C=% of quota, D=Q3 actual. Team = Σactual / Σquota.
-  const aeRows = await getValues("AE attainment!A1:AZ80");
+  const aeRows = await getValues("'AE Attainment (Official)'!A1:AZ80");
   const aeHi = aeRows.findIndex((r) => r[0] === "AE");
   const aeReps = [];
   if (aeHi !== -1) {
@@ -231,7 +231,7 @@ async function main() {
     blocks.push({ type: "section", text: { type: "mrkdwn", text: `*📈 Pipeline progression — week ${wowLatest} (vs prior week)*\n${wowMetrics.map(wowStr).join("\n")}\n_latest week may still be in progress_` } });
   }
 
-  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Won-ARR book: ${fmtUsd(wonArrTotal)} · source: SOQL_PaymentMix · ARR_MoM_Rebuild · AE attainment · Pipeline - WoW · auto-posted after the daily SFDC → Sheet refresh` }] });
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Won-ARR book: ${fmtUsd(wonArrTotal)} · source: SOQL_PaymentMix · ARR_MoM_Rebuild · AE Attainment (Official) · Pipeline - WoW · auto-posted after the daily SFDC → Sheet refresh` }] });
 
   const text = `RevOps Daily Digest — ${dLabel}: Live ARR ${fmtUsd(liveArr)}${arrDelta == null ? "" : ` (${signed(arrDelta)})`}, ${newWon.length} newly won.`;
 

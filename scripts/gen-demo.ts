@@ -90,7 +90,7 @@ function relabel(text: string): string {
 
 // ---- parse ----
 const arr = parseArrTab(raw["ARR & recurring revenue"]);
-const aeAttainment = parseAeAttainmentTab(raw["AE attainment"]);
+const aeAttainment = parseAeAttainmentTab(raw["AE Attainment (Official)"]);
 const pipeline = parsePipelineTab(raw["Pipeline"]);
 const pipelineWow = parsePipelineWowTab(raw["Pipeline - WoW"]);
 const openDeals = parseQuery1(raw["Query 1"]);
