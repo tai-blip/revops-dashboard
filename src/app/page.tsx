@@ -805,7 +805,7 @@ export default function Dashboard() {
         sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
         stats: [
           { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const },
-          { label: "New ARR (mo)", value: fmt(S.currentMonth?.newARR), sub: `New Biz + Expansion${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
+          { label: "New ARR (mo)", value: fmt(S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
           { label: "Churned (mo)", value: fmt(S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
           { label: "MoM change", value: gp(S.arrMoM), tone: (S.arrMoM ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
           { label: "Total pipeline", value: fmt(totalPipe) },
@@ -815,8 +815,8 @@ export default function Dashboard() {
       targets: {
         sentence: `Quarter-to-date the team has attained ${fmt(teamActual)} — ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` New ARR (Net New + Expansion) is ${fmt(newArrNbExp)}, skewing ${nbPct.toFixed(0)}% Net New.` : ""}`,
         stats: [
-          { label: "New ARR (current mo)", value: fmt(newArrNbExp), sub: "Net New + Expansion" },
-          { label: "Team New ARR Q3", value: fmt(newArrNbExp), sub: "Net New + Expansion" },
+          { label: "New ARR (current mo)", value: fmt(newArrNbExp), sub: "Net New + Expansion · per contract live date" },
+          { label: "Team New ARR Q3", value: fmt(newArrNbExp), sub: "Net New + Expansion · per contract live date" },
           { label: "Team quota Q3", value: fmt(teamQuota), sub: `across ${data.aeAttainment.reps.length} AEs` },
           { label: "% of quota", value: teamPct.toFixed(1) + "%", sub: `attainment ${fmt(teamActual)} · ${S.elapsedPct.toFixed(0)}% of quarter gone`, tone: teamPct >= S.elapsedPct ? ("good" as const) : ("bad" as const) },
         ],
@@ -1902,7 +1902,7 @@ export default function Dashboard() {
                           <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{quota != null && quota > 0 ? kM(quota) : "\u2014"}</div>
                         </div>
                         <div>
-                          {label("Closed Won")}
+                          {label("Booked ARR")}
                           <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk, marginTop: 3 }}>{kM(cwTotal)}</div>
                           <div style={{ fontSize: 11.5, color: C.t3, marginTop: 2 }}>NB {kM(cw.nb)} · Exp {kM(cw.exp)}</div>
                         </div>
