@@ -1,8 +1,9 @@
 // Ops Excellence (a): AE/AM probability freshness.
-// Flags OPEN opps in SAL/SQL/SQO/Trial that are genuinely STALE: quarterly forecast
-// not updated in 4+ weeks (or never set), AND the opp is at least 4 weeks old — brand
-// -new opps (created < 4 weeks ago) are excluded so a rep isn't dinged for an opp they
-// haven't had a chance to forecast yet. Writes "Ops Excellence - Probability Freshness".
+// Flags OPEN opps in SAL/SQL/SQO/Trial that need forecast attention — EITHER the
+// quarterly forecast datestamp (Last_Forecasted_Date_Quarterly__c) is 4+ weeks old / never
+// set, OR the AE/AM % probability value itself (AE_AM_Probability__c) is blank (it must be
+// filled at all times). Excludes brand-new opps (created < 4 weeks ago) so a rep isn't
+// dinged for an opp they haven't had a chance to forecast. Writes "Ops Excellence - Probability Freshness".
 // Run: node --env-file=.env scripts/refresh-probability-freshness.mjs
 import { google } from "googleapis";
 
@@ -41,7 +42,7 @@ async function main() {
   const api = google.sheets({ version: "v4", auth: gAuth });
   const { token, instance } = await sfAuth();
 
-  const soql = `SELECT Id, Name, AccountId, Owner.Name, Account.Name, StageName, Probability, RecordType.Name, convertCurrency(AnnualContractValueARR__c), CloseDate, CreatedDate, AE_AM_Probability__c, Last_Forecasted_Date_Quarterly__c FROM Opportunity WHERE IsClosed = false AND StageName IN ${STAGES} AND CreatedDate <= N_DAYS_AGO:${MIN_AGE_DAYS} AND (Last_Forecasted_Date_Quarterly__c < LAST_N_DAYS:${STALE_DAYS} OR Last_Forecasted_Date_Quarterly__c = null) ORDER BY Owner.Name, Last_Forecasted_Date_Quarterly__c NULLS FIRST`;
+  const soql = `SELECT Id, Name, AccountId, Owner.Name, Account.Name, StageName, Probability, RecordType.Name, convertCurrency(AnnualContractValueARR__c), CloseDate, CreatedDate, AE_AM_Probability__c, Last_Forecasted_Date_Quarterly__c FROM Opportunity WHERE IsClosed = false AND StageName IN ${STAGES} AND CreatedDate <= N_DAYS_AGO:${MIN_AGE_DAYS} AND (Last_Forecasted_Date_Quarterly__c < LAST_N_DAYS:${STALE_DAYS} OR Last_Forecasted_Date_Quarterly__c = null OR AE_AM_Probability__c = null) ORDER BY Owner.Name, Last_Forecasted_Date_Quarterly__c NULLS FIRST`;
   const recs = await sfQueryAll(instance, token, soql);
 
   const today = new Date();
@@ -55,7 +56,7 @@ async function main() {
 
   const matrix = [
     ["AE/AM Probability Freshness — flagged Opportunities", "", "", `Updated ${stamp}`, "", "", ""],
-    [`${recs.length} open opps (SAL/SQL/SQO/Trial) stale 4+ weeks — forecast not updated in ${STALE_DAYS}+ days (or never set) · excludes opps created < 4 weeks ago`, "", "", "", "", "", ""],
+    [`${recs.length} open opps (SAL/SQL/SQO/Trial) needing forecast attention — forecast not updated in ${STALE_DAYS}+ days / never set, OR AE/AM % probability blank · excludes opps created < 4 weeks ago`, "", "", "", "", "", ""],
     [],
     ["Rep", "Flagged", "", "", "", "", ""],
     ...repRows.map(([rep, n]) => [rep, n, "", "", "", "", ""]),
@@ -115,7 +116,7 @@ async function main() {
     await api.spreadsheets.values.update({
       spreadsheetId: TEAM_ID, range: `'${rep}'!A1`, valueInputOption: "USER_ENTERED",
       requestBody: { values: [
-        [`${rep} — ${mine.length} flagged (forecast ${STALE_DAYS}+ days old or never set · excl. opps created < 4 weeks ago)`, "", `Updated ${stamp}, auto-refreshed daily`],
+        [`${rep} — ${mine.length} flagged (forecast ${STALE_DAYS}+ days old / never set, or AE/AM % blank · excl. opps < 4 weeks old)`, "", `Updated ${stamp}, auto-refreshed daily`],
         detailHeader,
         ...mine.map(detailRow),
       ] },
