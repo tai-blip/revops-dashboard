@@ -47,7 +47,7 @@ const checks = [
   ["Query 1", "A1:A1200", (r) => (!r ? "missing" : r.filter((x) => x[0]).length < 100 ? `only ${r.filter((x) => x[0]).length} rows (pull failed?)` : null)],
   ["Query 2", "A1:A2200", (r) => (!r ? "missing" : r.filter((x) => x[0]).length < 100 ? `only ${r.filter((x) => x[0]).length} rows` : null)],
   ["LiveARR - SOQL Pull", "A1:A1300", (r) => (!r ? "missing" : r.filter((x) => x[0]).length < 500 ? `only ${r.filter((x) => x[0]).length} rows` : null)],
-  ["AE attainment", "A1:A40", (r) => (!r ? "missing" : !r.some((x) => x[0] === "AE") ? "no AE header" : null)],
+  ["AE Attainment (Official)", "A1:A40", (r) => (!r ? "missing" : !r.some((x) => x[0] === "AE") ? "no AE header" : null)],
   ["Pipeline - WoW", "A1:A20", (r) => (!r ? "missing" : !r.some((x) => String(x[0]).includes("New ARR pipeline Created")) ? "no pipeline-created row" : null)],
   ["Forecasting", "A1:A5", (r) => (!r ? "missing" : null)],
 ];
