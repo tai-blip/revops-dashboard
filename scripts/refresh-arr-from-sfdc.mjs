@@ -55,9 +55,12 @@ const SOQL = `SELECT Id, Name, AccountId, Account.Name, Account.Payment_Terms__c
   PaymentTerms__c, AccountManager__r.Name
   FROM Opportunity WHERE StageName IN ('Billing','Closed Won','Closed Lost')`.replace(/\s+/g, " ");
 
-// Normalize the messy PaymentTerms__c picklist into Annual / Quarterly / Monthly / Other.
+// Normalize the messy PaymentTerms__c picklist into Annual / Bi-Annual / Quarterly /
+// Monthly / Other. Bi-Annual (SFDC "Bi-Annual_24_months") = 24-month upfront — kept as
+// its own bucket (it's the longest commitment, e.g. James's Yoshinoya deal).
 function normTerm(v) {
   const s = String(v ?? "").toLowerCase();
+  if (s.startsWith("bi-annual") || s.startsWith("bi_annual") || s.startsWith("biannual") || s.startsWith("bi annual") || s.startsWith("semi")) return "Bi-Annual";
   if (s.startsWith("annual")) return "Annual";
   if (s.startsWith("quarter")) return "Quarterly";
   if (s.startsWith("monthly")) return "Monthly";
