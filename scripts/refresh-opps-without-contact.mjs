@@ -154,7 +154,7 @@ async function main() {
     STAGE_ORDER.indexOf(a.rec.StageName) - STAGE_ORDER.indexOf(b.rec.StageName) ||
     String(a.rec.CloseDate).localeCompare(String(b.rec.CloseDate));
 
-  const teamMeta = await api.spreadsheets.get({ spreadsheetId: TEAM_ID, fields: "sheets.properties(sheetId,title)" });
+  let teamMeta = await api.spreadsheets.get({ spreadsheetId: TEAM_ID, fields: "sheets.properties(sheetId,title)" });
   const teamTabs = new Set(teamMeta.data.sheets.map((s) => s.properties.title));
   const ensureTab = async (title) => {
     if (teamTabs.has(title)) return;
@@ -175,6 +175,30 @@ async function main() {
       ] },
     });
   }
+
+  // Pin the number formats: clearing a tab leaves the old formatting behind, which rendered
+  // "Days Overdue" (576) as a date. Dates as dates, counts and ARR as numbers.
+  teamMeta = await api.spreadsheets.get({ spreadsheetId: TEAM_ID, fields: "sheets.properties(sheetId,title)" });
+  const sheetIdOf = new Map(teamMeta.data.sheets.map((s) => [s.properties.title, s.properties.sheetId]));
+  const COL_FORMATS = [
+    [[4, 5], { type: "DATE", pattern: "yyyy-mm-dd" }],   // Close Date
+    [[5, 6], { type: "NUMBER", pattern: "0" }],          // Days Overdue
+    [[6, 7], { type: "NUMBER", pattern: "#,##0.00" }],   // ARR (USD)
+    [[7, 8], { type: "NUMBER", pattern: "0" }],          // Account Contacts
+    [[8, 10], { type: "DATE", pattern: "yyyy-mm-dd" }],  // Last Activity, Created
+  ];
+  const formatReqs = REP_TABS.flatMap((rep) => {
+    const sheetId = sheetIdOf.get(rep);
+    if (sheetId == null) return [];
+    return COL_FORMATS.map(([[start, end], numberFormat]) => ({
+      repeatCell: {
+        range: { sheetId, startRowIndex: 2, startColumnIndex: start, endColumnIndex: end },
+        cell: { userEnteredFormat: { numberFormat } },
+        fields: "userEnteredFormat.numberFormat",
+      },
+    }));
+  });
+  if (formatReqs.length) await api.spreadsheets.batchUpdate({ spreadsheetId: TEAM_ID, requestBody: { requests: formatReqs } });
 
   // Summary: one column per week, labelled for the 7 days ending today ("24th Jul - 31st Jul").
   await ensureTab("Summary");
