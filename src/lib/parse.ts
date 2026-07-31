@@ -134,6 +134,32 @@ export function parseArrMomRebuildTab(rows: Row[]): ArrMomPoint[] {
   return out;
 }
 
+// Full-book monthly breakdown from ARR_MoM_Rebuild — the CORRECT (non-survivor) versions
+// of the metrics the old "ARR & recurring revenue" tab computed from LiveARR. Used to
+// override arr.monthly so New ARR flow, churn, and the product-line split all tie out.
+// Cols: B month-end serial, C Active ARR, J churn, N NB-added, O Exp-added, P Ren-added,
+// Q New ARR (NB+Exp), R Alfie, S Managed Services, T Core.
+export type ArrMomFull = {
+  label: string; activeARR: number; churnedARR: number;
+  newBusiness: number; expansion: number; renewals: number; newARR: number;
+  alfie: number; managedServices: number; coreExisting: number;
+};
+export function parseArrMomRebuildFull(rows: Row[]): ArrMomFull[] {
+  const out: ArrMomFull[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (r?.[1] == null || typeof r[2] !== "number" || r[2] <= 0) continue;
+    const n = (c: number) => (typeof r[c] === "number" ? (r[c] as number) : 0);
+    out.push({
+      label: sheetsSerialToISODate(r[1]).slice(0, 7),
+      activeARR: n(2), churnedARR: n(9),
+      newBusiness: n(13), expansion: n(14), renewals: n(15), newARR: n(16),
+      alfie: n(17), managedServices: n(18), coreExisting: n(19),
+    });
+  }
+  return out;
+}
+
 // "ACV_MoM" tab — avg ACV of deals won each month, by Segment / Region / AE
 // (sheet-computed AVERAGEIFS so the numbers are auditable in the workbook).
 export type AcvMomData = {
