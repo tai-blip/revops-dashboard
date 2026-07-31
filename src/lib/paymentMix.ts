@@ -7,7 +7,7 @@
 
 type Row = (string | number | null)[];
 
-const TERMS = ["Annual", "Quarterly", "Monthly"] as const;
+const TERMS = ["Annual", "Bi-Annual", "Quarterly", "Monthly"] as const;
 type Term = (typeof TERMS)[number];
 
 export type MomentumTerm = {
