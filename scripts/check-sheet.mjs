@@ -34,14 +34,12 @@ const checks = [
   }],
   ["ACV_MoM", "A1:AZ2", (r) => (!r ? "missing" : r[0]?.[2] !== "All: Avg ACV" ? "col C header != 'All: Avg ACV'" : null)],
   ["ARR_MoM_Segments", "A1:AB2", (r) => (!r ? "missing" : !r[0]?.some((h) => String(h).includes("$ / Location")) ? "no $/Location column" : null)],
-  ["ARR & recurring revenue", "A1:F60", (r) => {
+  ["ARR_WoW_Rebuild", "A1:B20", (r) => {
     if (!r) return "missing";
-    const mh = r.findIndex((x) => x[0] === "Month");
-    if (mh === -1) return "no Month header";
-    // Monthly rows only (YYYY-MM) — a quarterly section (YYYYQn) sits below them.
-    const last = r.slice(mh + 1).filter((x) => /^\d{4}-\d{2}$/.test(String(x[0])) && typeof x[5] === "number" && x[5] > 0).pop();
-    if (!last) return "no Active ARR values";
-    if (last[5] < 3_000_000 || last[5] > 12_000_000) return `latest Active ARR out of range: ${Math.round(last[5])} (currency bug?)`;
+    const vals = r.slice(1).filter((x) => typeof x[1] === "number" && x[1] > 0);
+    if (!vals.length) return "no weekly Active ARR";
+    const last = vals[vals.length - 1][1];
+    if (last < 3_000_000 || last > 12_000_000) return `latest weekly Active ARR out of range: ${Math.round(last)} (currency bug?)`;
     return null;
   }],
   ["Query 1", "A1:A1200", (r) => (!r ? "missing" : r.filter((x) => x[0]).length < 100 ? `only ${r.filter((x) => x[0]).length} rows (pull failed?)` : null)],

@@ -1,7 +1,8 @@
 import fs from "fs";
 import path from "path";
 import {
-  parseArrTab,
+  parseArrMonthlyFromRebuild,
+  parseArrWeeklyFromRebuild,
   parseAeAttainmentTab,
   parsePipelineTab,
   parsePipelineWowTab,
@@ -89,7 +90,7 @@ function relabel(text: string): string {
 }
 
 // ---- parse ----
-const arr = parseArrTab(raw["ARR & recurring revenue"]);
+const arr = { monthly: parseArrMonthlyFromRebuild(raw["ARR_MoM_Rebuild"]), weekly: parseArrWeeklyFromRebuild(raw["ARR_WoW_Rebuild"]) };
 const aeAttainment = parseAeAttainmentTab(raw["AE Attainment (Official)"]);
 const pipeline = parsePipelineTab(raw["Pipeline"]);
 const pipelineWow = parsePipelineWowTab(raw["Pipeline - WoW"]);
