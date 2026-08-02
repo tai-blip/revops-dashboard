@@ -404,6 +404,10 @@ async function main() {
   // USER_ENTERED so date columns land as real dates (the ACV_MoM AVERAGEIFS compare against them)
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_ClosedDeals!A1", valueInputOption: "USER_ENTERED", requestBody: { values: closed } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Rebuild!A1", valueInputOption: "USER_ENTERED", requestBody: { values: mom } });
+  // Live ARR AS OF TODAY (V1 label, W1 value) — contracts live & not yet ended as of
+  // TODAY(). Unlike the current-month row (which projects month-end, subtracting the
+  // whole month's upcoming expirations), this is the true point-in-time live ARR.
+  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Rebuild!V1", valueInputOption: "USER_ENTERED", requestBody: { values: [["Live ARR (as of today)", `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=TODAY())*(SOQL_Pull!$E$2:$E$${LAST}>TODAY())*SOQL_Pull!$C$2:$C$${LAST})`]] } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_WoW_Rebuild!A1", valueInputOption: "USER_ENTERED", requestBody: { values: wow } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Segments!A1", valueInputOption: "USER_ENTERED", requestBody: { values: seg } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ACV_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: acvTab } });
