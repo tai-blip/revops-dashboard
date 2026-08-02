@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { getSheetValues } from "@/lib/sheets";
 import {
-  parseArrTab,
   parseArrMomProgressionTab,
   parseArrMomRebuildTab,
-  parseArrMomRebuildFull,
+  parseArrMonthlyFromRebuild,
+  parseArrWeeklyFromRebuild,
   parseAcvMomTab,
   parsePerLocation,
   parseAeAttainmentTab,
@@ -51,9 +51,9 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [arrRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows] =
       await Promise.all([
-        getSheetValues("ARR & recurring revenue"),
+        getSheetValues("ARR_WoW_Rebuild", "A1:J30").catch(() => [] as (string | number | null)[][]),
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
         // tolerated here only as a fallback if it's ever restored.
         getSheetValues("ARR MoM Progression", "A1:D400").catch(() => [] as (string | number | null)[][]),
@@ -76,28 +76,13 @@ export async function GET() {
         getSheetValues("SOQL_PaymentMix", "A1:M2000").catch(() => [] as (string | number | null)[][]),
       ]);
 
-    const arr = parseArrTab(arrRows);
-    // Override the survivor-biased "ARR & recurring revenue" monthly metrics (New ARR
-    // flow, churn, product-line split) with the CORRECT full-book values from
-    // ARR_MoM_Rebuild (Rule A). The recurring tab reads LiveARR — which retroactively
-    // drops churned deals — so it understates history; the rebuild is the true
-    // point-in-time book (ties to Tableau). Matched by YYYY-MM; future months the
-    // rebuild doesn't compute keep the recurring values.
-    const arrFull = parseArrMomRebuildFull(arrMomRebuildRows);
-    const fullByLabel = new Map(arrFull.map((p) => [p.label, p]));
-    for (const m of arr.monthly) {
-      const fb = fullByLabel.get(m.label);
-      if (!fb) continue;
-      m.newBusiness = fb.newBusiness;
-      m.expansion = fb.expansion;
-      m.renewals = fb.renewals;
-      m.newARR = fb.newARR;
-      m.churnedARR = fb.churnedARR;
-      m.activeARR = fb.activeARR;
-      m.alfie = fb.alfie;
-      m.managedServices = fb.managedServices;
-      m.coreExisting = fb.coreExisting;
-    }
+    // ARR (monthly + weekly) is now built entirely from the full-book Rule A rebuild —
+    // ARR_MoM_Rebuild (monthly) + ARR_WoW_Rebuild (weekly). The survivor-biased
+    // "ARR & recurring revenue" tab is retired.
+    const arr = {
+      monthly: parseArrMonthlyFromRebuild(arrMomRebuildRows),
+      weekly: parseArrWeeklyFromRebuild(wowRows),
+    };
     // Command ARR chart source: the automated SFDC rebuild (Rule A). Fall back to
     // the manual "ARR MoM Progression" tab if the rebuild hasn't been written yet.
     const arrMomRebuild = parseArrMomRebuildTab(arrMomRebuildRows);

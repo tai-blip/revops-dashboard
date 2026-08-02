@@ -160,6 +160,47 @@ export function parseArrMomRebuildFull(rows: Row[]): ArrMomFull[] {
   return out;
 }
 
+// Build arr.monthly straight from ARR_MoM_Rebuild (full book) — replaces the survivor
+// "ARR & recurring revenue" tab as the source. Cols: B month-end serial, C Active, I MoM
+// growth (fraction), J churn, N NB-add, O Exp-add, P Ren-add, Q New ARR, R/S/T product.
+export function parseArrMonthlyFromRebuild(rows: Row[]): ArrPoint[] {
+  const out: ArrPoint[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (r?.[1] == null || typeof r[2] !== "number" || r[2] <= 0) continue;
+    const n = (c: number) => (typeof r[c] === "number" ? (r[c] as number) : 0);
+    out.push({
+      label: sheetsSerialToISODate(r[1]).slice(0, 7),
+      newARR: n(16), newBusiness: n(13), expansion: n(14), renewals: n(15),
+      activeARR: n(2), churnedARR: n(9),
+      changePct: typeof r[8] === "number" ? r[8] : null, // MoM growth fraction (col I)
+      alfie: n(17), managedServices: n(18), coreExisting: n(19),
+      alfieTarget: 0, msTarget: 0,
+    });
+  }
+  return out;
+}
+
+// arr.weekly from ARR_WoW_Rebuild (full book, last 16 weeks). Cols: A week-start serial,
+// B Active, C churn, D NB-add, E Exp-add, F Ren-add, G New ARR, H/I/J product.
+export function parseArrWeeklyFromRebuild(rows: Row[]): ArrPoint[] {
+  const out: ArrPoint[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (r?.[0] == null || typeof r[1] !== "number") continue;
+    const n = (c: number) => (typeof r[c] === "number" ? (r[c] as number) : 0);
+    out.push({
+      label: sheetsSerialToISODate(r[0]).slice(0, 10), // week-start (Monday) ISO
+      newARR: n(6), newBusiness: n(3), expansion: n(4), renewals: n(5),
+      activeARR: n(1), churnedARR: n(2),
+      changePct: null,
+      alfie: n(7), managedServices: n(8), coreExisting: n(9),
+      alfieTarget: 0, msTarget: 0,
+    });
+  }
+  return out;
+}
+
 // "ACV_MoM" tab — avg ACV of deals won each month, by Segment / Region / AE
 // (sheet-computed AVERAGEIFS so the numbers are auditable in the workbook).
 export type AcvMomData = {

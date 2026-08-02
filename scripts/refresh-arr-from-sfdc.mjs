@@ -80,6 +80,17 @@ function monthList(startY, startM /*1-based*/) {
   }
   return out;
 }
+
+// Last n week-start dates (Mondays, UTC) as ISO strings — matches the dashboard's
+// getWeekStart (Monday) convention so arr.weekly labels line up.
+function weekList(n) {
+  const now = new Date();
+  const diff = (now.getUTCDay() + 6) % 7; // days since Monday
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diff));
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) out.push(new Date(monday.getTime() - i * 7 * 86400000).toISOString().slice(0, 10));
+  return out;
+}
 const ser2ym = (s) => new Date(Date.UTC(1899, 11, 30) + s * 86400000).toISOString().slice(0, 7);
 
 async function main() {
@@ -230,6 +241,33 @@ async function main() {
     ]);
   });
 
+  // 6a2) ARR_WoW_Rebuild — the SAME full-book metrics, WEEKLY (last 16 Mondays), so the
+  //      dashboard's weekly ARR chart is Rule A too and the survivor "recurring" tab can
+  //      be retired. Boundary A+7 (next Monday) mirrors the monthly $B+1.
+  const weeks = weekList(16);
+  const wActive = (r, extra = "") =>
+    `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$A${r}+7)*(SOQL_Pull!$E$2:$E$${LAST}>$A${r}+7)${extra}*SOQL_Pull!$C$2:$C$${LAST})`;
+  const wAdded = (r, extra = "") =>
+    `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}>$A${r})*(SOQL_Pull!$D$2:$D$${LAST}<=$A${r}+7)${extra}*SOQL_Pull!$C$2:$C$${LAST})`;
+  const wow = [[
+    "Week Start","Active ARR","Churned (in week)","New Business Added","Expansion Added","Renewals Added",
+    "New ARR Added (NB+Exp)","Alfie ARR (Chat Agent)","Managed Services ARR","Core ARR",
+  ]];
+  weeks.forEach((wk, i) => {
+    const r = i + 2;
+    wow.push([
+      wk, wActive(r),
+      `=SUMPRODUCT((SOQL_Pull!$E$2:$E$${LAST}>=$A${r})*(SOQL_Pull!$E$2:$E$${LAST}<$A${r}+7)*(SOQL_Pull!$G$2:$G$${LAST}="Contracts Ended (Churned)")*SOQL_Pull!$C$2:$C$${LAST})`,
+      wAdded(r, `*(SOQL_Pull!$F$2:$F$${LAST}="1.New Business")`),
+      wAdded(r, `*(SOQL_Pull!$F$2:$F$${LAST}="3.Business Expansion")`),
+      wAdded(r, `*(SOQL_Pull!$F$2:$F$${LAST}="2.Renewals")`),
+      `=D${r}+E${r}`,
+      wActive(r, `*(SOQL_Pull!$R$2:$R$${LAST}=TRUE)`),
+      `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$A${r}+7)*(SOQL_Pull!$E$2:$E$${LAST}>$A${r}+7)*SOQL_Pull!$S$2:$S$${LAST})`,
+      `=B${r}-H${r}-I${r}`,
+    ]);
+  });
+
   // 6b) ARR_MoM_Segments — active ARR at each month-end (same boundary) split by
   //     US/Intl, Merchant Segment, Location Tier, Channel of Contact. Jan-2025 →
   //     present keeps the formula count light. "Unclassified/No tier/Other" are
@@ -350,11 +388,12 @@ async function main() {
   const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "sheets.properties(sheetId,title)" });
   const byTitle = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
   const reqs = [];
-  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
+  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
   reqs.push(
     { addSheet: { properties: { title: "SOQL_Pull" } } },
     { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 22 } } } },
     { addSheet: { properties: { title: "ARR_MoM_Rebuild" } } },
+    { addSheet: { properties: { title: "ARR_WoW_Rebuild", gridProperties: { rowCount: wow.length + 5, columnCount: 10 } } } },
     { addSheet: { properties: { title: "ARR_MoM_Segments", gridProperties: { rowCount: seg.length + 10, columnCount: 30 } } } },
     { addSheet: { properties: { title: "ACV_MoM", gridProperties: { rowCount: 20, columnCount: 50 } } } },
     { addSheet: { properties: { title: "ARR_per_Location_MoM", gridProperties: { rowCount: 20, columnCount: 12 } } } },
@@ -365,6 +404,7 @@ async function main() {
   // USER_ENTERED so date columns land as real dates (the ACV_MoM AVERAGEIFS compare against them)
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_ClosedDeals!A1", valueInputOption: "USER_ENTERED", requestBody: { values: closed } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Rebuild!A1", valueInputOption: "USER_ENTERED", requestBody: { values: mom } });
+  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_WoW_Rebuild!A1", valueInputOption: "USER_ENTERED", requestBody: { values: wow } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Segments!A1", valueInputOption: "USER_ENTERED", requestBody: { values: seg } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ACV_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: acvTab } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_per_Location_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: perLoc } });
