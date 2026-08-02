@@ -667,7 +667,12 @@ export default function Dashboard() {
     // with near-zero data instead of the actual current month.
     const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
     const notFuture = months.filter((m) => m.label <= nowKey);
+    // Use the LAST COMPLETE month — the current calendar month is in progress, and Rule A
+    // projects its month-end active ARR (subtracting upcoming churn), so on the 1st it
+    // looks like ARR fell and New ARR reads $0. Prefer the latest month before this one.
+    const complete = months.filter((m) => m.label < nowKey);
     const currentMonth =
+      complete[complete.length - 1] ??
       months.find((m) => m.label === nowKey) ??
       notFuture[notFuture.length - 1] ??
       latest;
@@ -676,7 +681,7 @@ export default function Dashboard() {
     // row. Falls back to the ARR tab's Active ARR Snapshot if the tab is absent (demo).
     const arrMomList = data.arrMom && data.arrMom.length ? data.arrMom : null;
     const arrMomCur = arrMomList
-      ? arrMomList.find((p) => p.label === nowKey) ??
+      ? arrMomList.filter((p) => p.label < nowKey).slice(-1)[0] ??
         arrMomList.filter((p) => p.label <= nowKey).slice(-1)[0] ??
         arrMomList[arrMomList.length - 1]
       : null;
@@ -791,10 +796,13 @@ export default function Dashboard() {
     const biggest = data.rankedDeals[0];
 
     // Q3 ARR mix skew from last 3 months
-    const q3Win = months.slice(-3);
+    // TRUE quarter window (e.g. Jul–Sep), not a rolling last-3-months slice — otherwise
+    // in August it becomes Jun–Aug and overstates "Q3".
+    const qStart = data.quarter.start.slice(0, 7), qEndExcl = data.quarter.end.slice(0, 7);
+    const q3Win = months.filter((m) => m.label >= qStart && m.label < qEndExcl);
     const nb = q3Win.reduce((s, m) => s + m.newBusiness, 0);
     const exp = q3Win.reduce((s, m) => s + m.expansion, 0);
-    const newArrNbExp = nb + exp; // New ARR = Net New + Expansion (renewals excluded)
+    const newArrNbExp = nb + exp; // Q3 New ARR = Net New + Expansion (renewals excluded)
     const mixTotal = nb + exp;
     const nbPct = mixTotal > 0 ? (nb / mixTotal) * 100 : 0;
 
@@ -815,8 +823,8 @@ export default function Dashboard() {
       targets: {
         sentence: `Quarter-to-date the team has attained ${fmt(teamActual)} — ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` New ARR (Net New + Expansion) is ${fmt(newArrNbExp)}, skewing ${nbPct.toFixed(0)}% Net New.` : ""}`,
         stats: [
-          { label: "New ARR (current mo)", value: fmt(newArrNbExp), sub: "Net New + Expansion · per contract live date" },
-          { label: "Team New ARR Q3", value: fmt(newArrNbExp), sub: "Net New + Expansion · per contract live date" },
+          { label: "New ARR (current mo)", value: fmt(S.currentMonth?.newARR), sub: `Net New + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
+          { label: "Team New ARR Q3", value: fmt(newArrNbExp), sub: `Net New + Expansion · per contract live date · ${qStart}→${qEndExcl}` },
           { label: "Team quota Q3", value: fmt(teamQuota), sub: `across ${data.aeAttainment.reps.length} AEs` },
           { label: "% of quota", value: teamPct.toFixed(1) + "%", sub: `attainment ${fmt(teamActual)} · ${S.elapsedPct.toFixed(0)}% of quarter gone`, tone: teamPct >= S.elapsedPct ? ("good" as const) : ("bad" as const) },
         ],
