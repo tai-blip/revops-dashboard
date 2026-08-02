@@ -26,6 +26,7 @@ import {
   parseForecastingStages,
   computeWinRateAndCycle,
   computeAcvDistribution,
+  computeBookingReport,
 } from "@/lib/deals";
 import {
   SALES_Q,
@@ -174,6 +175,7 @@ export async function GET() {
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
     const acv = computeAcvDistribution(closedDeals);
     const acvInsights = computeAcvInsights(closedDealsRows);
+    const bookingReport = computeBookingReport(closedDealsRows);
     const paymentMix = computePaymentMix(paymentMixRows);
 
     // Who Does What — open deals grouped by owner, flagged if stale (>60d since last stage change)
@@ -219,6 +221,7 @@ export async function GET() {
       arr,
       arrMom,
       liveArrToday,
+      bookingReport,
       aeAttainment,
       pipeline,
       pipelineWow,

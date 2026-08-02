@@ -36,6 +36,7 @@ type DashboardData = {
   };
   arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
   liveArrToday?: number | null;
+  bookingReport?: { total: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string }[] };
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
     monthlyTeamActual: { label: string; actual: number }[];
@@ -98,7 +99,7 @@ type DashboardData = {
     quotaGap: number;
     quotaPerWeek: number;
     potentialLanding: number;
-    decideDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
+    decideDeals: { name: string; owner: string; stage: string; arr: number; potARR: number; ageDays: number | null }[];
   };
   quarter: { key: string; label: string; start: string; end: string };
   winRates: { derived: boolean; n: number; overall: number | null };
@@ -1117,6 +1118,54 @@ export default function Dashboard() {
               <TabHeader label="Command" sentence={tabSummaries.command.sentence} stats={tabSummaries.command.stats} />
             )}
 
+            {/* ARR Composition — Live vs Booked ARR (item 1) + Churn + Booking report (item 2) */}
+            {data.bookingReport && (() => {
+              const br = data.bookingReport;
+              const months = data.arr.monthly;
+              const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+              const lastComplete = months.filter((m) => m.label < nowKey).slice(-1)[0];
+              const churnMo = lastComplete?.churnedARR ?? 0;
+              const churn12 = months.slice(-12).reduce((s, m) => s + m.churnedARR, 0);
+              const liveArr = data.liveArrToday ?? 0;
+              const box = (label: string, val: string, sub: string, color: string) => (
+                <div style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "16px 18px" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3 }}>{label}</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color, marginTop: 5 }}>{val}</div>
+                  <div style={{ fontSize: 12, color: C.t2, marginTop: 4 }}>{sub}</div>
+                </div>
+              );
+              return (
+                <Card title="ARR Composition — Live vs Booked · Churn" sub="Live = contracts past ContractLiveDate (recognized). Booked = signed but not yet live. Churn shown as its own component — never netted into New ARR.">
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, padding: "18px 20px" }}>
+                    {box("Live ARR (as of today)", fmt(liveArr), "past ContractLiveDate", C.grn)}
+                    {box("Booked — not yet live", fmt(br.total), `${br.count} signed deals pending go-live`, C.navy)}
+                    {box("Churn — last complete mo", fmt(churnMo), lastComplete?.label ?? "", C.red)}
+                    {box("Churn — trailing 12 mo", fmt(churn12), `${(liveArr ? (churn12 / liveArr) * 100 : 0).toFixed(1)}% of live ARR`, C.red)}
+                  </div>
+                  {br.deals.length > 0 && (
+                    <div style={{ padding: "0 20px 18px" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Booking report — signed, not yet live (top {Math.min(12, br.deals.length)} by ARR)</div>
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                          <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th l>Signed</Th><Th l>Live date</Th><Th>ARR</Th></tr></thead>
+                          <tbody>
+                            {br.deals.slice(0, 12).map((d, i) => (
+                              <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                                <Td l bold>{d.name}</Td><Td l>{d.owner.split(" ")[0]}</Td>
+                                <Td l><Pill tone="blue">{d.stage}</Pill></Td>
+                                <Td l>{d.signedDate || "—"}</Td><Td l>{d.liveDate || "not set"}</Td>
+                                <Td mono bold color={C.navy}>{fmt(d.arr)}</Td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              );
+            })()}
+
             {pathToPlan && (() => {
               const P = pathToPlan;
               // whole-k / M formatter matching the card design (no decimal on k)
@@ -2082,8 +2131,9 @@ export default function Dashboard() {
         const potVsQuota = totalQuota > 0 ? totalPot / totalQuota : 0;
 
         // Decide board derived numbers
-        const decideView = F.decideDeals.filter((d) => decideAE === "all" || d.owner === decideAE);
-        const decideOwners = ["all", ...Array.from(new Set(F.decideDeals.map((d) => d.owner)))];
+        // Filter by STAGE now (SQL/SAL/SQO), not by AE — per Stephen.
+        const decideView = F.decideDeals.filter((d) => decideAE === "all" || d.stage === decideAE);
+        const decideStages = ["all", "SQL", "SAL", "SQO"].filter((s) => s === "all" || F.decideDeals.some((d) => d.stage === s));
         let committed = 0, commitBest = 0;
         for (const d of F.decideDeals) {
           const call = dealCalls[d.name];
@@ -2214,12 +2264,12 @@ export default function Dashboard() {
           </Card>
 
           {/* deals that decide */}
-          <Card title={`Deals that decide ${Q.label}`} sub={`Biggest open deals by ARR${decideAE === "all" ? "" : " · " + short(decideAE)}. Filter by AE to work rep-by-rep. Top ${decideView.length} by ARR · ${fmt(decideView.reduce((s, d) => s + d.arr, 0))} in view.`} accent={C.coral}>
+          <Card title={`Deals that decide ${Q.label}`} sub={`Open SQL/SAL/SQO deals ranked by quarterly Potential ARR${decideAE === "all" ? "" : " · " + decideAE}. Top ${decideView.length} · ${fmt(decideView.reduce((s, d) => s + d.potARR, 0))} potential in view.`} accent={C.coral}>
             <div style={{ padding: "16px 20px" }}>
               <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-                {decideOwners.map((o) => (
+                {decideStages.map((o) => (
                   <button key={o} onClick={() => setDecideAE(o)} style={{ padding: "5px 13px", fontSize: 12, fontWeight: 600, borderRadius: 20, border: `1px solid ${o === decideAE ? C.coral : C.bd}`, background: o === decideAE ? C.coralSoft : "#fff", color: o === decideAE ? C.coralDk : C.t2, cursor: "pointer" }}>
-                    {o === "all" ? "All" : short(o)}
+                    {o === "all" ? "All stages" : o}
                   </button>
                 ))}
               </div>
@@ -2244,7 +2294,7 @@ export default function Dashboard() {
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                      <Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th>Age</Th><Th>ARR</Th><Th>Call</Th>
+                      <Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th>Age</Th><Th>ARR</Th><Th>Pot. ARR (Q)</Th><Th>Call</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2255,6 +2305,7 @@ export default function Dashboard() {
                         <Td l><Pill tone="blue">{d.stage}</Pill></Td>
                         <Td mono color={(d.ageDays ?? 0) > 90 ? C.red : C.t2}>{d.ageDays != null ? d.ageDays + "d" : "\u2014"}</Td>
                         <Td mono bold color={C.coralDk}>{fmt(d.arr)}</Td>
+                        <Td mono bold color={C.navy}>{fmt(d.potARR)}</Td>
                         <td style={{ textAlign: "center", padding: "8px 10px", whiteSpace: "nowrap" }}>
                           {callBtn(d.name, "commit", "Commit", C.grn)}
                           {callBtn(d.name, "best", "Best case", C.navy)}
@@ -2875,9 +2926,12 @@ export default function Dashboard() {
       {tab === "productarr" && (() => {
         const monthly = data.arr.monthly.filter((p) => p.label.startsWith("2026-"));
         const weekly = data.arr.weekly.slice(-6);
-        const wLabels = weekly.map((p) => p.label.slice(5));
+        const MABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        // proper month labels (Stephen item 3) — was p.label.slice(5) which showed bare
+        // month numbers ("07") instead of names. "2026-07"→"Jul-26"; "2026-07-27"→"Jul 27".
+        const wLabels = weekly.map((p) => { const [, m, d] = p.label.split("-"); return `${MABBR[+m - 1]} ${+d}`; });
         const mWin = monthly.slice(-6);
-        const mLabels = mWin.map((p) => p.label.slice(5));
+        const mLabels = mWin.map((p) => { const [y, m] = p.label.split("-"); return `${MABBR[+m - 1]}-${y.slice(2)}`; });
 
         const PRODUCTS = [
           { key: "alfie" as const, name: "Alfie", color: C.purp, target: "alfieTarget" as const },
