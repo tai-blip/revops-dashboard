@@ -70,7 +70,7 @@ export async function GET() {
         // Daily SFDC pull (all closed deals + dimensions) — powers ACV & Deal Size.
         // Tolerate absence so the dashboard still loads if the pull hasn't run.
         getSheetValues("SOQL_ClosedDeals", "A1:T4000").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("ARR_MoM_Rebuild", "A1:T400").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_MoM_Rebuild", "A1:W400").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ACV_MoM", "A1:AZ20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_per_Location_MoM", "A1:K20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("SOQL_PaymentMix", "A1:M2000").catch(() => [] as (string | number | null)[][]),
@@ -87,6 +87,9 @@ export async function GET() {
     // the manual "ARR MoM Progression" tab if the rebuild hasn't been written yet.
     const arrMomRebuild = parseArrMomRebuildTab(arrMomRebuildRows);
     const arrMom = arrMomRebuild.length ? arrMomRebuild : parseArrMomProgressionTab(arrMomRows);
+    // Live ARR as of TODAY (ARR_MoM_Rebuild W1) — the true point-in-time active book,
+    // not the current-month row (which projects month-end, subtracting upcoming expirations).
+    const liveArrToday = typeof arrMomRebuildRows?.[0]?.[22] === "number" ? (arrMomRebuildRows[0][22] as number) : null;
     const acvMoM = parseAcvMomTab(acvMomRows);
     const perLocation = parsePerLocation(perLocRows);
     const aeAttainment = parseAeAttainmentTab(aeRows);
@@ -215,6 +218,7 @@ export async function GET() {
       updatedAt: new Date().toISOString(),
       arr,
       arrMom,
+      liveArrToday,
       aeAttainment,
       pipeline,
       pipelineWow,

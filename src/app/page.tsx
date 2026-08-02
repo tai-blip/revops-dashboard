@@ -35,6 +35,7 @@ type DashboardData = {
     weekly: ArrPoint[];
   };
   arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
+  liveArrToday?: number | null;
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
     monthlyTeamActual: { label: string; actual: number }[];
@@ -685,7 +686,9 @@ export default function Dashboard() {
         arrMomList.filter((p) => p.label <= nowKey).slice(-1)[0] ??
         arrMomList[arrMomList.length - 1]
       : null;
-    const arrNow = arrMomCur ? arrMomCur.totalARR : currentMonth?.activeARR ?? 0;
+    // Live ARR = true active book AS OF TODAY (not the current-month month-end projection,
+    // which subtracts the whole month's upcoming expirations and looks like a drop).
+    const arrNow = data.liveArrToday ?? (arrMomCur ? arrMomCur.totalARR : currentMonth?.activeARR ?? 0);
     const curMoM = arrMomCur ? arrMomCur.momGrowth / 100 : currentMonth?.changePct ?? null;
     const gap = 10000000 - arrNow;
 
