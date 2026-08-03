@@ -8,6 +8,9 @@ import {
   parseAcvMomTab,
   parsePerLocation,
   parseAeAttainmentTab,
+  parseAeAnnualTab,
+  parseTopBookedTab,
+  parseArrForwardTab,
   parsePipelineTab,
   parsePipelineWowTab,
 } from "@/lib/parse";
@@ -26,6 +29,7 @@ import {
   parseForecastingStages,
   computeWinRateAndCycle,
   computeAcvDistribution,
+  computeBookingReport,
 } from "@/lib/deals";
 import {
   SALES_Q,
@@ -51,7 +55,7 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows] =
       await Promise.all([
         getSheetValues("ARR_WoW_Rebuild", "A1:J30").catch(() => [] as (string | number | null)[][]),
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
@@ -74,6 +78,9 @@ export async function GET() {
         getSheetValues("ACV_MoM", "A1:AZ20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_per_Location_MoM", "A1:K20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("SOQL_PaymentMix", "A1:M2000").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("AE_Annual_Potential", "A1:K30").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("Top_Booked_ARR", "A1:F12").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_Forward", "A1:E24").catch(() => [] as (string | number | null)[][]),
       ]);
 
     // ARR (monthly + weekly) is now built entirely from the full-book Rule A rebuild —
@@ -93,6 +100,9 @@ export async function GET() {
     const acvMoM = parseAcvMomTab(acvMomRows);
     const perLocation = parsePerLocation(perLocRows);
     const aeAttainment = parseAeAttainmentTab(aeRows);
+    const aeAnnual = parseAeAnnualTab(aeAnnualRows);
+    const topBooked = parseTopBookedTab(topBookedRows);
+    const arrForward = parseArrForwardTab(arrForwardRows);
     const pipeline = parsePipelineTab(pipelineRows);
     const pipelineWow = parsePipelineWowTab(pipelineWowRows);
 
@@ -174,6 +184,7 @@ export async function GET() {
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
     const acv = computeAcvDistribution(closedDeals);
     const acvInsights = computeAcvInsights(closedDealsRows);
+    const bookingReport = computeBookingReport(closedDealsRows);
     const paymentMix = computePaymentMix(paymentMixRows);
 
     // Who Does What — open deals grouped by owner, flagged if stale (>60d since last stage change)
@@ -219,7 +230,11 @@ export async function GET() {
       arr,
       arrMom,
       liveArrToday,
+      bookingReport,
+      topBooked,
+      arrForward,
       aeAttainment,
+      aeAnnual,
       pipeline,
       pipelineWow,
       dealHealth,

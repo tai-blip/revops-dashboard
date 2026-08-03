@@ -5,6 +5,7 @@ import { C, fmt, pct, Card, KV, Bar, Pill, Th, Td } from "@/lib/ui";
 import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
+import { ArrMovementChart } from "@/lib/ArrMovementChart";
 import { GroupedBarChart } from "@/lib/GroupedBarChart";
 import { StackedBarChart } from "@/lib/StackedBarChart";
 import { Sparkline, DeltaPill, wowDeltaPct, fmtMetricValue } from "@/lib/Sparkline";
@@ -36,9 +37,15 @@ type DashboardData = {
   };
   arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
   liveArrToday?: number | null;
+  bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
+  topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
+  arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
     monthlyTeamActual: { label: string; actual: number }[];
+  };
+  aeAnnual?: {
+    reps: { name: string; goal: number; ytdNB: number; ytdExp: number; ytdTotal: number; pctOfGoal: number; potNB: number; potExp: number; potTotal: number; projection: number; pctProj: number }[];
   };
   pipeline: {
     filterRep: string;
@@ -98,7 +105,7 @@ type DashboardData = {
     quotaGap: number;
     quotaPerWeek: number;
     potentialLanding: number;
-    decideDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
+    decideDeals: { name: string; owner: string; stage: string; arr: number; potARR: number; ageDays: number | null }[];
   };
   quarter: { key: string; label: string; start: string; end: string };
   winRates: { derived: boolean; n: number; overall: number | null };
@@ -503,6 +510,7 @@ export default function Dashboard() {
   const [pipePeriod, setPipePeriod] = useState<"weekly" | "monthly">("weekly");
   const [wowMetric, setWowMetric] = useState<string | null>(null);
   const [decideAE, setDecideAE] = useState<string>("all");
+  const [attView, setAttView] = useState<"quarterly" | "annual">("quarterly");
   const [dealCalls, setDealCalls] = useState<Record<string, "commit" | "best" | "pipeline" | "omit">>({});
 
   useEffect(() => {
@@ -589,6 +597,7 @@ export default function Dashboard() {
       return {
         label: p.label,
         activeARR: p.totalARR,
+        bookedARR: m?.bookedARR ?? 0,
         newARR: m?.newARR ?? 0,
         newBusiness: m?.newBusiness ?? 0,
         expansion: m?.expansion ?? 0,
@@ -818,9 +827,13 @@ export default function Dashboard() {
           { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const },
           { label: "New ARR (mo)", value: fmt(S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
           { label: "Churned (mo)", value: fmt(S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
+          { label: "Up for renewal (mo)", value: fmt(data.arrForward?.renewalDue ?? 0), sub: "contract term ends this month · in renewal", tone: "warn" as const },
           { label: "MoM change", value: gp(S.arrMoM), tone: (S.arrMoM ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
-          { label: "Total pipeline", value: fmt(totalPipe) },
-          { label: "Coverage", value: S.coverage.toFixed(2) + "x", tone: S.coverage >= 3 ? ("good" as const) : ("warn" as const) },
+          {
+            label: "Total pipeline",
+            value: fmt(totalPipe),
+            extra: { label: "Coverage", value: S.coverage.toFixed(2) + "x", tone: S.coverage >= 3 ? ("good" as const) : ("warn" as const) },
+          },
         ],
       },
       targets: {
@@ -1207,6 +1220,105 @@ export default function Dashboard() {
                     </div>
                   </Card>
                 </>
+              );
+            })()}
+
+            {/* ARR Composition — Live vs Booked (item 1) + Churn + MoM breakdown + top-5 booked (item 2) */}
+            {data.bookingReport && (() => {
+              const br = data.bookingReport;
+              const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+              const MABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+              const mLabel = (l: string) => { const [y, mm] = l.split("-"); return `${MABBR[+mm - 1]}-${y.slice(2)}`; };
+              // Fixed window Jan-26 → Jan-27. Actuals: Jan-26 → last complete month
+              // (Live line). Forward: current month → Jan-27, Booked = last live +
+              // cumulative scheduled go-lives (no end-date subtraction), Live line stops.
+              const hist = data.arr.monthly.filter((m) => m.label >= "2026-01" && m.label < nowKey);
+              const lastComplete = hist.slice(-1)[0];
+              const churnMo = lastComplete?.churnedARR ?? 0;
+              const liveArr = data.liveArrToday ?? 0;
+              const booked = liveArr + br.total;
+              const anchor = lastComplete?.activeARR ?? liveArr;
+              type MPt = { label: string; newBusiness: number; expansion: number; churn: number; liveARR: number | null; bookedARR: number; forecast: boolean };
+              const histPts: MPt[] = hist.map((m) => ({
+                label: mLabel(m.label), newBusiness: m.newBusiness, expansion: m.expansion,
+                churn: m.churnedARR, liveARR: m.activeARR, bookedARR: m.activeARR, forecast: false,
+              }));
+              let cum = anchor;
+              const fwdPts: MPt[] = (data.arrForward?.months ?? [])
+                .filter((f) => f.ym <= "2027-01")
+                .map((f) => { cum += f.goLiveTotal; return {
+                  label: mLabel(f.ym), newBusiness: f.goLiveNB, expansion: f.goLiveExp,
+                  churn: 0, liveARR: null, bookedARR: cum, forecast: true,
+                }; });
+              const pts = [...histPts, ...fwdPts];
+              const box = (label: string, val: string, sub: string, color: string) => (
+                <div style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "16px 18px" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3 }}>{label}</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color, marginTop: 5 }}>{val}</div>
+                  <div style={{ fontSize: 12, color: C.t2, marginTop: 4 }}>{sub}</div>
+                </div>
+              );
+              const top = data.topBooked ?? [];
+              return (
+                <Card title="ARR Composition — Live vs Booked (Jan-26 → Jan-27)" sub="Actuals through the last complete month, then forward Booked ARR = last Live ARR + each future month's scheduled go-lives (contract live date). Live ARR line stops at actuals; Booked ARR projects forward. Computed in the sheet.">
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, padding: "18px 20px" }}>
+                    {box("Booked ARR", fmt(booked), `Live ${fmt(liveArr)} + ${fmt(br.total)} pending`, C.navy)}
+                    {box("Live ARR (as of today)", fmt(liveArr), "past ContractLiveDate", C.grn)}
+                    {box("Booked — not yet live", fmt(br.total), `${br.count} deals · NB ${fmt(br.nb)} / Exp ${fmt(br.exp)}`, C.navy)}
+                    {box("Churn — last complete mo", fmt(churnMo), lastComplete ? mLabel(lastComplete.label) : "", C.red)}
+                  </div>
+                  <div style={{ padding: "0 20px 8px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "2px 0 6px" }}>
+                      ARR trajectory — Live ARR (actuals) continuing into Booked ARR (forecast)
+                    </div>
+                    <ArrMovementChart points={pts.map((p) => ({ label: p.label, value: p.liveARR != null ? p.liveARR : p.bookedARR, forecast: p.forecast }))} />
+                  </div>
+                  {/* MoM breakdown table — all components with numbers */}
+                  <div style={{ padding: "6px 20px 14px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Month-over-month breakdown (Jan-26 → Jan-27)</div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                          <Th l>Month</Th><Th>New Biz</Th><Th>Expansion</Th><Th>Churn</Th><Th>Booked ARR</Th><Th>Live ARR</Th>
+                        </tr></thead>
+                        <tbody>
+                          {pts.map((m, i) => (
+                            <tr key={i} style={{ borderBottom: `1px solid ${C.s1}`, background: m.forecast ? C.s1 : undefined }}>
+                              <Td l bold>{m.label}{m.forecast ? " ·f" : ""}</Td>
+                              <Td mono color={C.grn}>{m.newBusiness ? fmt(m.newBusiness) : "—"}</Td>
+                              <Td mono color={C.blue}>{m.expansion ? fmt(m.expansion) : "—"}</Td>
+                              <Td mono color={C.red}>{m.churn ? "−" + fmt(m.churn) : "—"}</Td>
+                              <Td mono bold color={C.gold}>{fmt(m.bookedARR)}</Td>
+                              <Td mono bold color={C.navy}>{m.liveARR != null ? fmt(m.liveARR) : "—"}</Td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.t3, marginTop: 6 }}>·f = forecast month (Booked ARR projected; Live ARR not yet actual)</div>
+                  </div>
+                  {/* Top 5 currently-booked contracts (sheet-computed: Top_Booked_ARR) */}
+                  {top.length > 0 && (
+                    <div style={{ padding: "0 20px 18px" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Top {top.length} booked contracts — currently in the book</div>
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                          <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Account</Th><Th l>AE</Th><Th l>Status</Th><Th l>Live date</Th><Th>ARR</Th></tr></thead>
+                          <tbody>
+                            {top.map((d, i) => (
+                              <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                                <Td l bold>{d.account || d.opp}</Td><Td l>{d.owner.split(" ")[0]}</Td>
+                                <Td l><Pill tone={d.status === "Live" ? "good" : "warn"}>{d.status}</Pill></Td>
+                                <Td l>{d.liveDate}</Td>
+                                <Td mono bold color={C.navy}>{fmt(d.arr)}</Td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </Card>
               );
             })()}
 
@@ -1832,7 +1944,95 @@ export default function Dashboard() {
           {tabSummaries && (
             <TabHeader label="AE Attainment" sentence={tabSummaries.attainment.sentence} stats={tabSummaries.attainment.stats} />
           )}
-          {(() => {
+          {/* Quarterly ⇄ Annual toggle */}
+          <div style={{ display: "inline-flex", background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 3, marginBottom: 16 }}>
+            {(["quarterly", "annual"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setAttView(v)}
+                style={{
+                  border: "none", cursor: "pointer", borderRadius: 8, padding: "6px 16px", fontSize: 13, fontWeight: 600,
+                  fontFamily: "inherit", textTransform: "capitalize",
+                  background: attView === v ? "#fff" : "transparent",
+                  color: attView === v ? C.t1 : C.t3,
+                  boxShadow: attView === v ? "0 1px 3px rgba(0,0,0,.08)" : "none",
+                }}
+              >
+                {v === "quarterly" ? `${data.quarter.label}` : `Annual (FY${new Date().getUTCFullYear().toString().slice(2)})`}
+              </button>
+            ))}
+          </div>
+          {attView === "annual" && (() => {
+            const kM = (n: number) => {
+              const a = Math.abs(n);
+              if (a >= 1e6) return "$" + (a / 1e6).toFixed(2) + "M";
+              if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
+              return "$" + Math.round(a);
+            };
+            const label = (t: string) => (
+              <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em" }}>{t}</div>
+            );
+            const reps = data.aeAnnual?.reps ?? [];
+            if (reps.length === 0) {
+              return <div style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: "22px", color: C.t2, fontSize: 14 }}>Annual attainment data not yet available. Run <code>refresh-ae-annual-potential.mjs</code> to populate it.</div>;
+            }
+            const teamGoal = reps.reduce((s, r) => s + r.goal, 0);
+            const teamYtd = reps.reduce((s, r) => s + r.ytdTotal, 0);
+            const teamProj = reps.reduce((s, r) => s + r.projection, 0);
+            return (
+              <div style={{ display: "grid", gap: 12, marginBottom: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 4 }}>
+                  {[
+                    ["Team annual goal", kM(teamGoal), `${reps.length} reps`, C.t1],
+                    ["Team YTD attainment", kM(teamYtd), `${teamGoal > 0 ? Math.round((teamYtd / teamGoal) * 100) : 0}% of goal · by ContractLiveDate`, C.coralDk],
+                    ["Full-year projection", kM(teamProj), `${teamGoal > 0 ? Math.round((teamProj / teamGoal) * 100) : 0}% of goal · YTD + open-pipe potential`, C.navy],
+                  ].map(([l, v, s, c], i) => (
+                    <div key={i} style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: "16px 20px" }}>
+                      {label(l as string)}
+                      <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: c as string, marginTop: 4 }}>{v}</div>
+                      <div style={{ fontSize: 12, color: C.t2, marginTop: 3 }}>{s}</div>
+                    </div>
+                  ))}
+                </div>
+                {[...reps].sort((a, b) => b.pctOfGoal - a.pctOfGoal).map((rep) => (
+                  <div key={rep.name} style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: "18px 22px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: C.t1 }}>{rep.name}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: C.coralDk, background: C.coralSoft, borderRadius: 20, padding: "4px 12px" }}>
+                        {rep.goal > 0 ? pct(rep.pctOfGoal) : "—"} to annual goal
+                      </span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20 }}>
+                      <div>
+                        {label("Annual Goal")}
+                        <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{rep.goal > 0 ? kM(rep.goal) : "—"}</div>
+                      </div>
+                      <div>
+                        {label("YTD Attainment")}
+                        <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk, marginTop: 3 }}>{kM(rep.ytdTotal)}</div>
+                        <div style={{ fontSize: 11.5, color: C.t3, marginTop: 2 }}>NB {kM(rep.ytdNB)} · Exp {kM(rep.ytdExp)}</div>
+                      </div>
+                      <div>
+                        {label("Potential ARR (Year)")}
+                        <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.purp, marginTop: 3 }}>{kM(rep.potTotal)}</div>
+                        <div style={{ fontSize: 11.5, color: C.t3, marginTop: 2 }}>AE/AM % × open ARR</div>
+                      </div>
+                      <div>
+                        {label("Full-Year Projection")}
+                        <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.navy, marginTop: 3 }}>{kM(rep.projection)}</div>
+                        <div style={{ fontSize: 11.5, color: rep.pctProj >= 1 ? C.grn : C.t3, marginTop: 2 }}>{rep.goal > 0 ? `${pct(rep.pctProj)} of goal` : ""}</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 16 }}>
+                      {label("YTD → Projection vs Annual Goal")}
+                      <div style={{ marginTop: 6 }}><Bar value={rep.ytdTotal} target={rep.goal} /></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+          {attView === "quarterly" && (() => {
             const kM = (n: number) => {
               const a = Math.abs(n);
               if (a >= 1e6) return "$" + (a / 1e6).toFixed(2) + "M";
@@ -2082,8 +2282,9 @@ export default function Dashboard() {
         const potVsQuota = totalQuota > 0 ? totalPot / totalQuota : 0;
 
         // Decide board derived numbers
-        const decideView = F.decideDeals.filter((d) => decideAE === "all" || d.owner === decideAE);
-        const decideOwners = ["all", ...Array.from(new Set(F.decideDeals.map((d) => d.owner)))];
+        // Filter by STAGE now (SQL/SAL/SQO), not by AE — per Stephen.
+        const decideView = F.decideDeals.filter((d) => decideAE === "all" || d.stage === decideAE);
+        const decideStages = ["all", "SQL", "SAL", "SQO"].filter((s) => s === "all" || F.decideDeals.some((d) => d.stage === s));
         let committed = 0, commitBest = 0;
         for (const d of F.decideDeals) {
           const call = dealCalls[d.name];
@@ -2214,12 +2415,12 @@ export default function Dashboard() {
           </Card>
 
           {/* deals that decide */}
-          <Card title={`Deals that decide ${Q.label}`} sub={`Biggest open deals by ARR${decideAE === "all" ? "" : " · " + short(decideAE)}. Filter by AE to work rep-by-rep. Top ${decideView.length} by ARR · ${fmt(decideView.reduce((s, d) => s + d.arr, 0))} in view.`} accent={C.coral}>
+          <Card title={`Deals that decide ${Q.label}`} sub={`Open SQL/SAL/SQO deals ranked by quarterly Potential ARR${decideAE === "all" ? "" : " · " + decideAE}. Top ${decideView.length} · ${fmt(decideView.reduce((s, d) => s + d.potARR, 0))} potential in view.`} accent={C.coral}>
             <div style={{ padding: "16px 20px" }}>
               <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-                {decideOwners.map((o) => (
+                {decideStages.map((o) => (
                   <button key={o} onClick={() => setDecideAE(o)} style={{ padding: "5px 13px", fontSize: 12, fontWeight: 600, borderRadius: 20, border: `1px solid ${o === decideAE ? C.coral : C.bd}`, background: o === decideAE ? C.coralSoft : "#fff", color: o === decideAE ? C.coralDk : C.t2, cursor: "pointer" }}>
-                    {o === "all" ? "All" : short(o)}
+                    {o === "all" ? "All stages" : o}
                   </button>
                 ))}
               </div>
@@ -2244,7 +2445,7 @@ export default function Dashboard() {
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                      <Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th>Age</Th><Th>ARR</Th><Th>Call</Th>
+                      <Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th>Age</Th><Th>ARR</Th><Th>Pot. ARR (Q)</Th><Th>Call</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2255,6 +2456,7 @@ export default function Dashboard() {
                         <Td l><Pill tone="blue">{d.stage}</Pill></Td>
                         <Td mono color={(d.ageDays ?? 0) > 90 ? C.red : C.t2}>{d.ageDays != null ? d.ageDays + "d" : "\u2014"}</Td>
                         <Td mono bold color={C.coralDk}>{fmt(d.arr)}</Td>
+                        <Td mono bold color={C.navy}>{fmt(d.potARR)}</Td>
                         <td style={{ textAlign: "center", padding: "8px 10px", whiteSpace: "nowrap" }}>
                           {callBtn(d.name, "commit", "Commit", C.grn)}
                           {callBtn(d.name, "best", "Best case", C.navy)}
@@ -2875,9 +3077,12 @@ export default function Dashboard() {
       {tab === "productarr" && (() => {
         const monthly = data.arr.monthly.filter((p) => p.label.startsWith("2026-"));
         const weekly = data.arr.weekly.slice(-6);
-        const wLabels = weekly.map((p) => p.label.slice(5));
+        const MABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        // proper month labels (Stephen item 3) — was p.label.slice(5) which showed bare
+        // month numbers ("07") instead of names. "2026-07"→"Jul-26"; "2026-07-27"→"Jul 27".
+        const wLabels = weekly.map((p) => { const [, m, d] = p.label.split("-"); return `${MABBR[+m - 1]} ${+d}`; });
         const mWin = monthly.slice(-6);
-        const mLabels = mWin.map((p) => p.label.slice(5));
+        const mLabels = mWin.map((p) => { const [y, m] = p.label.split("-"); return `${MABBR[+m - 1]}-${y.slice(2)}`; });
 
         const PRODUCTS = [
           { key: "alfie" as const, name: "Alfie", color: C.purp, target: "alfieTarget" as const },
