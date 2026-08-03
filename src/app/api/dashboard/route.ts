@@ -10,6 +10,7 @@ import {
   parseAeAttainmentTab,
   parseAeAnnualTab,
   parseTopBookedTab,
+  parseArrForwardTab,
   parsePipelineTab,
   parsePipelineWowTab,
 } from "@/lib/parse";
@@ -54,7 +55,7 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows] =
       await Promise.all([
         getSheetValues("ARR_WoW_Rebuild", "A1:J30").catch(() => [] as (string | number | null)[][]),
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
@@ -79,6 +80,7 @@ export async function GET() {
         getSheetValues("SOQL_PaymentMix", "A1:M2000").catch(() => [] as (string | number | null)[][]),
         getSheetValues("AE_Annual_Potential", "A1:K30").catch(() => [] as (string | number | null)[][]),
         getSheetValues("Top_Booked_ARR", "A1:F12").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_Forward", "A1:E24").catch(() => [] as (string | number | null)[][]),
       ]);
 
     // ARR (monthly + weekly) is now built entirely from the full-book Rule A rebuild —
@@ -100,6 +102,7 @@ export async function GET() {
     const aeAttainment = parseAeAttainmentTab(aeRows);
     const aeAnnual = parseAeAnnualTab(aeAnnualRows);
     const topBooked = parseTopBookedTab(topBookedRows);
+    const arrForward = parseArrForwardTab(arrForwardRows);
     const pipeline = parsePipelineTab(pipelineRows);
     const pipelineWow = parsePipelineWowTab(pipelineWowRows);
 
@@ -229,6 +232,7 @@ export async function GET() {
       liveArrToday,
       bookingReport,
       topBooked,
+      arrForward,
       aeAttainment,
       aeAnnual,
       pipeline,

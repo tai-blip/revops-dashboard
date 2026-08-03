@@ -411,11 +411,52 @@ async function main() {
     ...bookedNow.map((d) => [d.opp, d.acct, d.owner, Math.round(d.arr), !d.live || d.live > todayISO ? "Pending" : "Live", d.live || "not set"]),
   ];
 
+  // 6e) ARR_Forward — forward-looking Booked ARR for the composition chart.
+  //     Per RevOps: Booked ARR(future month) = last live ARR + CUMULATIVE ARR of deals
+  //     with ContractLiveDate in each future month. End dates are NOT subtracted (no
+  //     churn/expiry) — the line only steps up as scheduled go-lives land. The frontend
+  //     anchors this at the last complete month's Live ARR. Window runs to Jan 2027.
+  //     Also surfaces "renewal due" = ARR of contracts whose term ENDS in the current
+  //     month (the ~$300k of accounts up for renewal), for the exec-summary box.
+  const fwdNow = new Date();
+  const curY = fwdNow.getUTCFullYear(), curM = fwdNow.getUTCMonth() + 1; // e.g. 2026, 8
+  const curYM = `${curY}-${String(curM).padStart(2, "0")}`;
+  const MNAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  // Forward months: current month → Jan 2027 inclusive.
+  const fwdList = [];
+  { let y = curY, m = curM; while (y < 2027 || (y === 2027 && m <= 1)) { fwdList.push({ y, m, ym: `${y}-${String(m).padStart(2, "0")}` }); m++; if (m > 12) { m = 1; y++; } } }
+  const goLive = {}; // ym -> { nb, exp }
+  for (const x of won) {
+    const ym = (x.ContractLiveDate__c ?? "").slice(0, 7);
+    if (!goLive[ym]) goLive[ym] = { nb: 0, exp: 0 };
+    const arr = Number(x.AnnualContractValueARR__c ?? 0);
+    const rt = x.RecordType?.Name ?? "";
+    if (/Expansion/i.test(rt)) goLive[ym].exp += arr;
+    else if (/New Business/i.test(rt)) goLive[ym].nb += arr;
+    else goLive[ym].nb += arr; // renewals rarely have a future live date; bucket as NB
+  }
+  // Renewal-due = ARR of contracts whose term ends in the current month, using the same
+  // 1st-of-next-month boundary as Live/Booked ARR — so a contract dated the 1st of next
+  // month (its last active day is this month) counts as a this-month renewal. i.e.
+  // end in (firstOfThisMonth, firstOfNextMonth].
+  const firstThis = curYM + "-01";
+  const firstNext = (curM === 12 ? `${curY + 1}-01` : `${curY}-${String(curM + 1).padStart(2, "0")}`) + "-01";
+  let renewalDue = 0;
+  for (const x of won) { const e = (x.ContractEndDate__c ?? "").slice(0, 10); if (e && e > firstThis && e <= firstNext) renewalDue += Number(x.AnnualContractValueARR__c ?? 0); }
+  const arrForward = [
+    ["Renewal due (contract end this month)", Math.round(renewalDue), "Current month", curYM, `Updated ${topStamp}`],
+    ["Month", "YM", "GoLive NB", "GoLive Exp", "GoLive Total"],
+    ...fwdList.map((f) => {
+      const g = goLive[f.ym] ?? { nb: 0, exp: 0 };
+      return [`${MNAMES[f.m - 1]} ${f.y}`, f.ym, Math.round(g.nb), Math.round(g.exp), Math.round(g.nb + g.exp)];
+    }),
+  ];
+
   // 7) Create-or-replace + bulk write (one values.update per tab)
   const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "sheets.properties(sheetId,title)" });
   const byTitle = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
   const reqs = [];
-  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
+  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR","ARR_Forward"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
   reqs.push(
     { addSheet: { properties: { title: "SOQL_Pull" } } },
     { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 22 } } } },
@@ -426,6 +467,7 @@ async function main() {
     { addSheet: { properties: { title: "ARR_per_Location_MoM", gridProperties: { rowCount: 20, columnCount: 12 } } } },
     { addSheet: { properties: { title: "SOQL_PaymentMix", gridProperties: { rowCount: pmix.length + 10, columnCount: 14 } } } },
     { addSheet: { properties: { title: "Top_Booked_ARR", gridProperties: { rowCount: 20, columnCount: 6 } } } },
+    { addSheet: { properties: { title: "ARR_Forward", gridProperties: { rowCount: 24, columnCount: 6 } } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_Pull!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pull } });
@@ -442,6 +484,8 @@ async function main() {
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_per_Location_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: perLoc } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_PaymentMix!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pmix } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "Top_Booked_ARR!A1", valueInputOption: "USER_ENTERED", requestBody: { values: topBooked } });
+  // RAW so month labels ("2026-08", "Aug 2026") stay TEXT — USER_ENTERED would coerce them to dates.
+  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_Forward!A1", valueInputOption: "RAW", requestBody: { values: arrForward } });
 
   // 8) Report latest month + MAPE vs target
   const back = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `ARR_MoM_Rebuild!A2:G${months.length+1}`, valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];

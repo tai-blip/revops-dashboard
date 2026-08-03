@@ -26,6 +26,7 @@ export const C = {
   ylwBg: "#FAEEDA",
   blue: "#1565C0",
   blueBg: "#E6F1FB",
+  gold: "#B58A2E",
   purp: "#6B4E9E",
   purpBg: "#EEE8F6",
   teal: "#0F766E",

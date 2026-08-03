@@ -293,6 +293,32 @@ export function parseAeAnnualTab(rows: Row[]): { reps: AnnualRep[] } {
   return { reps };
 }
 
+// "ARR_Forward" tab (written by refresh-arr-from-sfdc.mjs). Forward-looking booked ARR:
+// scheduled go-lives per future month (NB/Exp) + the current-month renewal-due exposure.
+export type ArrForward = {
+  renewalDue: number; renewalMonth: string;
+  months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[];
+};
+export function parseArrForwardTab(rows: Row[]): ArrForward {
+  const empty: ArrForward = { renewalDue: 0, renewalMonth: "", months: [] };
+  if (!rows || rows.length < 2) return empty;
+  const renewalDue = Number(rows[0]?.[1] ?? 0) || 0;
+  const renewalMonth = String(rows[0]?.[3] ?? "");
+  const headerIdx = rows.findIndex((r) => String(r?.[0] ?? "") === "Month");
+  if (headerIdx === -1) return { renewalDue, renewalMonth, months: [] };
+  const months: ArrForward["months"] = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const label = String(r?.[0] ?? "").trim();
+    if (!label) continue;
+    months.push({
+      label, ym: String(r[1] ?? ""),
+      goLiveNB: Number(r[2] ?? 0) || 0, goLiveExp: Number(r[3] ?? 0) || 0, goLiveTotal: Number(r[4] ?? 0) || 0,
+    });
+  }
+  return { renewalDue, renewalMonth, months };
+}
+
 // "Top_Booked_ARR" tab (written by refresh-arr-from-sfdc.mjs). Top 5 largest contracts
 // currently in the booked book (Live or signed-but-pending go-live).
 export type TopBookedDeal = { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string };
