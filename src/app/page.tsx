@@ -1266,9 +1266,9 @@ export default function Dashboard() {
                   </div>
                   <div style={{ padding: "0 20px 8px" }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "2px 0 6px" }}>
-                      ARR composition — bars = New Business + Expansion (up) &amp; Churn (down) · lines = Live ARR (actuals) &amp; Booked ARR (forward)
+                      ARR trajectory — Live ARR (actuals) continuing into Booked ARR (forecast)
                     </div>
-                    <ArrMovementChart points={pts} />
+                    <ArrMovementChart points={pts.map((p) => ({ label: p.label, value: p.liveARR != null ? p.liveARR : p.bookedARR, forecast: p.forecast }))} />
                   </div>
                   {/* MoM breakdown table — all components with numbers */}
                   <div style={{ padding: "6px 20px 14px" }}>
