@@ -470,22 +470,32 @@ async function main() {
     { addSheet: { properties: { title: "ARR_Forward", gridProperties: { rowCount: 24, columnCount: 6 } } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_Pull!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pull } });
-  // USER_ENTERED so date columns land as real dates (the ACV_MoM AVERAGEIFS compare against them)
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_ClosedDeals!A1", valueInputOption: "USER_ENTERED", requestBody: { values: closed } });
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Rebuild!A1", valueInputOption: "USER_ENTERED", requestBody: { values: mom } });
-  // Live ARR AS OF TODAY (V1 label, W1 value) — contracts live & not yet ended as of
-  // TODAY(). Unlike the current-month row (which projects month-end, subtracting the
-  // whole month's upcoming expirations), this is the true point-in-time live ARR.
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Rebuild!V1", valueInputOption: "USER_ENTERED", requestBody: { values: [["Live ARR (as of today)", `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=TODAY())*(SOQL_Pull!$E$2:$E$${LAST}>TODAY())*SOQL_Pull!$C$2:$C$${LAST})`]] } });
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_WoW_Rebuild!A1", valueInputOption: "USER_ENTERED", requestBody: { values: wow } });
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_MoM_Segments!A1", valueInputOption: "USER_ENTERED", requestBody: { values: seg } });
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ACV_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: acvTab } });
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_per_Location_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: perLoc } });
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_PaymentMix!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pmix } });
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "Top_Booked_ARR!A1", valueInputOption: "USER_ENTERED", requestBody: { values: topBooked } });
+  // Collapse all tab writes into TWO batched calls (one per valueInputOption) instead of
+  // ~10 individual values.update calls — keeps us well under the Sheets API "write
+  // requests per minute" quota so the downstream daily-digest step doesn't get rate-limited.
+  // USER_ENTERED so date columns land as real dates (the ACV_MoM AVERAGEIFS compare against them).
+  // ARR_MoM_Rebuild!V1 = Live ARR AS OF TODAY (contracts live & not yet ended as of TODAY()) —
+  // the true point-in-time live ARR, vs the current-month row which projects month-end.
+  await api.spreadsheets.values.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: {
+    valueInputOption: "USER_ENTERED",
+    data: [
+      { range: "SOQL_Pull!A1", values: pull },
+      { range: "SOQL_ClosedDeals!A1", values: closed },
+      { range: "ARR_MoM_Rebuild!A1", values: mom },
+      { range: "ARR_MoM_Rebuild!V1", values: [["Live ARR (as of today)", `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=TODAY())*(SOQL_Pull!$E$2:$E$${LAST}>TODAY())*SOQL_Pull!$C$2:$C$${LAST})`]] },
+      { range: "ARR_WoW_Rebuild!A1", values: wow },
+      { range: "ARR_MoM_Segments!A1", values: seg },
+      { range: "ACV_MoM!A1", values: acvTab },
+      { range: "ARR_per_Location_MoM!A1", values: perLoc },
+      { range: "SOQL_PaymentMix!A1", values: pmix },
+      { range: "Top_Booked_ARR!A1", values: topBooked },
+    ],
+  } });
   // RAW so month labels ("2026-08", "Aug 2026") stay TEXT — USER_ENTERED would coerce them to dates.
-  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_Forward!A1", valueInputOption: "RAW", requestBody: { values: arrForward } });
+  await api.spreadsheets.values.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: {
+    valueInputOption: "RAW",
+    data: [{ range: "ARR_Forward!A1", values: arrForward }],
+  } });
 
   // 8) Report latest month + MAPE vs target
   const back = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `ARR_MoM_Rebuild!A2:G${months.length+1}`, valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];
