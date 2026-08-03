@@ -7,6 +7,8 @@ export type HeaderStat = {
   value: string;
   sub?: string;
   tone?: "good" | "bad" | "warn";
+  // Optional second metric stacked in the same box, separated by a divider line.
+  extra?: { label: string; value: string; sub?: string; tone?: "good" | "bad" | "warn" };
 };
 
 const toneColor: Record<string, string> = {
@@ -99,6 +101,37 @@ export function TabHeader({
             </div>
             {s.sub && (
               <div style={{ fontSize: 11, color: "#9FAAC6", marginTop: 5 }}>{s.sub}</div>
+            )}
+            {s.extra && (
+              <>
+                <div style={{ borderTop: "1px solid rgba(255,255,255,.14)", margin: "10px 0 8px" }} />
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: ".06em",
+                    textTransform: "uppercase",
+                    color: "#9FAAC6",
+                  }}
+                >
+                  {s.extra.label}
+                </div>
+                <div
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 700,
+                    color: s.extra.tone ? toneColor[s.extra.tone] : "#fff",
+                    fontFamily: "var(--font-dm-mono)",
+                    marginTop: 5,
+                    lineHeight: 1,
+                  }}
+                >
+                  {s.extra.value}
+                </div>
+                {s.extra.sub && (
+                  <div style={{ fontSize: 11, color: "#9FAAC6", marginTop: 5 }}>{s.extra.sub}</div>
+                )}
+              </>
             )}
           </div>
         ))}
