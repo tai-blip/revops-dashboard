@@ -10,7 +10,7 @@ export const AE_PLAN: Record<
   "Dorsa Mahmoudnia": { short: "Dorsa", pipeGenTargetQ3: 750000, quotaQ3: 250000 },
   "Jed Rutstein": { short: "Jed", pipeGenTargetQ3: 960000, quotaQ3: 250000 },
   "Jill Bucci": { short: "Jill", pipeGenTargetQ3: 850000, quotaQ3: 200000 },
-  "Mathias Berthelemot": { short: "Mathias", pipeGenTargetQ3: 0, quotaQ3: 250000 },
+  "Mathias Berthelemot": { short: "Mathias", pipeGenTargetQ3: 0, quotaQ3: 150000 },
   "David Dubinski": { short: "Davi", pipeGenTargetQ3: 0, quotaQ3: 0 },
 };
 

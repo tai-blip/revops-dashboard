@@ -39,6 +39,9 @@ jobs:
       - name: Opps without a contact
         if: always()
         run: node scripts/refresh-opps-without-contact.mjs
+      - name: AE annual attainment + potential
+        if: always()
+        run: node scripts/refresh-ae-annual-potential.mjs
       - name: Sheet health check
         if: always()
         run: node scripts/check-sheet.mjs

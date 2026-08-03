@@ -265,6 +265,31 @@ export function parsePerLocation(rows: Row[]): PerLocationData | null {
   };
 }
 
+// "AE_Annual_Potential" tab (written by refresh-ae-annual-potential.mjs). One row per
+// rep with an FY quota: YTD attainment (NB/Exp), open-pipe potential, projection.
+export type AnnualRep = {
+  name: string; goal: number;
+  ytdNB: number; ytdExp: number; ytdTotal: number; pctOfGoal: number;
+  potNB: number; potExp: number; potTotal: number; projection: number; pctProj: number;
+};
+export function parseAeAnnualTab(rows: Row[]): { reps: AnnualRep[] } {
+  const headerIdx = rows.findIndex((r) => String(r?.[0] ?? "") === "Owner");
+  if (headerIdx === -1) return { reps: [] };
+  const n = (v: unknown) => Number(v ?? 0) || 0;
+  const reps: AnnualRep[] = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const name = String(r?.[0] ?? "").trim();
+    if (!name) continue;
+    reps.push({
+      name, goal: n(r[1]),
+      ytdNB: n(r[2]), ytdExp: n(r[3]), ytdTotal: n(r[4]), pctOfGoal: n(r[5]),
+      potNB: n(r[6]), potExp: n(r[7]), potTotal: n(r[8]), projection: n(r[9]), pctProj: n(r[10]),
+    });
+  }
+  return { reps };
+}
+
 export function parseAeAttainmentTab(rows: Row[]) {
   const headerIdx = rows.findIndex((r) => r[0] === "AE");
   if (headerIdx === -1) return { reps: [], monthlyTeamActual: [] };

@@ -5,6 +5,7 @@ import { C, fmt, pct, Card, KV, Bar, Pill, Th, Td } from "@/lib/ui";
 import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
+import { ArrMovementChart } from "@/lib/ArrMovementChart";
 import { GroupedBarChart } from "@/lib/GroupedBarChart";
 import { StackedBarChart } from "@/lib/StackedBarChart";
 import { Sparkline, DeltaPill, wowDeltaPct, fmtMetricValue } from "@/lib/Sparkline";
@@ -36,10 +37,13 @@ type DashboardData = {
   };
   arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
   liveArrToday?: number | null;
-  bookingReport?: { total: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string }[] };
+  bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
     monthlyTeamActual: { label: string; actual: number }[];
+  };
+  aeAnnual?: {
+    reps: { name: string; goal: number; ytdNB: number; ytdExp: number; ytdTotal: number; pctOfGoal: number; potNB: number; potExp: number; potTotal: number; projection: number; pctProj: number }[];
   };
   pipeline: {
     filterRep: string;
@@ -504,6 +508,7 @@ export default function Dashboard() {
   const [pipePeriod, setPipePeriod] = useState<"weekly" | "monthly">("weekly");
   const [wowMetric, setWowMetric] = useState<string | null>(null);
   const [decideAE, setDecideAE] = useState<string>("all");
+  const [attView, setAttView] = useState<"quarterly" | "annual">("quarterly");
   const [dealCalls, setDealCalls] = useState<Record<string, "commit" | "best" | "pipeline" | "omit">>({});
 
   useEffect(() => {
@@ -1135,23 +1140,47 @@ export default function Dashboard() {
                 </div>
               );
               return (
-                <Card title="ARR Composition — Live vs Booked · Churn" sub="Live = contracts past ContractLiveDate (recognized). Booked = signed but not yet live. Churn shown as its own component — never netted into New ARR.">
+                <Card title="ARR Composition — Live vs Booked · Churn" sub="Booked ARR = Live ARR (past ContractLiveDate) + signed deals not yet live. Churn shown as its own component — never netted into New ARR.">
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, padding: "18px 20px" }}>
+                    {box("Booked ARR", fmt(liveArr + br.total), `Live ${fmt(liveArr)} + ${fmt(br.total)} pending`, C.navy)}
                     {box("Live ARR (as of today)", fmt(liveArr), "past ContractLiveDate", C.grn)}
-                    {box("Booked — not yet live", fmt(br.total), `${br.count} signed deals pending go-live`, C.navy)}
+                    {box("Booked — not yet live", fmt(br.total), `${br.count} deals · NB ${fmt(br.nb)} / Exp ${fmt(br.exp)}`, C.navy)}
                     {box("Churn — last complete mo", fmt(churnMo), lastComplete?.label ?? "", C.red)}
-                    {box("Churn — trailing 12 mo", fmt(churn12), `${(liveArr ? (churn12 / liveArr) * 100 : 0).toFixed(1)}% of live ARR`, C.red)}
                   </div>
+                  {(() => {
+                    const MABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                    // Last 12 complete months (exclude the in-progress current month, which
+                    // projects month-end and understates Live ARR).
+                    const mv = months.filter((m) => m.label < nowKey).slice(-12).map((m) => {
+                      const [y, mm] = m.label.split("-");
+                      return {
+                        label: `${MABBR[+mm - 1]}-${y.slice(2)}`,
+                        newBusiness: m.newBusiness,
+                        expansion: m.expansion,
+                        churn: m.churnedARR,
+                        liveARR: m.activeARR,
+                      };
+                    });
+                    return (
+                      <div style={{ padding: "0 20px 8px" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "2px 0 6px" }}>
+                          Monthly ARR movement — New Business + Expansion (up) vs Churn (down), with Live ARR (line)
+                        </div>
+                        <ArrMovementChart points={mv} />
+                      </div>
+                    );
+                  })()}
                   {br.deals.length > 0 && (
                     <div style={{ padding: "0 20px 18px" }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Booking report — signed, not yet live (top {Math.min(12, br.deals.length)} by ARR)</div>
                       <div style={{ overflowX: "auto" }}>
                         <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th l>Signed</Th><Th l>Live date</Th><Th>ARR</Th></tr></thead>
+                          <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Deal</Th><Th l>AE</Th><Th l>Type</Th><Th l>Stage</Th><Th l>Signed</Th><Th l>Live date</Th><Th>ARR</Th></tr></thead>
                           <tbody>
                             {br.deals.slice(0, 12).map((d, i) => (
                               <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
                                 <Td l bold>{d.name}</Td><Td l>{d.owner.split(" ")[0]}</Td>
+                                <Td l><Pill tone={d.type === "Exp" ? "blue" : "good"}>{d.type}</Pill></Td>
                                 <Td l><Pill tone="blue">{d.stage}</Pill></Td>
                                 <Td l>{d.signedDate || "—"}</Td><Td l>{d.liveDate || "not set"}</Td>
                                 <Td mono bold color={C.navy}>{fmt(d.arr)}</Td>
@@ -1881,7 +1910,95 @@ export default function Dashboard() {
           {tabSummaries && (
             <TabHeader label="AE Attainment" sentence={tabSummaries.attainment.sentence} stats={tabSummaries.attainment.stats} />
           )}
-          {(() => {
+          {/* Quarterly ⇄ Annual toggle */}
+          <div style={{ display: "inline-flex", background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 3, marginBottom: 16 }}>
+            {(["quarterly", "annual"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setAttView(v)}
+                style={{
+                  border: "none", cursor: "pointer", borderRadius: 8, padding: "6px 16px", fontSize: 13, fontWeight: 600,
+                  fontFamily: "inherit", textTransform: "capitalize",
+                  background: attView === v ? "#fff" : "transparent",
+                  color: attView === v ? C.t1 : C.t3,
+                  boxShadow: attView === v ? "0 1px 3px rgba(0,0,0,.08)" : "none",
+                }}
+              >
+                {v === "quarterly" ? `${data.quarter.label}` : `Annual (FY${new Date().getUTCFullYear().toString().slice(2)})`}
+              </button>
+            ))}
+          </div>
+          {attView === "annual" && (() => {
+            const kM = (n: number) => {
+              const a = Math.abs(n);
+              if (a >= 1e6) return "$" + (a / 1e6).toFixed(2) + "M";
+              if (a >= 1e3) return "$" + Math.round(a / 1e3) + "k";
+              return "$" + Math.round(a);
+            };
+            const label = (t: string) => (
+              <div style={{ fontSize: 10.5, color: C.t3, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em" }}>{t}</div>
+            );
+            const reps = data.aeAnnual?.reps ?? [];
+            if (reps.length === 0) {
+              return <div style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: "22px", color: C.t2, fontSize: 14 }}>Annual attainment data not yet available. Run <code>refresh-ae-annual-potential.mjs</code> to populate it.</div>;
+            }
+            const teamGoal = reps.reduce((s, r) => s + r.goal, 0);
+            const teamYtd = reps.reduce((s, r) => s + r.ytdTotal, 0);
+            const teamProj = reps.reduce((s, r) => s + r.projection, 0);
+            return (
+              <div style={{ display: "grid", gap: 12, marginBottom: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 4 }}>
+                  {[
+                    ["Team annual goal", kM(teamGoal), `${reps.length} reps`, C.t1],
+                    ["Team YTD attainment", kM(teamYtd), `${teamGoal > 0 ? Math.round((teamYtd / teamGoal) * 100) : 0}% of goal · by ContractLiveDate`, C.coralDk],
+                    ["Full-year projection", kM(teamProj), `${teamGoal > 0 ? Math.round((teamProj / teamGoal) * 100) : 0}% of goal · YTD + open-pipe potential`, C.navy],
+                  ].map(([l, v, s, c], i) => (
+                    <div key={i} style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: "16px 20px" }}>
+                      {label(l as string)}
+                      <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: c as string, marginTop: 4 }}>{v}</div>
+                      <div style={{ fontSize: 12, color: C.t2, marginTop: 3 }}>{s}</div>
+                    </div>
+                  ))}
+                </div>
+                {[...reps].sort((a, b) => b.pctOfGoal - a.pctOfGoal).map((rep) => (
+                  <div key={rep.name} style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: "18px 22px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: C.t1 }}>{rep.name}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: C.coralDk, background: C.coralSoft, borderRadius: 20, padding: "4px 12px" }}>
+                        {rep.goal > 0 ? pct(rep.pctOfGoal) : "—"} to annual goal
+                      </span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20 }}>
+                      <div>
+                        {label("Annual Goal")}
+                        <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{rep.goal > 0 ? kM(rep.goal) : "—"}</div>
+                      </div>
+                      <div>
+                        {label("YTD Attainment")}
+                        <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk, marginTop: 3 }}>{kM(rep.ytdTotal)}</div>
+                        <div style={{ fontSize: 11.5, color: C.t3, marginTop: 2 }}>NB {kM(rep.ytdNB)} · Exp {kM(rep.ytdExp)}</div>
+                      </div>
+                      <div>
+                        {label("Potential ARR (Year)")}
+                        <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.purp, marginTop: 3 }}>{kM(rep.potTotal)}</div>
+                        <div style={{ fontSize: 11.5, color: C.t3, marginTop: 2 }}>AE/AM % × open ARR</div>
+                      </div>
+                      <div>
+                        {label("Full-Year Projection")}
+                        <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.navy, marginTop: 3 }}>{kM(rep.projection)}</div>
+                        <div style={{ fontSize: 11.5, color: rep.pctProj >= 1 ? C.grn : C.t3, marginTop: 2 }}>{rep.goal > 0 ? `${pct(rep.pctProj)} of goal` : ""}</div>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 16 }}>
+                      {label("YTD → Projection vs Annual Goal")}
+                      <div style={{ marginTop: 6 }}><Bar value={rep.ytdTotal} target={rep.goal} /></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+          {attView === "quarterly" && (() => {
             const kM = (n: number) => {
               const a = Math.abs(n);
               if (a >= 1e6) return "$" + (a / 1e6).toFixed(2) + "M";

@@ -17,30 +17,41 @@ function sheetsSerialToDate(v: unknown): Date | null {
 // Booking report (Stephen item 2): deals that are BOOKED (Closed Won / Billing) but have
 // NOT yet gone live — no ContractLiveDate, or a ContractLiveDate still in the future. The
 // bridge between what Sales closed and what's actually turned on. From SOQL_ClosedDeals.
-export type BookingDeal = { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string };
-export function computeBookingReport(rows: Row[]): { total: number; count: number; deals: BookingDeal[] } {
-  const empty = { total: 0, count: 0, deals: [] as BookingDeal[] };
+export type BookingDeal = { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" };
+// Booked-but-not-live report. Per Stephen: Booked ARR = Live ARR + these not-yet-live
+// deals. Scope = New Business (mainly) + Expansion — Renewals excluded (they don't add
+// booked ARR). Each deal is a signed Billing/Closed Won opp whose ContractLiveDate is
+// unset or still in the future.
+export function computeBookingReport(rows: Row[]): { total: number; nb: number; exp: number; count: number; deals: BookingDeal[] } {
+  const empty = { total: 0, nb: 0, exp: 0, count: 0, deals: [] as BookingDeal[] };
   if (!rows || rows.length < 2) return empty;
   const h = rows[0].map((x) => String(x ?? "").toLowerCase());
   const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
   const cStage = ci("Stage"), cArr = ci("ARR (USD)"), cLive = ci("ContractLiveDate"),
-    cOpp = ci("Opportunity"), cOwner = ci("Owner"), cWon = ci("Date Reached Closed Won");
+    cOpp = ci("Opportunity"), cOwner = ci("Owner"), cWon = ci("Date Reached Closed Won"),
+    cType = ci("RecordType") >= 0 ? ci("RecordType") : ci("Type");
   if (cStage < 0 || cArr < 0 || cLive < 0) return empty;
   const now = Date.now();
   const iso = (v: unknown) => { const d = sheetsSerialToDate(v); return d ? d.toISOString().slice(0, 10) : ""; };
   const deals: BookingDeal[] = rows.slice(1)
     .filter((r) => {
       if (!/Billing|Closed Won/i.test(String(r[cStage] ?? ""))) return false;
+      const rt = String(r[cType] ?? "");
+      // New Business + Expansion only — drop Renewals (and anything not NB/Exp).
+      if (!/New Business|Expansion/i.test(rt)) return false;
       const d = sheetsSerialToDate(r[cLive]);
       return d == null || d.getTime() > now; // no live date, or live date in the future
     })
     .map((r) => ({
       name: String(r[cOpp] ?? ""), owner: String(r[cOwner] ?? ""), stage: String(r[cStage] ?? ""),
       arr: Number(r[cArr] ?? 0), signedDate: cWon >= 0 ? iso(r[cWon]) : "", liveDate: iso(r[cLive]),
+      type: /Expansion/i.test(String(r[cType] ?? "")) ? "Exp" as const : "NB" as const,
     }))
     .filter((d) => d.arr > 0)
     .sort((a, b) => b.arr - a.arr);
-  return { total: deals.reduce((s, d) => s + d.arr, 0), count: deals.length, deals };
+  const nb = deals.filter((d) => d.type === "NB").reduce((s, d) => s + d.arr, 0);
+  const exp = deals.filter((d) => d.type === "Exp").reduce((s, d) => s + d.arr, 0);
+  return { total: nb + exp, nb, exp, count: deals.length, deals };
 }
 
 // --- Header-based column resolution -------------------------------------------
