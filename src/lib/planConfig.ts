@@ -60,7 +60,9 @@ export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; q
   { name: "James Burdick", short: "James", quotaQ3: 255000, quotaAnnual: 1000000, am: false },
   { name: "Dorsa Mahmoudnia", short: "Dorsa", quotaQ3: 250000, quotaAnnual: 883200, am: false },
   { name: "Jed Rutstein", short: "Jed", quotaQ3: 250000, quotaAnnual: 750000, am: false },
-  { name: "Jill Bucci", short: "Jill", quotaQ3: 200000, quotaAnnual: 1280000, am: false },
+  // Jill ramped mid-year — her H2 total quota is $520k, used for both the quarterly
+  // and annual attainment views (per leadership).
+  { name: "Jill Bucci", short: "Jill", quotaQ3: 520000, quotaAnnual: 520000, am: false },
   { name: "Mathias Berthelemot", short: "Mathias", quotaQ3: 150000, quotaAnnual: 600000, am: true },
   { name: "David Dubinski", short: "Davi", quotaQ3: 0, quotaAnnual: null, am: false, lead: true },
 ];

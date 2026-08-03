@@ -20,6 +20,7 @@ export type ArrPoint = {
   expansion: number;
   renewals: number;
   activeARR: number;
+  bookedARR: number;
   churnedARR: number;
   changePct: number | null;
   alfie: number;
@@ -44,6 +45,7 @@ export function parseArrTab(rows: Row[]) {
         expansion: Number(r[3] ?? 0), // - Biz Expansion ($)
         renewals: Number(r[4] ?? 0), // - Renewals ($)
         activeARR: Number(r[5] ?? 0), // Active ARR Snapshot ($)
+        bookedARR: 0, // legacy tab has no booked series
         churnedARR: Number(r[11] ?? 0), // Churned ARR ($)
         changePct: r[22] != null ? Number(r[22]) : null, // MoM Change (%)
         alfie: Number(r[12] ?? 0), // Chat Agent Alfie ($) = M
@@ -72,6 +74,7 @@ export function parseArrTab(rows: Row[]) {
         expansion: Number(r[3] ?? 0),
         renewals: Number(r[4] ?? 0),
         activeARR: Number(r[5] ?? 0),
+        bookedARR: 0,
         churnedARR: Number(r[11] ?? 0),
         changePct: r[22] != null ? Number(r[22]) : null, // WoW Change (%)
         alfie: Number(r[12] ?? 0),
@@ -172,7 +175,7 @@ export function parseArrMonthlyFromRebuild(rows: Row[]): ArrPoint[] {
     out.push({
       label: sheetsSerialToISODate(r[1]).slice(0, 7),
       newARR: n(16), newBusiness: n(13), expansion: n(14), renewals: n(15),
-      activeARR: n(2), churnedARR: n(9),
+      activeARR: n(2), bookedARR: n(20), churnedARR: n(9), // U = Booked ARR (Live + not-yet-live)
       changePct: typeof r[8] === "number" ? r[8] : null, // MoM growth fraction (col I)
       alfie: n(17), managedServices: n(18), coreExisting: n(19),
       alfieTarget: 0, msTarget: 0,
@@ -192,7 +195,7 @@ export function parseArrWeeklyFromRebuild(rows: Row[]): ArrPoint[] {
     out.push({
       label: sheetsSerialToISODate(r[0]).slice(0, 10), // week-start (Monday) ISO
       newARR: n(6), newBusiness: n(3), expansion: n(4), renewals: n(5),
-      activeARR: n(1), churnedARR: n(2),
+      activeARR: n(1), bookedARR: 0, churnedARR: n(2),
       changePct: null,
       alfie: n(7), managedServices: n(8), coreExisting: n(9),
       alfieTarget: 0, msTarget: 0,
@@ -288,6 +291,25 @@ export function parseAeAnnualTab(rows: Row[]): { reps: AnnualRep[] } {
     });
   }
   return { reps };
+}
+
+// "Top_Booked_ARR" tab (written by refresh-arr-from-sfdc.mjs). Top 5 largest contracts
+// currently in the booked book (Live or signed-but-pending go-live).
+export type TopBookedDeal = { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string };
+export function parseTopBookedTab(rows: Row[]): TopBookedDeal[] {
+  const headerIdx = rows.findIndex((r) => String(r?.[0] ?? "") === "Opportunity");
+  if (headerIdx === -1) return [];
+  const out: TopBookedDeal[] = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const opp = String(r?.[0] ?? "").trim();
+    if (!opp) continue;
+    out.push({
+      opp, account: String(r[1] ?? ""), owner: String(r[2] ?? ""),
+      arr: Number(r[3] ?? 0) || 0, status: String(r[4] ?? ""), liveDate: String(r[5] ?? ""),
+    });
+  }
+  return out;
 }
 
 export function parseAeAttainmentTab(rows: Row[]) {

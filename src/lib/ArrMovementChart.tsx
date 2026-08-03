@@ -4,7 +4,7 @@
 // overlay (own scale, since the book ~$5.6M dwarfs the monthly flows ~$200k).
 import { CSSProperties } from "react";
 
-type Pt = { label: string; newBusiness: number; expansion: number; churn: number; liveARR: number };
+type Pt = { label: string; newBusiness: number; expansion: number; churn: number; liveARR: number; bookedARR: number };
 
 export function ArrMovementChart({ points }: { points: Pt[] }) {
   const W = 760, H = 240, padL = 8, padR = 8, padT = 16, padB = 26;
@@ -19,13 +19,13 @@ export function ArrMovementChart({ points }: { points: Pt[] }) {
   const zeroY = padT + innerH * (Math.max(...ups, 1) / (Math.max(...ups, 1) + Math.max(...downs, 1)) || 0.7);
   const hUp = (v: number) => (v / fMax) * (zeroY - padT);
   const hDown = (v: number) => (v / fMax) * (padT + innerH - zeroY);
-  const lMax = Math.max(...points.map((p) => p.liveARR), 1) * 1.1;
+  const lMax = Math.max(...points.map((p) => Math.max(p.liveARR, p.bookedARR)), 1) * 1.1;
   const lineY = (v: number) => padT + innerH - (v / lMax) * innerH;
   const cx = (i: number) => padL + gap * i + gap / 2;
   const fmtK = (v: number) => (Math.abs(v) >= 1e6 ? "$" + (v / 1e6).toFixed(1) + "M" : "$" + Math.round(v / 1e3) + "k");
-  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${cx(i).toFixed(1)},${lineY(p.liveARR).toFixed(1)}`).join(" ");
-  const GREEN = "#2E9E6B", BLUE = "#3F6BB0", RED = "#D2603A", NAVY = "#1B2949";
-  const legend: [string, string][] = [["New Business", GREEN], ["Expansion", BLUE], ["Churn", RED], ["Live ARR", NAVY]];
+  const path = (key: "liveARR" | "bookedARR") => points.map((p, i) => `${i === 0 ? "M" : "L"}${cx(i).toFixed(1)},${lineY(p[key]).toFixed(1)}`).join(" ");
+  const GREEN = "#2E9E6B", BLUE = "#3F6BB0", RED = "#D2603A", NAVY = "#1B2949", GOLD = "#C79A3E";
+  const legend: [string, string][] = [["New Business", GREEN], ["Expansion", BLUE], ["Churn", RED], ["Booked ARR", GOLD], ["Live ARR", NAVY]];
   const chip: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "#5a6478", marginRight: 14 };
 
   return (
@@ -43,7 +43,7 @@ export function ArrMovementChart({ points }: { points: Pt[] }) {
             const nbH = hUp(p.newBusiness), exH = hUp(p.expansion), chH = hDown(Math.abs(p.churn));
             return (
               <g key={i}>
-                <title>{`${p.label}\nNew Business ${fmtK(p.newBusiness)}\nExpansion ${fmtK(p.expansion)}\nChurn ${fmtK(-Math.abs(p.churn))}\nLive ARR ${fmtK(p.liveARR)}`}</title>
+                <title>{`${p.label}\nNew Business ${fmtK(p.newBusiness)}\nExpansion ${fmtK(p.expansion)}\nChurn ${fmtK(-Math.abs(p.churn))}\nBooked ARR ${fmtK(p.bookedARR)}\nLive ARR ${fmtK(p.liveARR)}`}</title>
                 <rect x={x} y={zeroY - nbH} width={bw} height={nbH} fill={GREEN} />
                 <rect x={x} y={zeroY - nbH - exH} width={bw} height={exH} fill={BLUE} />
                 {chH > 0 && <rect x={x} y={zeroY} width={bw} height={chH} fill={RED} />}
@@ -51,8 +51,10 @@ export function ArrMovementChart({ points }: { points: Pt[] }) {
               </g>
             );
           })}
-          <path d={linePath} fill="none" stroke={NAVY} strokeWidth={2} />
-          {points.map((p, i) => <circle key={i} cx={cx(i)} cy={lineY(p.liveARR)} r={2.4} fill={NAVY} />)}
+          <path d={path("bookedARR")} fill="none" stroke={GOLD} strokeWidth={2} strokeDasharray="5 3" />
+          <path d={path("liveARR")} fill="none" stroke={NAVY} strokeWidth={2} />
+          {points.map((p, i) => <circle key={`b${i}`} cx={cx(i)} cy={lineY(p.bookedARR)} r={2.2} fill={GOLD} />)}
+          {points.map((p, i) => <circle key={`l${i}`} cx={cx(i)} cy={lineY(p.liveARR)} r={2.4} fill={NAVY} />)}
         </svg>
       </div>
     </div>

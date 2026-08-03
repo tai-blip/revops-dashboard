@@ -15,7 +15,7 @@ const GOALS = {
   "James Burdick": 1000000,
   "Dorsa Mahmoudnia": 883200,
   "Jed Rutstein": 750000,
-  "Jill Bucci": 1280000,
+  "Jill Bucci": 520000,
   "Mathias Berthelemot": 600000,
 };
 const YEAR = new Date().getUTCFullYear();

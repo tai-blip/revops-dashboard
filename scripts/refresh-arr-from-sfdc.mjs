@@ -159,6 +159,7 @@ async function main() {
     "Id","AccountId","ARR (USD)","ContractLiveDate","ContractEndDate","RecordType","Status","Supersedes","NextSupersedingLive","EffectiveEndDate",
     "Owner","Merchant Segment","Location Tier","Deal Country","Region","Channel of Contact","Locations",
     "ChatAgent Enabled","Managed Services Y1 (USD)",  // R, S — feed the full-book product-line split
+    "Signed Date",  // T — when the deal was booked (Closed Won date, else CloseDate/live) → powers Booked ARR
   ]];
   won.forEach((x, i) => {
     const r = i + 2;
@@ -172,6 +173,7 @@ async function main() {
       ...dim(x),
       x.Locations_in_Contract__c ?? 0,
       x.ChatAgent_Enabled__c === true, x.Managed_Services_Year_1_Total__c ?? 0,
+      (x.Date_Reached_Closed_Won__c || x.CloseDate || x.ContractLiveDate__c || "").slice(0, 10),
     ]);
   });
 
@@ -211,6 +213,7 @@ async function main() {
     "Churned ARR (in month)","Active — New Business","Active — Renewals","Active — Expansion",
     "New Business Added","Expansion Added","Renewals Added","New ARR Added (NB+Exp)",
     "Alfie ARR (Chat Agent)","Managed Services ARR","Core ARR",
+    "Booked ARR",  // U — signed-by-boundary book (Live + signed-but-not-yet-live), same end gate as Active
   ]];
   months.forEach((m, i) => {
     const r = i + 2;
@@ -238,6 +241,9 @@ async function main() {
       activeAt(r, `*(SOQL_Pull!$R$2:$R$${LAST}=TRUE)`),
       `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$B${r}+1)*(SOQL_Pull!$E$2:$E$${LAST}>$B${r}+1)*SOQL_Pull!$S$2:$S$${LAST})`,
       `=C${r}-R${r}-S${r}`,
+      // U — Booked ARR: signed on/before boundary and not yet ended (gate on Signed Date T
+      // instead of ContractLiveDate D), so it counts signed-but-not-yet-live deals too.
+      `=SUMPRODUCT((SOQL_Pull!$T$2:$T$${LAST}<>"")*(SOQL_Pull!$T$2:$T$${LAST}<=$B${r}+1)*(SOQL_Pull!$E$2:$E$${LAST}>$B${r}+1)*SOQL_Pull!$C$2:$C$${LAST})`,
     ]);
   });
 
@@ -384,11 +390,32 @@ async function main() {
     ]);
   });
 
+  // 6d) Top_Booked_ARR — the 5 largest contracts currently in the booked book
+  //     (signed & not yet ended as of today — Live OR signed-but-pending go-live).
+  //     Same raw end-date basis as the Live-ARR-as-of-today headline (W1), for consistency.
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const bookedNow = won
+    .map((x) => ({
+      opp: x.Name ?? "", acct: x.Account?.Name ?? "", owner: x.Owner?.Name ?? "",
+      arr: Number(x.AnnualContractValueARR__c ?? 0),
+      live: (x.ContractLiveDate__c ?? "").slice(0, 10),
+      end: (x.ContractEndDate__c ?? "").slice(0, 10),
+    }))
+    .filter((d) => d.arr > 0 && (!d.end || d.end > todayISO))
+    .sort((a, b) => b.arr - a.arr)
+    .slice(0, 5);
+  const topStamp = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const topBooked = [
+    ["Top 5 booked contracts (currently in the book — Live or signed pending go-live)", "", "", "", "", `Updated ${topStamp}`],
+    ["Opportunity", "Account", "Owner", "ARR (USD)", "Status", "Live Date"],
+    ...bookedNow.map((d) => [d.opp, d.acct, d.owner, Math.round(d.arr), !d.live || d.live > todayISO ? "Pending" : "Live", d.live || "not set"]),
+  ];
+
   // 7) Create-or-replace + bulk write (one values.update per tab)
   const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "sheets.properties(sheetId,title)" });
   const byTitle = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
   const reqs = [];
-  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
+  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
   reqs.push(
     { addSheet: { properties: { title: "SOQL_Pull" } } },
     { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 22 } } } },
@@ -398,6 +425,7 @@ async function main() {
     { addSheet: { properties: { title: "ACV_MoM", gridProperties: { rowCount: 20, columnCount: 50 } } } },
     { addSheet: { properties: { title: "ARR_per_Location_MoM", gridProperties: { rowCount: 20, columnCount: 12 } } } },
     { addSheet: { properties: { title: "SOQL_PaymentMix", gridProperties: { rowCount: pmix.length + 10, columnCount: 14 } } } },
+    { addSheet: { properties: { title: "Top_Booked_ARR", gridProperties: { rowCount: 20, columnCount: 6 } } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_Pull!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pull } });
@@ -413,6 +441,7 @@ async function main() {
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ACV_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: acvTab } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "ARR_per_Location_MoM!A1", valueInputOption: "USER_ENTERED", requestBody: { values: perLoc } });
   await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "SOQL_PaymentMix!A1", valueInputOption: "USER_ENTERED", requestBody: { values: pmix } });
+  await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: "Top_Booked_ARR!A1", valueInputOption: "USER_ENTERED", requestBody: { values: topBooked } });
 
   // 8) Report latest month + MAPE vs target
   const back = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `ARR_MoM_Rebuild!A2:G${months.length+1}`, valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];

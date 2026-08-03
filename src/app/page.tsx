@@ -38,6 +38,7 @@ type DashboardData = {
   arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
   liveArrToday?: number | null;
   bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
+  topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
     monthlyTeamActual: { label: string; actual: number }[];
@@ -595,6 +596,7 @@ export default function Dashboard() {
       return {
         label: p.label,
         activeARR: p.totalARR,
+        bookedARR: m?.bookedARR ?? 0,
         newARR: m?.newARR ?? 0,
         newBusiness: m?.newBusiness ?? 0,
         expansion: m?.expansion ?? 0,
@@ -1123,78 +1125,6 @@ export default function Dashboard() {
               <TabHeader label="Command" sentence={tabSummaries.command.sentence} stats={tabSummaries.command.stats} />
             )}
 
-            {/* ARR Composition — Live vs Booked ARR (item 1) + Churn + Booking report (item 2) */}
-            {data.bookingReport && (() => {
-              const br = data.bookingReport;
-              const months = data.arr.monthly;
-              const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
-              const lastComplete = months.filter((m) => m.label < nowKey).slice(-1)[0];
-              const churnMo = lastComplete?.churnedARR ?? 0;
-              const churn12 = months.slice(-12).reduce((s, m) => s + m.churnedARR, 0);
-              const liveArr = data.liveArrToday ?? 0;
-              const box = (label: string, val: string, sub: string, color: string) => (
-                <div style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "16px 18px" }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3 }}>{label}</div>
-                  <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color, marginTop: 5 }}>{val}</div>
-                  <div style={{ fontSize: 12, color: C.t2, marginTop: 4 }}>{sub}</div>
-                </div>
-              );
-              return (
-                <Card title="ARR Composition — Live vs Booked · Churn" sub="Booked ARR = Live ARR (past ContractLiveDate) + signed deals not yet live. Churn shown as its own component — never netted into New ARR.">
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, padding: "18px 20px" }}>
-                    {box("Booked ARR", fmt(liveArr + br.total), `Live ${fmt(liveArr)} + ${fmt(br.total)} pending`, C.navy)}
-                    {box("Live ARR (as of today)", fmt(liveArr), "past ContractLiveDate", C.grn)}
-                    {box("Booked — not yet live", fmt(br.total), `${br.count} deals · NB ${fmt(br.nb)} / Exp ${fmt(br.exp)}`, C.navy)}
-                    {box("Churn — last complete mo", fmt(churnMo), lastComplete?.label ?? "", C.red)}
-                  </div>
-                  {(() => {
-                    const MABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                    // Last 12 complete months (exclude the in-progress current month, which
-                    // projects month-end and understates Live ARR).
-                    const mv = months.filter((m) => m.label < nowKey).slice(-12).map((m) => {
-                      const [y, mm] = m.label.split("-");
-                      return {
-                        label: `${MABBR[+mm - 1]}-${y.slice(2)}`,
-                        newBusiness: m.newBusiness,
-                        expansion: m.expansion,
-                        churn: m.churnedARR,
-                        liveARR: m.activeARR,
-                      };
-                    });
-                    return (
-                      <div style={{ padding: "0 20px 8px" }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "2px 0 6px" }}>
-                          Monthly ARR movement — New Business + Expansion (up) vs Churn (down), with Live ARR (line)
-                        </div>
-                        <ArrMovementChart points={mv} />
-                      </div>
-                    );
-                  })()}
-                  {br.deals.length > 0 && (
-                    <div style={{ padding: "0 20px 18px" }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Booking report — signed, not yet live (top {Math.min(12, br.deals.length)} by ARR)</div>
-                      <div style={{ overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Deal</Th><Th l>AE</Th><Th l>Type</Th><Th l>Stage</Th><Th l>Signed</Th><Th l>Live date</Th><Th>ARR</Th></tr></thead>
-                          <tbody>
-                            {br.deals.slice(0, 12).map((d, i) => (
-                              <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                                <Td l bold>{d.name}</Td><Td l>{d.owner.split(" ")[0]}</Td>
-                                <Td l><Pill tone={d.type === "Exp" ? "blue" : "good"}>{d.type}</Pill></Td>
-                                <Td l><Pill tone="blue">{d.stage}</Pill></Td>
-                                <Td l>{d.signedDate || "—"}</Td><Td l>{d.liveDate || "not set"}</Td>
-                                <Td mono bold color={C.navy}>{fmt(d.arr)}</Td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </Card>
-              );
-            })()}
-
             {pathToPlan && (() => {
               const P = pathToPlan;
               // whole-k / M formatter matching the card design (no decimal on k)
@@ -1285,6 +1215,95 @@ export default function Dashboard() {
                     </div>
                   </Card>
                 </>
+              );
+            })()}
+
+            {/* ARR Composition — Live vs Booked (item 1) + Churn + MoM breakdown + top-5 booked (item 2) */}
+            {data.bookingReport && (() => {
+              const br = data.bookingReport;
+              const months = data.arr.monthly;
+              const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+              const complete = months.filter((m) => m.label < nowKey);
+              const lastComplete = complete.slice(-1)[0];
+              const churnMo = lastComplete?.churnedARR ?? 0;
+              const liveArr = data.liveArrToday ?? 0;
+              const booked = liveArr + br.total;
+              const MABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+              const mLabel = (l: string) => { const [y, mm] = l.split("-"); return `${MABBR[+mm - 1]}-${y.slice(2)}`; };
+              const win = complete.slice(-12);
+              const mv = win.map((m) => ({
+                label: mLabel(m.label), newBusiness: m.newBusiness, expansion: m.expansion,
+                churn: m.churnedARR, liveARR: m.activeARR, bookedARR: m.bookedARR,
+              }));
+              const box = (label: string, val: string, sub: string, color: string) => (
+                <div style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "16px 18px" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3 }}>{label}</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color, marginTop: 5 }}>{val}</div>
+                  <div style={{ fontSize: 12, color: C.t2, marginTop: 4 }}>{sub}</div>
+                </div>
+              );
+              // MoM breakdown rows (most recent first), reversed for display
+              const rows = [...mv].reverse();
+              const top = data.topBooked ?? [];
+              return (
+                <Card title="ARR Composition — Live vs Booked · Churn" sub="Booked ARR = Live ARR (past ContractLiveDate) + signed deals not yet live. Churn is its own component — never netted into New ARR. Series computed in the sheet (ARR_MoM_Rebuild).">
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, padding: "18px 20px" }}>
+                    {box("Booked ARR", fmt(booked), `Live ${fmt(liveArr)} + ${fmt(br.total)} pending`, C.navy)}
+                    {box("Live ARR (as of today)", fmt(liveArr), "past ContractLiveDate", C.grn)}
+                    {box("Booked — not yet live", fmt(br.total), `${br.count} deals · NB ${fmt(br.nb)} / Exp ${fmt(br.exp)}`, C.navy)}
+                    {box("Churn — last complete mo", fmt(churnMo), lastComplete ? mLabel(lastComplete.label) : "", C.red)}
+                  </div>
+                  <div style={{ padding: "0 20px 8px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "2px 0 6px" }}>
+                      Monthly ARR movement — New Business + Expansion (up) vs Churn (down); Booked &amp; Live ARR (lines)
+                    </div>
+                    <ArrMovementChart points={mv} />
+                  </div>
+                  {/* MoM breakdown table — all components with numbers */}
+                  <div style={{ padding: "6px 20px 14px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Month-over-month breakdown</div>
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                        <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                          <Th l>Month</Th><Th>New Biz</Th><Th>Expansion</Th><Th>Churn</Th><Th>Booked ARR</Th><Th>Live ARR</Th>
+                        </tr></thead>
+                        <tbody>
+                          {rows.map((m, i) => (
+                            <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                              <Td l bold>{m.label}</Td>
+                              <Td mono color={C.grn}>{m.newBusiness ? fmt(m.newBusiness) : "—"}</Td>
+                              <Td mono color={C.blue}>{m.expansion ? fmt(m.expansion) : "—"}</Td>
+                              <Td mono color={C.red}>{m.churn ? "−" + fmt(m.churn) : "—"}</Td>
+                              <Td mono bold>{fmt(m.bookedARR)}</Td>
+                              <Td mono bold color={C.navy}>{fmt(m.liveARR)}</Td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  {/* Top 5 currently-booked contracts (sheet-computed: Top_Booked_ARR) */}
+                  {top.length > 0 && (
+                    <div style={{ padding: "0 20px 18px" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Top {top.length} booked contracts — currently in the book</div>
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                          <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Account</Th><Th l>AE</Th><Th l>Status</Th><Th l>Live date</Th><Th>ARR</Th></tr></thead>
+                          <tbody>
+                            {top.map((d, i) => (
+                              <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                                <Td l bold>{d.account || d.opp}</Td><Td l>{d.owner.split(" ")[0]}</Td>
+                                <Td l><Pill tone={d.status === "Live" ? "good" : "warn"}>{d.status}</Pill></Td>
+                                <Td l>{d.liveDate}</Td>
+                                <Td mono bold color={C.navy}>{fmt(d.arr)}</Td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </Card>
               );
             })()}
 
