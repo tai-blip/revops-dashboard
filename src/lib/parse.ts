@@ -332,7 +332,10 @@ export function parseTopBookedTab(rows: Row[]): TopBookedDeal[] {
     if (!opp) continue;
     out.push({
       opp, account: String(r[1] ?? ""), owner: String(r[2] ?? ""),
-      arr: Number(r[3] ?? 0) || 0, status: String(r[4] ?? ""), liveDate: String(r[5] ?? ""),
+      arr: Number(r[3] ?? 0) || 0, status: String(r[4] ?? ""),
+      // ContractLiveDate lands as a Sheets date serial (USER_ENTERED coerces the ISO
+      // string to a date) — convert back to an ISO date; pass through "not set"/blank.
+      liveDate: r[5] == null || r[5] === "" || r[5] === "not set" ? "not set" : sheetsSerialToISODate(r[5]),
     });
   }
   return out;
