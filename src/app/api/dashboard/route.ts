@@ -78,7 +78,7 @@ export async function GET() {
         getSheetValues("ACV_MoM", "A1:AZ20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_per_Location_MoM", "A1:K20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("SOQL_PaymentMix", "A1:M2000").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("AE_Annual_Potential", "A1:K30").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("AE_Annual_Potential", "A1:L30").catch(() => [] as (string | number | null)[][]),
         getSheetValues("Top_Booked_ARR", "A1:F12").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_Forward", "A1:E24").catch(() => [] as (string | number | null)[][]),
       ]);

@@ -45,7 +45,9 @@ type DashboardData = {
     monthlyTeamActual: { label: string; actual: number }[];
   };
   aeAnnual?: {
-    reps: { name: string; goal: number; ytdNB: number; ytdExp: number; ytdTotal: number; pctOfGoal: number; potNB: number; potExp: number; potTotal: number; projection: number; pctProj: number }[];
+    reps: { name: string; goal: number; ytdNB: number; ytdExp: number; ytdTotal: number; pctOfGoal: number; potNB: number; potExp: number; potTotal: number; projection: number; pctProj: number; yrMissing: number }[];
+    missingYearlyOpps: number;
+    missingYearlyArr: number;
   };
   pipeline: {
     filterRep: string;
@@ -511,6 +513,7 @@ export default function Dashboard() {
   const [wowMetric, setWowMetric] = useState<string | null>(null);
   const [decideAE, setDecideAE] = useState<string>("all");
   const [attView, setAttView] = useState<"quarterly" | "annual">("quarterly");
+  const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
   const [dealCalls, setDealCalls] = useState<Record<string, "commit" | "best" | "pipeline" | "omit">>({});
 
   useEffect(() => {
@@ -2319,9 +2322,79 @@ export default function Dashboard() {
           );
         };
 
+        // Quarterly ⇄ Yearly toggle (shown on both views). Yearly uses the AE/AM % YEAR
+        // forecast (AE_AM_Probability_Year__c) from the AE_Annual_Potential feed.
+        const fcastToggle = (
+          <div style={{ display: "inline-flex", background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 3, marginBottom: 16 }}>
+            {(["quarterly", "yearly"] as const).map((v) => (
+              <button key={v} onClick={() => setFcastView(v)}
+                style={{ border: "none", cursor: "pointer", borderRadius: 8, padding: "6px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                  background: fcastView === v ? "#fff" : "transparent", color: fcastView === v ? C.t1 : C.t3,
+                  boxShadow: fcastView === v ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>
+                {v === "quarterly" ? Q.label : "Yearly (FY26)"}
+              </button>
+            ))}
+          </div>
+        );
+
+        if (fcastView === "yearly") {
+          const ann = data.aeAnnual;
+          const reps = ann?.reps ?? [];
+          const kM = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : "$" + Math.round(n / 1e3) + "k");
+          const tGoal = reps.reduce((s, r) => s + r.goal, 0);
+          const tYtd = reps.reduce((s, r) => s + r.ytdTotal, 0);
+          const tPot = reps.reduce((s, r) => s + r.potTotal, 0);
+          const tProj = reps.reduce((s, r) => s + r.projection, 0);
+          return (
+            <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+              {fcastToggle}
+              {(ann?.missingYearlyOpps ?? 0) > 0 && (
+                <div style={{ background: C.ylwBg, border: `1px solid ${C.ylw}`, borderRadius: 10, padding: "12px 16px", marginBottom: 16, fontSize: 13.5, color: C.t1 }}>
+                  ⚠️ <b>{ann?.missingYearlyOpps} open opps ({kM(ann?.missingYearlyArr ?? 0)} ARR)</b> have no AE/AM <b>yearly</b> % set — the yearly projection is understated until reps fill it. (Reps update the quarterly % but often skip the yearly one.)
+                </div>
+              )}
+              {reps.length === 0 ? (
+                <div style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: 22, color: C.t2 }}>Yearly forecast data not available yet.</div>
+              ) : (
+                <Card title="Yearly forecast by AE — FY26" sub="YTD attainment (by Contract Live Date) + Potential ARR (Year) using AE/AM % YEAR → full-year projection vs annual goal.">
+                  <div style={{ overflowX: "auto", padding: "6px 20px 16px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>AE</Th><Th>Annual Goal</Th><Th>YTD</Th><Th>Potential (Yr)</Th><Th>Projection</Th><Th>% of Goal</Th><Th>Yr% missing</Th>
+                      </tr></thead>
+                      <tbody>
+                        {[...reps].sort((a, b) => b.pctProj - a.pctProj).map((r, i) => (
+                          <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                            <Td l bold>{r.name.split(" ")[0]}</Td>
+                            <Td mono>{kM(r.goal)}</Td>
+                            <Td mono color={C.coralDk}>{kM(r.ytdTotal)}</Td>
+                            <Td mono color={C.purp}>{kM(r.potTotal)}</Td>
+                            <Td mono bold color={C.navy}>{kM(r.projection)}</Td>
+                            <Td mono bold color={r.pctProj >= 1 ? C.grn : C.t1}>{pct(r.pctProj)}</Td>
+                            <Td mono color={r.yrMissing > 0 ? C.ylw : C.t3}>{r.yrMissing || "—"}</Td>
+                          </tr>
+                        ))}
+                        <tr style={{ borderTop: `2px solid ${C.bd}` }}>
+                          <Td l bold>Team</Td>
+                          <Td mono bold>{kM(tGoal)}</Td>
+                          <Td mono bold color={C.coralDk}>{kM(tYtd)}</Td>
+                          <Td mono bold color={C.purp}>{kM(tPot)}</Td>
+                          <Td mono bold color={C.navy}>{kM(tProj)}</Td>
+                          <Td mono bold color={tGoal && tProj / tGoal >= 1 ? C.grn : C.t1}>{tGoal ? pct(tProj / tGoal) : "—"}</Td>
+                          <Td mono>{reps.reduce((s, r) => s + r.yrMissing, 0) || "—"}</Td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )}
+            </div>
+          );
+        }
+
         return (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-
+          {fcastToggle}
           {/* header tiles */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
             <Card title={`${Q.key} Projected Close`}>

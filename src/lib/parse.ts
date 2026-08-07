@@ -274,11 +274,15 @@ export type AnnualRep = {
   name: string; goal: number;
   ytdNB: number; ytdExp: number; ytdTotal: number; pctOfGoal: number;
   potNB: number; potExp: number; potTotal: number; projection: number; pctProj: number;
+  yrMissing: number; // open NB/Exp opps owned by this rep with no AE/AM yearly %
 };
-export function parseAeAnnualTab(rows: Row[]): { reps: AnnualRep[] } {
-  const headerIdx = rows.findIndex((r) => String(r?.[0] ?? "") === "Owner");
-  if (headerIdx === -1) return { reps: [] };
+export function parseAeAnnualTab(rows: Row[]): { reps: AnnualRep[]; missingYearlyOpps: number; missingYearlyArr: number } {
   const n = (v: unknown) => Number(v ?? 0) || 0;
+  // Global "missing yearly %" flag lives in the title row (cells G/H = idx 6/7).
+  const missingYearlyOpps = n(rows?.[0]?.[6]);
+  const missingYearlyArr = n(rows?.[0]?.[7]);
+  const headerIdx = rows.findIndex((r) => String(r?.[0] ?? "") === "Owner");
+  if (headerIdx === -1) return { reps: [], missingYearlyOpps, missingYearlyArr };
   const reps: AnnualRep[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i];
@@ -288,9 +292,10 @@ export function parseAeAnnualTab(rows: Row[]): { reps: AnnualRep[] } {
       name, goal: n(r[1]),
       ytdNB: n(r[2]), ytdExp: n(r[3]), ytdTotal: n(r[4]), pctOfGoal: n(r[5]),
       potNB: n(r[6]), potExp: n(r[7]), potTotal: n(r[8]), projection: n(r[9]), pctProj: n(r[10]),
+      yrMissing: n(r[11]),
     });
   }
-  return { reps };
+  return { reps, missingYearlyOpps, missingYearlyArr };
 }
 
 // "ARR_Forward" tab (written by refresh-arr-from-sfdc.mjs). Forward-looking booked ARR:

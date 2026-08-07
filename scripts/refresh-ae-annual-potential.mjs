@@ -72,18 +72,25 @@ async function main() {
     else if (isNB(rt)) ytd[owner].nb += arr;
   }
 
-  // ── 2. Potential (Year) = Σ open (AE/AM % × ARR), NB + Exp ──
-  const potSoql = `SELECT Owner.Name, RecordType.Name, AE_AM_Probability__c, convertCurrency(AnnualContractValueARR__c) FROM Opportunity WHERE IsClosed = false AND AE_AM_Probability__c != null ORDER BY Owner.Name`;
+  // ── 2. Potential (Year) = Σ open (AE/AM % YEAR × ARR), NB + Exp ──
+  //    Uses AE_AM_Probability_Year__c (the YEARLY forecast %), NOT the quarterly field.
+  //    Reps update the quarterly % but often leave the yearly % blank, so we also count
+  //    the open NB/Exp opps with NO yearly % (the projection is understated until filled).
+  const potSoql = `SELECT Owner.Name, RecordType.Name, AE_AM_Probability_Year__c, convertCurrency(AnnualContractValueARR__c) FROM Opportunity WHERE IsClosed = false ORDER BY Owner.Name`;
   const potRecs = await sfQueryAll(instance, token, potSoql);
-  const pot = {}; // name -> { nb, exp, count }
+  const pot = {}; // name -> { nb, exp, count, missing, missingArr }
+  let missTotal = 0, missArrTotal = 0;
   for (const r of potRecs) {
     const owner = r.Owner?.Name ?? "(unassigned)";
     if (EXCLUDE.has(owner)) continue;
     const rt = r.RecordType?.Name ?? "";
-    if (/Renewal/i.test(rt)) continue;
-    const w = frac(r.AE_AM_Probability__c) * Number(r.AnnualContractValueARR__c ?? 0);
+    if (/Renewal/i.test(rt)) continue; // NB + Exp only
+    const arr = Number(r.AnnualContractValueARR__c ?? 0);
+    if (!(arr > 0)) continue;
+    pot[owner] ??= { nb: 0, exp: 0, count: 0, missing: 0, missingArr: 0 };
+    if (r.AE_AM_Probability_Year__c == null) { pot[owner].missing += 1; pot[owner].missingArr += arr; missTotal += 1; missArrTotal += arr; continue; }
+    const w = frac(r.AE_AM_Probability_Year__c) * arr;
     if (!(w > 0)) continue;
-    pot[owner] ??= { nb: 0, exp: 0, count: 0 };
     if (isExp(rt)) pot[owner].exp += w; else pot[owner].nb += w;
     pot[owner].count += 1;
   }
@@ -104,12 +111,14 @@ async function main() {
       goal > 0 ? +(ytdTot / goal).toFixed(4) : 0,
       Math.round(p.nb), Math.round(p.exp), Math.round(potTot),
       Math.round(proj), goal > 0 ? +(proj / goal).toFixed(4) : 0,
+      p.missing, // L — open NB/Exp opps with no yearly % (potential understated)
     ];
   });
 
   const matrix = [
-    [`AE Attainment (Annual) — FY${String(YEAR).slice(2)} · YTD by ContractLiveDate + open-pipe potential`, "", "", "", "", "", "", "", "", "", `Updated ${stamp}`],
-    ["Owner", "Annual Goal", "YTD NB", "YTD Exp", "YTD Total", "% of Goal", "Pot NB", "Pot Exp", "Pot Total", "Projection", "% Proj"],
+    // Title row also carries the global "missing yearly %" flag in cells F/G (idx 5/6) + H (idx 7).
+    [`AE Attainment (Annual) — FY${String(YEAR).slice(2)} · potential uses AE/AM % YEAR`, "", "", "", "", "Yearly % missing (opps):", missTotal, missArrTotal, "", "", `Updated ${stamp}`],
+    ["Owner", "Annual Goal", "YTD NB", "YTD Exp", "YTD Total", "% of Goal", "Pot NB", "Pot Exp", "Pot Total", "Projection", "% Proj", "Yr% missing"],
     ...rows,
   ];
 
@@ -120,7 +129,7 @@ async function main() {
     } else throw e;
   });
   await api.spreadsheets.values.update({
-    spreadsheetId: ID, range: "AE_Annual_Potential!A1:K200", valueInputOption: "RAW", requestBody: { values: matrix },
+    spreadsheetId: ID, range: "AE_Annual_Potential!A1:L200", valueInputOption: "RAW", requestBody: { values: matrix },
   });
 
   console.log(`Wrote AE_Annual_Potential — ${rows.length} reps · ${ytdRecs.length} YTD closed, ${potRecs.length} open opps scanned.\n`);
