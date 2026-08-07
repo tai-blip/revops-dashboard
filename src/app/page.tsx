@@ -2337,64 +2337,14 @@ export default function Dashboard() {
           </div>
         );
 
-        if (fcastView === "yearly") {
-          const ann = data.aeAnnual;
-          const reps = ann?.reps ?? [];
-          const kM = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : "$" + Math.round(n / 1e3) + "k");
-          const tGoal = reps.reduce((s, r) => s + r.goal, 0);
-          const tYtd = reps.reduce((s, r) => s + r.ytdTotal, 0);
-          const tPot = reps.reduce((s, r) => s + r.potTotal, 0);
-          const tProj = reps.reduce((s, r) => s + r.projection, 0);
-          return (
-            <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-              {fcastToggle}
-              {(ann?.missingYearlyOpps ?? 0) > 0 && (
-                <div style={{ background: C.ylwBg, border: `1px solid ${C.ylw}`, borderRadius: 10, padding: "12px 16px", marginBottom: 16, fontSize: 13.5, color: C.t1 }}>
-                  ⚠️ <b>{ann?.missingYearlyOpps} open opps ({kM(ann?.missingYearlyArr ?? 0)} ARR)</b> have no AE/AM <b>yearly</b> % set — the yearly projection is understated until reps fill it. (Reps update the quarterly % but often skip the yearly one.)
-                </div>
-              )}
-              {reps.length === 0 ? (
-                <div style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: 22, color: C.t2 }}>Yearly forecast data not available yet.</div>
-              ) : (
-                <Card title="Yearly forecast by AE — FY26" sub="YTD attainment (by Contract Live Date) + Potential ARR (Year) using AE/AM % YEAR → full-year projection vs annual goal.">
-                  <div style={{ overflowX: "auto", padding: "6px 20px 16px" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>AE</Th><Th>Annual Goal</Th><Th>YTD</Th><Th>Potential (Yr)</Th><Th>Projection</Th><Th>% of Goal</Th><Th>Yr% missing</Th>
-                      </tr></thead>
-                      <tbody>
-                        {[...reps].sort((a, b) => b.pctProj - a.pctProj).map((r, i) => (
-                          <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                            <Td l bold>{r.name.split(" ")[0]}</Td>
-                            <Td mono>{kM(r.goal)}</Td>
-                            <Td mono color={C.coralDk}>{kM(r.ytdTotal)}</Td>
-                            <Td mono color={C.purp}>{kM(r.potTotal)}</Td>
-                            <Td mono bold color={C.navy}>{kM(r.projection)}</Td>
-                            <Td mono bold color={r.pctProj >= 1 ? C.grn : C.t1}>{pct(r.pctProj)}</Td>
-                            <Td mono color={r.yrMissing > 0 ? C.ylw : C.t3}>{r.yrMissing || "—"}</Td>
-                          </tr>
-                        ))}
-                        <tr style={{ borderTop: `2px solid ${C.bd}` }}>
-                          <Td l bold>Team</Td>
-                          <Td mono bold>{kM(tGoal)}</Td>
-                          <Td mono bold color={C.coralDk}>{kM(tYtd)}</Td>
-                          <Td mono bold color={C.purp}>{kM(tPot)}</Td>
-                          <Td mono bold color={C.navy}>{kM(tProj)}</Td>
-                          <Td mono bold color={tGoal && tProj / tGoal >= 1 ? C.grn : C.t1}>{tGoal ? pct(tProj / tGoal) : "—"}</Td>
-                          <Td mono>{reps.reduce((s, r) => s + r.yrMissing, 0) || "—"}</Td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
-              )}
-            </div>
-          );
-        }
+        // Yearly numbers (AE/AM % YEAR) for the in-quarter card's Yearly toggle.
+        const annY = data.aeAnnual;
+        const annYReps = [...(annY?.reps ?? [])].sort((a, b) => b.pctProj - a.pctProj);
+        const kMY = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : "$" + Math.round(n / 1e3) + "k");
+        const annYTot = annYReps.reduce((t, r) => ({ goal: t.goal + r.goal, ytd: t.ytd + r.ytdTotal, pot: t.pot + r.potTotal, proj: t.proj + r.projection, miss: t.miss + r.yrMissing }), { goal: 0, ytd: 0, pot: 0, proj: 0, miss: 0 });
 
         return (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-          {fcastToggle}
           {/* header tiles */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
             <Card title={`${Q.key} Projected Close`}>
@@ -2411,8 +2361,50 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          {/* in-quarter table */}
-          <Card title={`In-quarter forecast — ${Q.label}`} sub="Per AE (incl. AM). Potential = Closed Won + Pot. New Biz + Pot. Expansion (open-deal quarter-expected revenue; Closed Won excluded from weighting).">
+          {/* in-quarter forecast — Quarterly ⇄ Yearly toggle (this table only) */}
+          {fcastToggle}
+          {fcastView === "yearly" && (annY?.missingYearlyOpps ?? 0) > 0 && (
+            <div style={{ background: C.ylwBg, border: `1px solid ${C.ylw}`, borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: C.t1 }}>
+              ⚠️ <b>{annY?.missingYearlyOpps} open opps ({kMY(annY?.missingYearlyArr ?? 0)} ARR)</b> have no AE/AM <b>yearly</b> % — the yearly projection is understated until reps fill it.
+            </div>
+          )}
+          <Card
+            title={fcastView === "quarterly" ? `In-quarter forecast — ${Q.label}` : "Yearly forecast by AE — FY26"}
+            sub={fcastView === "quarterly"
+              ? "Per AE (incl. AM). Potential = Closed Won + Pot. New Biz + Pot. Expansion (open-deal quarter-expected revenue; Closed Won excluded from weighting)."
+              : "Per AE. YTD (by Contract Live Date) + Potential ARR (Year) using AE/AM % YEAR → full-year projection vs annual goal."}
+          >
+            {fcastView === "yearly" ? (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                    <Th l>AE</Th><Th>Annual Goal</Th><Th>YTD</Th><Th>Potential (Yr)</Th><Th>Projection</Th><Th>% of Goal</Th><Th>Yr% missing</Th>
+                  </tr></thead>
+                  <tbody>
+                    {annYReps.map((r, i) => (
+                      <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                        <Td l bold>{r.name.split(" ")[0]}</Td>
+                        <Td mono color={C.t2}>{kMY(r.goal)}</Td>
+                        <Td mono color={r.ytdTotal > 0 ? C.coralDk : C.t1}>{kMY(r.ytdTotal)}</Td>
+                        <Td mono color={C.purp}>{kMY(r.potTotal)}</Td>
+                        <Td mono bold>{kMY(r.projection)}</Td>
+                        <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(r.goal > 0 ? r.pctProj : null, null)}</td>
+                        <Td mono color={r.yrMissing > 0 ? C.ylw : C.t3}>{r.yrMissing || "—"}</Td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
+                      <Td l bold>Team</Td>
+                      <Td mono>{kMY(annYTot.goal)}</Td>
+                      <Td mono color={C.coralDk}>{kMY(annYTot.ytd)}</Td>
+                      <Td mono color={C.purp}>{kMY(annYTot.pot)}</Td>
+                      <Td mono bold>{kMY(annYTot.proj)}</Td>
+                      <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(annYTot.goal > 0 ? annYTot.proj / annYTot.goal : null, null)}</td>
+                      <Td mono>{annYTot.miss || "—"}</Td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
@@ -2459,6 +2451,7 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
+            )}
           </Card>
 
           {/* remainder of quarter */}
