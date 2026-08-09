@@ -54,6 +54,41 @@ export function computeBookingReport(rows: Row[]): { total: number; nb: number; 
   return { total: nb + exp, nb, exp, count: deals.length, deals };
 }
 
+// Bookings vs Arrivals (Sai's cash-flow lens). For a quarter [qStart, qEnd):
+//   • Signed  = ARR of won/billing NB+Exp deals whose SIGNED date (Date Reached Closed
+//     Won, else CloseDate) falls in the quarter — "what got booked this quarter".
+//   • Live    = ARR whose ContractLiveDate falls in the quarter — "what actually goes
+//     live / cash arrives this quarter" (live-and-paying, not signed).
+// Signed-but-not-live (signed in-quarter, live date after qEnd or unset) is the timing
+// spillover that distorts burn if you look at signings alone. Per owner + team totals.
+export type SignedLiveRow = { owner: string; signed: number; live: number; signedNotLive: number };
+export function computeSignedLiveForecast(rows: Row[], qStart: string, qEnd: string): { byOwner: Record<string, SignedLiveRow>; total: SignedLiveRow } {
+  const total: SignedLiveRow = { owner: "", signed: 0, live: 0, signedNotLive: 0 };
+  const byOwner: Record<string, SignedLiveRow> = {};
+  if (!rows || rows.length < 2) return { byOwner, total };
+  const h = rows[0].map((x) => String(x ?? "").toLowerCase());
+  const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
+  const cStage = ci("Stage"), cArr = ci("ARR (USD)"), cLive = ci("ContractLiveDate"),
+    cOwner = ci("Owner"), cWon = ci("Date Reached Closed Won"), cClose = ci("CloseDate"),
+    cType = ci("RecordType") >= 0 ? ci("RecordType") : ci("Type");
+  if (cStage < 0 || cArr < 0 || cLive < 0) return { byOwner, total };
+  const iso = (v: unknown) => { const d = sheetsSerialToDate(v); return d ? d.toISOString().slice(0, 10) : ""; };
+  const inQ = (d: string) => d !== "" && d >= qStart && d < qEnd;
+  for (const r of rows.slice(1)) {
+    if (!/Billing|Closed Won/i.test(String(r[cStage] ?? ""))) continue;
+    if (!/New Business|Expansion/i.test(String(r[cType] ?? ""))) continue;
+    const arr = Number(r[cArr] ?? 0);
+    if (!(arr > 0)) continue;
+    const owner = String(r[cOwner] ?? "");
+    const signed = cWon >= 0 && iso(r[cWon]) ? iso(r[cWon]) : cClose >= 0 ? iso(r[cClose]) : "";
+    const live = iso(r[cLive]);
+    byOwner[owner] ??= { owner, signed: 0, live: 0, signedNotLive: 0 };
+    if (inQ(signed)) { byOwner[owner].signed += arr; total.signed += arr; if (!inQ(live)) { byOwner[owner].signedNotLive += arr; total.signedNotLive += arr; } }
+    if (inQ(live)) { byOwner[owner].live += arr; total.live += arr; }
+  }
+  return { byOwner, total };
+}
+
 // --- Header-based column resolution -------------------------------------------
 // The Salesforce → Coefficient export can reorder/insert columns, which silently
 // breaks fixed-index parsing (e.g. reading a date column as the deal Owner).

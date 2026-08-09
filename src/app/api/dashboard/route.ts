@@ -30,6 +30,7 @@ import {
   computeWinRateAndCycle,
   computeAcvDistribution,
   computeBookingReport,
+  computeSignedLiveForecast,
 } from "@/lib/deals";
 import {
   SALES_Q,
@@ -185,6 +186,7 @@ export async function GET() {
     const acv = computeAcvDistribution(closedDeals);
     const acvInsights = computeAcvInsights(closedDealsRows);
     const bookingReport = computeBookingReport(closedDealsRows);
+    const signedLive = computeSignedLiveForecast(closedDealsRows, qDef.start, qDef.end);
     const paymentMix = computePaymentMix(paymentMixRows);
 
     // Who Does What — open deals grouped by owner, flagged if stale (>60d since last stage change)
@@ -231,6 +233,7 @@ export async function GET() {
       arrMom,
       liveArrToday,
       bookingReport,
+      signedLive,
       topBooked,
       arrForward,
       aeAttainment,

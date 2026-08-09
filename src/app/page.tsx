@@ -39,6 +39,7 @@ type DashboardData = {
   liveArrToday?: number | null;
   bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
+  signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
@@ -2453,6 +2454,46 @@ export default function Dashboard() {
             </div>
             )}
           </Card>
+
+          {/* Bookings vs Arrivals — Sai's cash-flow lens (signed date vs live date) */}
+          {data.signedLive && (() => {
+            const SL = data.signedLive;
+            const rowsSL = roster.filter((r) => !r.lead || (SL.byOwner[r.name] && (SL.byOwner[r.name].signed > 0 || SL.byOwner[r.name].live > 0)));
+            return (
+              <Card
+                title={`Bookings vs Arrivals — ${Q.label}`}
+                sub="Per AE, cash-flow lens. Booked = ARR signed this quarter (by Contract Signed date). Arriving = ARR going live this quarter (by Contract Live date). Signed-not-live = booked this quarter but goes live later — the timing gap that shifts when cash actually arrives."
+                accent={C.navy}
+              >
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      <Th l>AE</Th><Th>Booked (signed in {Q.key})</Th><Th>Arriving (live in {Q.key})</Th><Th>Signed, not yet live</Th>
+                    </tr></thead>
+                    <tbody>
+                      {rowsSL.map((r) => {
+                        const s = SL.byOwner[r.name] ?? { signed: 0, live: 0, signedNotLive: 0 };
+                        return (
+                          <tr key={r.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                            <Td l bold>{r.short ?? short(r.name)}{r.am && <span style={{ color: C.t3, fontWeight: 400, fontSize: 11 }}> · AM</span>}{r.lead && <span style={{ color: C.t3, fontWeight: 400, fontSize: 11 }}> · Ent</span>}</Td>
+                            <Td mono color={s.signed > 0 ? C.coralDk : C.t1}>{fmt(s.signed)}</Td>
+                            <Td mono color={s.live > 0 ? C.grn : C.t1}>{fmt(s.live)}</Td>
+                            <Td mono color={s.signedNotLive > 0 ? C.ylw : C.t3}>{s.signedNotLive > 0 ? fmt(s.signedNotLive) : "—"}</Td>
+                          </tr>
+                        );
+                      })}
+                      <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
+                        <Td l bold>Team</Td>
+                        <Td mono bold color={C.coralDk}>{fmt(SL.total.signed)}</Td>
+                        <Td mono bold color={C.grn}>{fmt(SL.total.live)}</Td>
+                        <Td mono bold color={C.ylw}>{SL.total.signedNotLive > 0 ? fmt(SL.total.signedNotLive) : "—"}</Td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            );
+          })()}
 
           {/* remainder of quarter */}
           <Card title={`Remainder of ${Q.label} — ${F.daysLeft} days, ${F.weeksLeft} week${F.weeksLeft === 1 ? "" : "s"} left`} sub="What still has to close to reach quota, the weekly run-rate that implies, and where Potential ARR projects the quarter to land." accent={C.coral}>
