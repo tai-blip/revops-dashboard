@@ -11,6 +11,7 @@ import {
   parseAeAnnualTab,
   parseTopBookedTab,
   parseArrForwardTab,
+  parseDealTrackerTab,
   parsePipelineTab,
   parsePipelineWowTab,
 } from "@/lib/parse";
@@ -56,7 +57,7 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows] =
       await Promise.all([
         getSheetValues("ARR_WoW_Rebuild", "A1:J30").catch(() => [] as (string | number | null)[][]),
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
@@ -82,6 +83,7 @@ export async function GET() {
         getSheetValues("AE_Annual_Potential", "A1:L30").catch(() => [] as (string | number | null)[][]),
         getSheetValues("Top_Booked_ARR", "A1:F12").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_Forward", "A1:E24").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("Deal Tracker (DRAFT)", "A1:K200").catch(() => [] as (string | number | null)[][]),
       ]);
 
     // ARR (monthly + weekly) is now built entirely from the full-book Rule A rebuild —
@@ -104,6 +106,7 @@ export async function GET() {
     const aeAnnual = parseAeAnnualTab(aeAnnualRows);
     const topBooked = parseTopBookedTab(topBookedRows);
     const arrForward = parseArrForwardTab(arrForwardRows);
+    const dealTracker = parseDealTrackerTab(dealTrackerRows);
     const pipeline = parsePipelineTab(pipelineRows);
     const pipelineWow = parsePipelineWowTab(pipelineWowRows);
 
@@ -234,6 +237,7 @@ export async function GET() {
       liveArrToday,
       bookingReport,
       signedLive,
+      dealTracker,
       topBooked,
       arrForward,
       aeAttainment,

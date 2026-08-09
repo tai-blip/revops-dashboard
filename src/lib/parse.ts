@@ -324,6 +324,28 @@ export function parseArrForwardTab(rows: Row[]): ArrForward {
   return { renewalDue, renewalMonth, months };
 }
 
+// "Deal Tracker (DRAFT)" tab (seeded by build-deal-tracker.mjs, edited by the team).
+// Read-only mirror for the dashboard: decide-Q3 opps + Davi's key deals + the team's
+// editable ▸ Call / ▸ Next step / ▸ Updated columns.
+export type DealTrackerRow = { name: string; ae: string; stage: string; pot: number; conf: string; live: string; inPipe: boolean; call: string; nextStep: string; updated: string };
+export function parseDealTrackerTab(rows: Row[]): DealTrackerRow[] {
+  const headerIdx = rows.findIndex((r) => String(r?.[0] ?? "").trim() === "#");
+  if (headerIdx === -1) return [];
+  const out: DealTrackerRow[] = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const r = rows[i];
+    const name = String(r?.[1] ?? "").trim();
+    if (!name) continue;
+    out.push({
+      name, ae: String(r[2] ?? ""), stage: String(r[3] ?? ""),
+      pot: Number(r[4] ?? 0) || 0, conf: String(r[5] ?? ""),
+      live: String(r[6] ?? ""), inPipe: String(r[7] ?? "").trim() !== "",
+      call: String(r[8] ?? ""), nextStep: String(r[9] ?? ""), updated: String(r[10] ?? ""),
+    });
+  }
+  return out;
+}
+
 // "Top_Booked_ARR" tab (written by refresh-arr-from-sfdc.mjs). Top 5 largest contracts
 // currently in the booked book (Live or signed-but-pending go-live).
 export type TopBookedDeal = { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string };

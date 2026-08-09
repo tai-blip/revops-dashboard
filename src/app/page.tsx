@@ -40,6 +40,7 @@ type DashboardData = {
   bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
+  dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; inPipe: boolean; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
@@ -175,6 +176,7 @@ const TABS = [
   ["targets", "Targets & Progress"],
   ["pipeline", "Pipeline"],
   ["forecast", "Forecast"],
+  ["deals", "Deal Tracker"],
   ["health", "Deal Health"],
   ["attainment", "AE Attainment"],
   ["acv", "ACV & Deal Size"],
@@ -515,6 +517,8 @@ export default function Dashboard() {
   const [decideAE, setDecideAE] = useState<string>("all");
   const [attView, setAttView] = useState<"quarterly" | "annual">("quarterly");
   const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
+  const [dealAE, setDealAE] = useState<string>("all");
+  const [dealPipeOnly, setDealPipeOnly] = useState<boolean>(false);
   const [dealCalls, setDealCalls] = useState<Record<string, "commit" | "best" | "pipeline" | "omit">>({});
 
   useEffect(() => {
@@ -2727,6 +2731,67 @@ export default function Dashboard() {
             );
           })()}
         </div>
+        );
+      })()}
+
+      {tab === "deals" && (() => {
+        const all = data.dealTracker ?? [];
+        const aes = ["all", ...Array.from(new Set(all.map((d) => d.ae).filter(Boolean)))];
+        const view = all.filter((d) => (dealAE === "all" || d.ae === dealAE) && (!dealPipeOnly || d.inPipe));
+        const totalPot = view.reduce((s, d) => s + d.pot, 0);
+        const confTone: Record<string, { bg: string; fg: string }> = {
+          Medium: { bg: C.grnBg, fg: C.grn }, Pilot: { bg: C.blueBg, fg: C.blue },
+          Hard: { bg: C.ylwBg, fg: C.ylw }, "Very Hard": { bg: C.redBg, fg: C.red },
+        };
+        const nConf = (c: string) => all.filter((d) => d.conf === c).length;
+        const sheetUrl = "https://docs.google.com/spreadsheets/d/1QPpNHeUuPqlAtWA5VyF0_AxXCLM3MZia5UokMSwhFNc/edit";
+        return (
+          <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+            {all.length === 0 ? (
+              <div style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: 22, color: C.t2 }}>Deal Tracker not populated yet — run <code>build-deal-tracker.mjs</code>.</div>
+            ) : (
+            <Card
+              title="Deal Tracker — Q3 FY26"
+              sub={`Live mirror of the editable "Deal Tracker (DRAFT)" sheet: the deals that decide Q3 + Davi's key deals. The team updates Call / Next step / Updated in the sheet; this view reflects it. ${nConf("Medium")} Medium · ${nConf("Pilot")} Pilot · ${nConf("Hard")} Hard · ${nConf("Very Hard")} Very Hard.`}
+            >
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 4px" }}>
+                <select value={dealAE} onChange={(e) => setDealAE(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit" }}>
+                  {aes.map((a) => <option key={a} value={a}>{a === "all" ? "All AEs" : a}</option>)}
+                </select>
+                <label style={{ fontSize: 13, color: C.t2, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <input type="checkbox" checked={dealPipeOnly} onChange={(e) => setDealPipeOnly(e.target.checked)} /> In Q3 pipeline only
+                </label>
+                <span style={{ fontSize: 13, color: C.t2 }}>{view.length} deals · <b>{fmt(totalPot)}</b> potential</span>
+                <a href={sheetUrl} target="_blank" rel="noreferrer" style={{ marginLeft: "auto", fontSize: 13, color: C.blue, fontWeight: 600, textDecoration: "none" }}>Edit in Google Sheets ↗</a>
+              </div>
+              <div style={{ overflow: "auto", maxHeight: 620, padding: "6px 20px 18px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead><tr style={{ borderBottom: `1px solid ${C.bd}`, position: "sticky", top: 0, background: "#fff" }}>
+                    <Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th>Potential</Th><Th l>Confidence</Th><Th l>Est. Live</Th><Th l>Call</Th><Th l>Next step</Th><Th l>Updated</Th>
+                  </tr></thead>
+                  <tbody>
+                    {view.map((d, i) => {
+                      const t = confTone[d.conf];
+                      return (
+                        <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <Td l bold>{d.name}{!d.inPipe && <span style={{ color: C.t3, fontWeight: 400, fontSize: 10.5 }}> · key deal</span>}</Td>
+                          <Td l>{d.ae}</Td>
+                          <Td l><Pill tone={/SQO/.test(d.stage) ? "good" : /SAL|SQL/.test(d.stage) ? "blue" : undefined}>{d.stage}</Pill></Td>
+                          <Td mono bold>{d.pot ? fmt(d.pot) : "—"}</Td>
+                          <Td l>{d.conf ? <span style={{ background: t?.bg ?? C.s2, color: t?.fg ?? C.t2, padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>{d.conf}</span> : "—"}</Td>
+                          <Td l>{d.live || "—"}</Td>
+                          <Td l>{d.call || <span style={{ color: C.t3 }}>—</span>}</Td>
+                          <Td l><span style={{ fontSize: 12, color: C.t2 }}>{d.nextStep || "—"}</span></Td>
+                          <Td l>{d.updated || <span style={{ color: C.t3 }}>—</span>}</Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+            )}
+          </div>
         );
       })()}
 
