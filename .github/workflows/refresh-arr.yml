@@ -19,6 +19,9 @@ jobs:
       SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
       SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      # Prod dashboard origin the RevOps Pulse digest fetches its numbers from
+      # (e.g. https://revops-dashboard.vercel.app). Set as a repo variable.
+      DASH_API_URL: ${{ vars.DASH_API_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,6 +48,6 @@ jobs:
       - name: Sheet health check
         if: always()
         run: node scripts/check-sheet.mjs
-      - name: Slack daily digest (what changed vs yesterday)
+      - name: RevOps Pulse — daily digest to Slack
         if: always()
-        run: node scripts/daily-digest.mjs
+        run: node scripts/post-revops-digest.mjs
