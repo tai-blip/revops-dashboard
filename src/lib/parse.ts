@@ -327,7 +327,7 @@ export function parseArrForwardTab(rows: Row[]): ArrForward {
 // "Deal Tracker (DRAFT)" tab (seeded by build-deal-tracker.mjs, edited by the team).
 // Read-only mirror for the dashboard: decide-Q3 opps + Davi's key deals + the team's
 // editable ▸ Call / ▸ Next step / ▸ Updated columns.
-export type DealTrackerRow = { name: string; ae: string; stage: string; pot: number; conf: string; live: string; inPipe: boolean; call: string; nextStep: string; updated: string };
+export type DealTrackerRow = { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string };
 export function parseDealTrackerTab(rows: Row[]): DealTrackerRow[] {
   const headerIdx = rows.findIndex((r) => String(r?.[0] ?? "").trim() === "#");
   if (headerIdx === -1) return [];
@@ -339,7 +339,7 @@ export function parseDealTrackerTab(rows: Row[]): DealTrackerRow[] {
     out.push({
       name, ae: String(r[2] ?? ""), stage: String(r[3] ?? ""),
       pot: Number(r[4] ?? 0) || 0, conf: String(r[5] ?? ""),
-      live: String(r[6] ?? ""), inPipe: String(r[7] ?? "").trim() !== "",
+      live: String(r[6] ?? ""), source: String(r[7] ?? ""),
       call: String(r[8] ?? ""), nextStep: String(r[9] ?? ""), updated: String(r[10] ?? ""),
     });
   }

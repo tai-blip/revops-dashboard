@@ -105,23 +105,23 @@ async function main() {
   const rows = decide.map((d) => {
     const k = KEY.find((x) => nameMatch(x[0], d.name));
     if (k) usedKey.add(k[0]);
-    return { name: d.name, ae: d.owner, stage: d.stage, pot: d.potARR, conf: k ? k[2] : "", live: k ? k[4] : "", notes: k ? k[5] : "", inPipe: "✓" };
+    return { name: d.name, ae: d.owner, stage: d.stage, pot: d.potARR, conf: k ? k[2] : "", live: k ? k[4] : "", notes: k ? k[5] : "", source: k ? "Q3 + Key Deal" : "Q3 Pipeline" };
   });
   // Add Davi's key deals not already matched to a decide-Q3 opp (his extra flagged pipeline).
   for (const k of KEY) {
     if (usedKey.has(k[0])) continue;
-    rows.push({ name: k[0], ae: AE[k[1]] ?? k[1], stage: "Key Deal", pot: k[3], conf: k[2], live: k[4], notes: k[5], inPipe: "" });
+    rows.push({ name: k[0], ae: AE[k[1]] ?? k[1], stage: "Key Deal", pot: k[3], conf: k[2], live: k[4], notes: k[5], source: "Davi Key Deal" });
   }
-  // Sort: in-pipeline first, then by potential desc.
-  rows.sort((a, b) => (b.inPipe ? 1 : 0) - (a.inPipe ? 1 : 0) || b.pot - a.pot);
+  // Sort: Q3-pipeline deals first, then by potential desc.
+  rows.sort((a, b) => (b.source.startsWith("Q3") ? 1 : 0) - (a.source.startsWith("Q3") ? 1 : 0) || b.pot - a.pot);
 
   const CONF_ORDER = { "Medium": 1, "Pilot": 2, "Hard": 3, "Very Hard": 4 };
   const stamp = new Date().toISOString().slice(0, 10);
   const matrix = [
     [`Deal Tracker (DRAFT) — Q3 FY26 · seeded ${stamp} from "Deals that decide Q3" + Davi's Key Deals 2026`, "", "", "", "", "", "", "", "", "", ""],
     ["Team edits the ▸ columns. Left columns auto-seeded (re-running this script overwrites them — keep manual updates in Salesforce or the ▸ columns).", "", "", "", "", "", "", "", "", "", ""],
-    ["#", "Deal", "AE", "Stage", "Potential ARR", "Confidence (Davi)", "Est. Live (Davi)", "In Q3 pipeline?", "▸ Call (Commit/Best/Pipeline)", "▸ Next step", "▸ Updated"],
-    ...rows.map((r, i) => [i + 1, r.name, (r.ae || "").split(" ")[0], r.stage, r.pot || "", r.conf, r.live, r.inPipe, "", r.notes, ""]),
+    ["#", "Deal", "AE", "Stage", "Potential ARR", "Confidence (Davi)", "Est. Live (Davi)", "Source", "▸ Call (Commit/Best/Pipeline)", "▸ Next step", "▸ Updated"],
+    ...rows.map((r, i) => [i + 1, r.name, (r.ae || "").split(" ")[0], r.stage, r.pot || "", r.conf, r.live, r.source, "", r.notes, ""]),
   ];
 
   await api.spreadsheets.values.clear({ spreadsheetId: ID, range: `'${TAB}'!A1:Z400` }).catch(async (e) => {
@@ -129,7 +129,9 @@ async function main() {
       await api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: [{ addSheet: { properties: { title: TAB, gridProperties: { rowCount: rows.length + 20, columnCount: 12 } } } }] } });
     } else throw e;
   });
-  await api.spreadsheets.values.update({ spreadsheetId: ID, range: `'${TAB}'!A1`, valueInputOption: "USER_ENTERED", requestBody: { values: matrix } });
+  // RAW so Davi's est-live date strings ("10/01/2026") stay TEXT — USER_ENTERED coerces
+  // them to date serials that then read back as raw numbers (46393) in the dashboard.
+  await api.spreadsheets.values.update({ spreadsheetId: ID, range: `'${TAB}'!A1`, valueInputOption: "RAW", requestBody: { values: matrix } });
 
   const nMedium = rows.filter((r) => r.conf === "Medium").length;
   console.log(`Wrote "${TAB}" — ${rows.length} deals (${decide.length} from decide-Q3 + ${rows.length - decide.length} extra key deals) · ${nMedium} Medium-confidence.`);

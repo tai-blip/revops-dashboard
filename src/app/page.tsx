@@ -40,7 +40,7 @@ type DashboardData = {
   bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
-  dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; inPipe: boolean; call: string; nextStep: string; updated: string }[];
+  dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
@@ -518,7 +518,7 @@ export default function Dashboard() {
   const [attView, setAttView] = useState<"quarterly" | "annual">("quarterly");
   const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
   const [dealAE, setDealAE] = useState<string>("all");
-  const [dealPipeOnly, setDealPipeOnly] = useState<boolean>(false);
+  const [dealSource, setDealSource] = useState<string>("all"); // all | q3 | key
   const [dealCalls, setDealCalls] = useState<Record<string, "commit" | "best" | "pipeline" | "omit">>({});
 
   useEffect(() => {
@@ -2737,7 +2737,7 @@ export default function Dashboard() {
       {tab === "deals" && (() => {
         const all = data.dealTracker ?? [];
         const aes = ["all", ...Array.from(new Set(all.map((d) => d.ae).filter(Boolean)))];
-        const view = all.filter((d) => (dealAE === "all" || d.ae === dealAE) && (!dealPipeOnly || d.inPipe));
+        const view = all.filter((d) => (dealAE === "all" || d.ae === dealAE) && (dealSource === "all" || (dealSource === "q3" ? d.source.startsWith("Q3") : /Key/i.test(d.source))));
         const totalPot = view.reduce((s, d) => s + d.pot, 0);
         const confTone: Record<string, { bg: string; fg: string }> = {
           Medium: { bg: C.grnBg, fg: C.grn }, Pilot: { bg: C.blueBg, fg: C.blue },
@@ -2758,24 +2758,28 @@ export default function Dashboard() {
                 <select value={dealAE} onChange={(e) => setDealAE(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit" }}>
                   {aes.map((a) => <option key={a} value={a}>{a === "all" ? "All AEs" : a}</option>)}
                 </select>
-                <label style={{ fontSize: 13, color: C.t2, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                  <input type="checkbox" checked={dealPipeOnly} onChange={(e) => setDealPipeOnly(e.target.checked)} /> In Q3 pipeline only
-                </label>
+                <select value={dealSource} onChange={(e) => setDealSource(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit" }}>
+                  <option value="all">All deals</option>
+                  <option value="q3">Q3 pipeline (deals that decide Q3)</option>
+                  <option value="key">Davi's key deals</option>
+                </select>
                 <span style={{ fontSize: 13, color: C.t2 }}>{view.length} deals · <b>{fmt(totalPot)}</b> potential</span>
                 <a href={sheetUrl} target="_blank" rel="noreferrer" style={{ marginLeft: "auto", fontSize: 13, color: C.blue, fontWeight: 600, textDecoration: "none" }}>Edit in Google Sheets ↗</a>
               </div>
               <div style={{ overflow: "auto", maxHeight: 620, padding: "6px 20px 18px" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead><tr style={{ borderBottom: `1px solid ${C.bd}`, position: "sticky", top: 0, background: "#fff" }}>
-                    <Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th>Potential</Th><Th l>Confidence</Th><Th l>Est. Live</Th><Th l>Call</Th><Th l>Next step</Th><Th l>Updated</Th>
+                    <Th l>Deal</Th><Th l>AE</Th><Th l>Source</Th><Th l>Stage</Th><Th>Potential</Th><Th l>Confidence</Th><Th l>Est. Live</Th><Th l>Call</Th><Th l>Next step</Th><Th l>Updated</Th>
                   </tr></thead>
                   <tbody>
                     {view.map((d, i) => {
                       const t = confTone[d.conf];
+                      const srcTone = d.source.startsWith("Q3") ? { bg: C.blueBg, fg: C.blue } : { bg: C.s2, fg: C.t2 };
                       return (
                         <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                          <Td l bold>{d.name}{!d.inPipe && <span style={{ color: C.t3, fontWeight: 400, fontSize: 10.5 }}> · key deal</span>}</Td>
+                          <Td l bold>{d.name}</Td>
                           <Td l>{d.ae}</Td>
+                          <Td l><span style={{ background: srcTone.bg, color: srcTone.fg, padding: "2px 8px", borderRadius: 20, fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}>{d.source}</span></Td>
                           <Td l><Pill tone={/SQO/.test(d.stage) ? "good" : /SAL|SQL/.test(d.stage) ? "blue" : undefined}>{d.stage}</Pill></Td>
                           <Td mono bold>{d.pot ? fmt(d.pot) : "—"}</Td>
                           <Td l>{d.conf ? <span style={{ background: t?.bg ?? C.s2, color: t?.fg ?? C.t2, padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>{d.conf}</span> : "—"}</Td>
