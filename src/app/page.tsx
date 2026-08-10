@@ -2742,7 +2742,7 @@ export default function Dashboard() {
         const qq = dealSearch.trim().toLowerCase();
         const view = all.filter((d) =>
           (dealAE === "all" || d.ae === dealAE) &&
-          (dealSource === "all" || (dealSource === "q3" ? d.source.startsWith("Q3") : /Key/i.test(d.source))) &&
+          (dealSource === "all" || d.source === dealSource) &&
           (dealConf === "all" || d.conf === dealConf) &&
           (!qq || (d.name + " " + d.ae + " " + d.nextStep).toLowerCase().includes(qq))
         );
@@ -2767,9 +2767,10 @@ export default function Dashboard() {
                   {aes.map((a) => <option key={a} value={a}>{a === "all" ? "All AEs" : a}</option>)}
                 </select>
                 <select value={dealSource} onChange={(e) => setDealSource(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit" }}>
-                  <option value="all">All deals</option>
-                  <option value="q3">Q3 pipeline (deals that decide Q3)</option>
-                  <option value="key">Davi's key deals</option>
+                  <option value="all">All sources</option>
+                  <option value="Q3 Pipeline">Q3 pipeline only</option>
+                  <option value="Q3 + Key Deal">Q3 + Davi key deal</option>
+                  <option value="Davi Key Deal">Davi key deal only</option>
                 </select>
                 <select value={dealConf} onChange={(e) => setDealConf(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit" }}>
                   <option value="all">All confidence</option>
