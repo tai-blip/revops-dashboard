@@ -1,10 +1,12 @@
-name: Daily RevOps data refresh (SFDC → Sheet)
+name: RevOps data refresh (SFDC → Sheet)
 
-# Runs all Salesforce → Google Sheet pulls daily and on-demand.
+# Core ARR/pipeline data refreshes HOURLY so the dashboard stays near-live.
+# The heavier weekly-cadence trackers + the Slack digest run ONCE a day (12:00 UTC)
+# so the ops tabs don't churn and the channel isn't spammed hourly.
 on:
   schedule:
-    - cron: "0 12 * * *"   # every day at 12:00 UTC (8pm Singapore). Adjust as needed.
-  workflow_dispatch: {}      # lets you run it manually from the Actions tab
+    - cron: "0 * * * *"    # every hour, on the hour (UTC)
+  workflow_dispatch: {}      # manual run from the Actions tab does the full set + digest
 
 jobs:
   refresh:
@@ -23,31 +25,45 @@ jobs:
       # (e.g. https://revops-dashboard.vercel.app). Set as a repo variable.
       DASH_API_URL: ${{ vars.DASH_API_URL }}
     steps:
+      # Daily gate: the once-a-day steps (ops trackers + digest) only run at 12:00 UTC
+      # or on a manual dispatch. Every other hour does just the core data refresh.
+      - id: gate
+        run: |
+          if [ "$(date -u +%H)" = "12" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "daily=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "daily=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
       - run: npm ci
+
+      # ---- hourly: core ARR / pipeline data ----
       - name: SF imports (Query 1/2 + LiveARR — replaces Coefficient)
         run: node scripts/refresh-sf-imports.mjs
       - name: ARR MoM (SFDC → Sheet)
         if: always()
         run: node scripts/refresh-arr-from-sfdc.mjs
-      - name: Lead-conversion compliance
-        if: always()
-        run: node scripts/refresh-lead-conversion.mjs
-      - name: Probability freshness
-        if: always()
-        run: node scripts/refresh-probability-freshness.mjs
-      - name: Opps without a contact
-        if: always()
-        run: node scripts/refresh-opps-without-contact.mjs
-      - name: AE annual attainment + potential
-        if: always()
-        run: node scripts/refresh-ae-annual-potential.mjs
       - name: Sheet health check
         if: always()
         run: node scripts/check-sheet.mjs
+
+      # ---- daily only (12:00 UTC): ops trackers + digest ----
+      - name: Lead-conversion compliance
+        if: ${{ always() && steps.gate.outputs.daily == 'true' }}
+        run: node scripts/refresh-lead-conversion.mjs
+      - name: Probability freshness
+        if: ${{ always() && steps.gate.outputs.daily == 'true' }}
+        run: node scripts/refresh-probability-freshness.mjs
+      - name: Opps without a contact
+        if: ${{ always() && steps.gate.outputs.daily == 'true' }}
+        run: node scripts/refresh-opps-without-contact.mjs
+      - name: AE annual attainment + potential
+        if: ${{ always() && steps.gate.outputs.daily == 'true' }}
+        run: node scripts/refresh-ae-annual-potential.mjs
       - name: RevOps Pulse — daily digest to Slack
-        if: always()
+        if: ${{ always() && steps.gate.outputs.daily == 'true' }}
         run: node scripts/post-revops-digest.mjs
