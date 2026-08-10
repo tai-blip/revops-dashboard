@@ -1,12 +1,14 @@
 name: RevOps data refresh (SFDC → Sheet)
 
-# Core ARR/pipeline data refreshes HOURLY so the dashboard stays near-live.
-# The heavier weekly-cadence trackers + the Slack digest run ONCE a day (12:00 UTC)
-# so the ops tabs don't churn and the channel isn't spammed hourly.
+# Core ARR/pipeline data refreshes every ~2.5 hours so the dashboard stays near-live.
+# The heavier weekly-cadence trackers + the Slack digest run ONCE a day (the 12:30 UTC
+# slot) so the ops tabs don't churn and the channel isn't spammed.
 on:
   schedule:
-    - cron: "0 * * * *"    # every hour, on the hour (UTC)
-  workflow_dispatch: {}      # manual run from the Actions tab does the full set + digest
+    - cron: "0 0,5,10,15,20 * * *"   # 00:00 05:00 10:00 15:00 20:00  (2.5h grid, on the hour)
+    - cron: "30 2,7,17,22 * * *"     # 02:30 07:30 17:30 22:30        (2.5h grid, half past)
+    - cron: "30 12 * * *"            # 12:30 — the once-a-day digest + ops-tracker run
+  workflow_dispatch: {}               # manual run does the full set + digest
 
 jobs:
   refresh:
@@ -25,15 +27,6 @@ jobs:
       # (e.g. https://revops-dashboard.vercel.app). Set as a repo variable.
       DASH_API_URL: ${{ vars.DASH_API_URL }}
     steps:
-      # Daily gate: the once-a-day steps (ops trackers + digest) only run at 12:00 UTC
-      # or on a manual dispatch. Every other hour does just the core data refresh.
-      - id: gate
-        run: |
-          if [ "$(date -u +%H)" = "12" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "daily=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "daily=false" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -41,7 +34,7 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # ---- hourly: core ARR / pipeline data ----
+      # ---- every 2.5h: core ARR / pipeline data ----
       - name: SF imports (Query 1/2 + LiveARR — replaces Coefficient)
         run: node scripts/refresh-sf-imports.mjs
       - name: ARR MoM (SFDC → Sheet)
@@ -51,19 +44,19 @@ jobs:
         if: always()
         run: node scripts/check-sheet.mjs
 
-      # ---- daily only (12:00 UTC): ops trackers + digest ----
+      # ---- once a day (12:30 UTC slot, or manual): ops trackers + digest ----
       - name: Lead-conversion compliance
-        if: ${{ always() && steps.gate.outputs.daily == 'true' }}
+        if: ${{ always() && (github.event.schedule == '30 12 * * *' || github.event_name == 'workflow_dispatch') }}
         run: node scripts/refresh-lead-conversion.mjs
       - name: Probability freshness
-        if: ${{ always() && steps.gate.outputs.daily == 'true' }}
+        if: ${{ always() && (github.event.schedule == '30 12 * * *' || github.event_name == 'workflow_dispatch') }}
         run: node scripts/refresh-probability-freshness.mjs
       - name: Opps without a contact
-        if: ${{ always() && steps.gate.outputs.daily == 'true' }}
+        if: ${{ always() && (github.event.schedule == '30 12 * * *' || github.event_name == 'workflow_dispatch') }}
         run: node scripts/refresh-opps-without-contact.mjs
       - name: AE annual attainment + potential
-        if: ${{ always() && steps.gate.outputs.daily == 'true' }}
+        if: ${{ always() && (github.event.schedule == '30 12 * * *' || github.event_name == 'workflow_dispatch') }}
         run: node scripts/refresh-ae-annual-potential.mjs
       - name: RevOps Pulse — daily digest to Slack
-        if: ${{ always() && steps.gate.outputs.daily == 'true' }}
+        if: ${{ always() && (github.event.schedule == '30 12 * * *' || github.event_name == 'workflow_dispatch') }}
         run: node scripts/post-revops-digest.mjs
