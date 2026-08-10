@@ -19,6 +19,7 @@ jobs:
       SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
       SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      DASH_API_URL: ${{ vars.DASH_API_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,6 +43,9 @@ jobs:
       - name: AE annual attainment + potential
         if: always()
         run: node scripts/refresh-ae-annual-potential.mjs
+      - name: Deal Tracker snapshot (replace)
+        if: always()
+        run: node scripts/build-deal-tracker.mjs
       - name: Sheet health check
         if: always()
         run: node scripts/check-sheet.mjs

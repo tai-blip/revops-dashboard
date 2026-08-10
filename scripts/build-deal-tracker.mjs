@@ -94,10 +94,24 @@ const nameMatch = (a, b) => { const x = norm(a), y = norm(b); if (!x || !y) retu
 
 const gAuth = new google.auth.JWT({ email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, key: Buffer.from(process.env.GOOGLE_PRIVATE_KEY_B64, "base64").toString("utf-8"), scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
 
+// Load the "deals that decide Q3" from the deployed dashboard API (CI) or a local
+// dev server. Set DASH_API_URL to the prod origin in CI; defaults to localhost.
+const API = (process.env.DASH_API_URL || "http://localhost:3000").replace(/\/+$/, "") + "/api/dashboard";
+async function loadDash() {
+  // Prefer a local snapshot if present (fast for manual dev runs), else fetch the API.
+  try { if (fs.existsSync("/tmp/dash.json")) return JSON.parse(fs.readFileSync("/tmp/dash.json", "utf-8")); } catch {}
+  for (let i = 1; i <= 3; i++) {
+    try { const r = await fetch(API, { signal: AbortSignal.timeout(25000) }); if (r.ok) return await r.json(); } catch (e) { console.log(`deal-tracker: fetch ${API} failed (${i}/3): ${e.message}`); }
+    if (i < 3) await new Promise((res) => setTimeout(res, 4000));
+  }
+  return null;
+}
+
 async function main() {
   const api = google.sheets({ version: "v4", auth: gAuth });
   const ID = process.env.GOOGLE_SHEET_ID;
-  const dash = JSON.parse(fs.readFileSync("/tmp/dash.json", "utf-8"));
+  const dash = await loadDash();
+  if (!dash || !dash.forecastTab) { console.log(`deal-tracker: no dashboard data (tried /tmp/dash.json + ${API}) — skipping.`); return; }
   const decide = dash.forecastTab?.decideDeals ?? [];
 
   // Merge: start from decide-Q3 (live SF pipeline), enrich with Davi's key-deal data.

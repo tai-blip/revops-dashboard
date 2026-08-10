@@ -519,6 +519,8 @@ export default function Dashboard() {
   const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
   const [dealAE, setDealAE] = useState<string>("all");
   const [dealSource, setDealSource] = useState<string>("all"); // all | q3 | key
+  const [dealConf, setDealConf] = useState<string>("all");
+  const [dealSearch, setDealSearch] = useState<string>("");
   const [dealCalls, setDealCalls] = useState<Record<string, "commit" | "best" | "pipeline" | "omit">>({});
 
   useEffect(() => {
@@ -2737,7 +2739,13 @@ export default function Dashboard() {
       {tab === "deals" && (() => {
         const all = data.dealTracker ?? [];
         const aes = ["all", ...Array.from(new Set(all.map((d) => d.ae).filter(Boolean)))];
-        const view = all.filter((d) => (dealAE === "all" || d.ae === dealAE) && (dealSource === "all" || (dealSource === "q3" ? d.source.startsWith("Q3") : /Key/i.test(d.source))));
+        const qq = dealSearch.trim().toLowerCase();
+        const view = all.filter((d) =>
+          (dealAE === "all" || d.ae === dealAE) &&
+          (dealSource === "all" || (dealSource === "q3" ? d.source.startsWith("Q3") : /Key/i.test(d.source))) &&
+          (dealConf === "all" || d.conf === dealConf) &&
+          (!qq || (d.name + " " + d.ae + " " + d.nextStep).toLowerCase().includes(qq))
+        );
         const totalPot = view.reduce((s, d) => s + d.pot, 0);
         const confTone: Record<string, { bg: string; fg: string }> = {
           Medium: { bg: C.grnBg, fg: C.grn }, Pilot: { bg: C.blueBg, fg: C.blue },
@@ -2763,6 +2771,11 @@ export default function Dashboard() {
                   <option value="q3">Q3 pipeline (deals that decide Q3)</option>
                   <option value="key">Davi's key deals</option>
                 </select>
+                <select value={dealConf} onChange={(e) => setDealConf(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit" }}>
+                  <option value="all">All confidence</option>
+                  {["Medium", "Pilot", "Hard", "Very Hard"].map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <input value={dealSearch} onChange={(e) => setDealSearch(e.target.value)} placeholder="Search deal / AE / note…" style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit", minWidth: 180 }} />
                 <span style={{ fontSize: 13, color: C.t2 }}>{view.length} deals · <b>{fmt(totalPot)}</b> potential</span>
                 <a href={sheetUrl} target="_blank" rel="noreferrer" style={{ marginLeft: "auto", fontSize: 13, color: C.blue, fontWeight: 600, textDecoration: "none" }}>Edit in Google Sheets ↗</a>
               </div>
