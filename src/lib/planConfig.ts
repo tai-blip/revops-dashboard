@@ -67,5 +67,11 @@ export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; q
   { name: "David Dubinski", short: "Davi", quotaQ3: 0, quotaAnnual: null, am: false, lead: true },
 ];
 
+// AEs excluded from the FORECAST tab only (not AE Attainment). Dorsa has no AE/AM %
+// on her open opps, so her Potential computes to $0 while her quota still counts —
+// which drags the Q3 team projection below quota artificially. Excluded until her
+// pipeline is forecasted. Scoped to the Forecast tab (Quarterly + Yearly).
+export const FORECAST_EXCLUDE = new Set<string>(["Dorsa Mahmoudnia"]);
+
 export const CURRENT_LIVE_ARR_FALLBACK = 5690808;
 

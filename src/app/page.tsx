@@ -19,6 +19,7 @@ import {
   SALES_Q,
   currentSalesQ,
   monthsInQuarter,
+  FORECAST_EXCLUDE,
 } from "@/lib/planConfig";
 import type { ArrPoint } from "@/lib/parse";
 import { AE_PLAN } from "@/lib/aePlan";
@@ -2380,6 +2381,7 @@ export default function Dashboard() {
         const annY = data.aeAnnual;
         const fByName = Object.fromEntries(F.rows.map((r) => [r.name, r]));
         const annYReps = [...(annY?.reps ?? [])]
+          .filter((r) => !FORECAST_EXCLUDE.has(r.name))
           .map((r) => {
             const fr = fByName[r.name];
             const pot = fr ? openPot(fr, true) : r.potTotal;

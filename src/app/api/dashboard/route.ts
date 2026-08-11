@@ -38,6 +38,7 @@ import {
   SALES_Q,
   currentSalesQ,
   AE_ROSTER,
+  FORECAST_EXCLUDE,
   ANNUAL_END_TARGET,
   CURRENT_LIVE_ARR_FALLBACK,
   TARGETS,
@@ -124,7 +125,7 @@ export async function GET() {
     const q = currentSalesQ();
     const qDef = SALES_Q[q];
     const latestArr = arr.monthly[arr.monthly.length - 1]?.activeARR ?? CURRENT_LIVE_ARR_FALLBACK;
-    const roster = AE_ROSTER.map((a) => ({
+    const roster = AE_ROSTER.filter((a) => !FORECAST_EXCLUDE.has(a.name)).map((a) => ({
       name: a.name,
       short: a.short,
       quota: a.quotaQ3,
