@@ -607,7 +607,7 @@ export default function Dashboard() {
     if (!data) return [];
     if (!data.arrMom || !data.arrMom.length) return data.arr.monthly;
     const byLabel = new Map(data.arr.monthly.map((m) => [m.label, m]));
-    return data.arrMom.map((p) => {
+    const pts = data.arrMom.map((p) => {
       const m = byLabel.get(p.label);
       return {
         label: p.label,
@@ -626,6 +626,16 @@ export default function Dashboard() {
         msTarget: m?.msTarget ?? 0,
       };
     });
+    // The current calendar month's Rule A value is a month-END projection (subtracts the
+    // month's upcoming term-ends, so it reads as a drop). Anchor the current-month point on
+    // the true as-of-today Live ARR so the chart endpoint matches the headline ($5.79M).
+    const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+    const ci = pts.findIndex((p) => p.label === nowKey);
+    if (ci >= 0 && data.liveArrToday != null) {
+      const prev = pts[ci - 1];
+      pts[ci] = { ...pts[ci], activeARR: data.liveArrToday, changePct: prev && prev.activeARR > 0 ? (data.liveArrToday - prev.activeARR) / prev.activeARR : pts[ci].changePct };
+    }
+    return pts;
   }, [data]);
 
   // Pipeline created within Q3 FY26, per AE — sourced from the Pipeline-WoW tab's
@@ -696,9 +706,12 @@ export default function Dashboard() {
     // projects its month-end active ARR (subtracting upcoming churn), so on the 1st it
     // looks like ARR fell and New ARR reads $0. Prefer the latest month before this one.
     const complete = months.filter((m) => m.label < nowKey);
+    const prevMonth = complete[complete.length - 1]; // last complete month (for MoM base)
+    // Current month = this calendar month (labels the "(mo)" tiles correctly). Its Live ARR
+    // is taken as-of-today (arrNow below), not the month-end projection.
     const currentMonth =
-      complete[complete.length - 1] ??
       months.find((m) => m.label === nowKey) ??
+      complete[complete.length - 1] ??
       notFuture[notFuture.length - 1] ??
       latest;
     // Live ARR = current-month Total ARR from the "ARR MoM Progression" tab (the
@@ -713,7 +726,12 @@ export default function Dashboard() {
     // Live ARR = true active book AS OF TODAY (not the current-month month-end projection,
     // which subtracts the whole month's upcoming expirations and looks like a drop).
     const arrNow = data.liveArrToday ?? (arrMomCur ? arrMomCur.totalARR : currentMonth?.activeARR ?? 0);
-    const curMoM = arrMomCur ? arrMomCur.momGrowth / 100 : currentMonth?.changePct ?? null;
+    // MoM = as-of-today Live ARR vs last complete month's active ARR (not the current-month
+    // month-end projection, which read as a false drop).
+    const curMoM =
+      data.liveArrToday != null && prevMonth && prevMonth.activeARR > 0
+        ? (data.liveArrToday - prevMonth.activeARR) / prevMonth.activeARR
+        : arrMomCur ? arrMomCur.momGrowth / 100 : currentMonth?.changePct ?? null;
     const gap = 10000000 - arrNow;
 
     // Q3 pipe generation vs quota vs time elapsed. Team gen sums the same AE rows the
