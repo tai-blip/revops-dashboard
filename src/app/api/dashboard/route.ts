@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSheetValues } from "@/lib/sheets";
+import { getSheetValuesBatch } from "@/lib/sheets";
 import {
   parseArrMomProgressionTab,
   parseArrMomRebuildTab,
@@ -60,35 +60,33 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
+    // ONE batched Sheets read for every tab (values.batchGet) — see getSheetValuesBatch.
+    // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
+    // quota under concurrent traffic; batching collapses it to ~2 reads per load.
+    // NOTE: order here MUST match the destructured variables below.
     const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows] =
-      await Promise.all([
-        getSheetValues("ARR_WoW_Rebuild", "A1:J30").catch(() => [] as (string | number | null)[][]),
-        // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
-        // tolerated here only as a fallback if it's ever restored.
-        getSheetValues("ARR MoM Progression", "A1:D400").catch(() => [] as (string | number | null)[][]),
-        // "AE Attainment (Official)" = leadership's exact filter (New Business,
-        // Stage Billing/Closed Won, by Contract Live Date, excl Sri/Jesse). Replaces
-        // the old "AE attainment" tab, which keyed on Status and missed Billing-stage
-        // New Business deals (e.g. Yoshinoya), understating reps' Q3 numbers.
-        getSheetValues("AE Attainment (Official)"),
-        getSheetValues("Pipeline"),
-        getSheetValues("Pipeline - WoW", "A1:BI400"),
-        getSheetValues("Query 1", "A1:Z1000"),
-        getSheetValues("Query 2", "A1:Z2000"),
-        getSheetValues("Forecasting", "A1:T45"),
-        // Daily SFDC pull (all closed deals + dimensions) — powers ACV & Deal Size.
-        // Tolerate absence so the dashboard still loads if the pull hasn't run.
-        getSheetValues("SOQL_ClosedDeals", "A1:V4000").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("ARR_MoM_Rebuild", "A1:W400").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("ACV_MoM", "A1:AZ20").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("ARR_per_Location_MoM", "A1:K20").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("SOQL_PaymentMix", "A1:M2000").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("AE_Annual_Potential", "A1:L30").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("Top_Booked_ARR", "A1:F12").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("ARR_Forward", "A1:E24").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("Deal Tracker (DRAFT)", "A1:K200").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("Cash_Forecast", "A1:H4000").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("ARR_Funnel", "A1:P4000").catch(() => [] as (string | number | null)[][]),
+      await getSheetValuesBatch([
+        { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
+        // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
+        { tab: "ARR MoM Progression", range: "A1:D400" },
+        // "AE Attainment (Official)" = leadership's exact filter (New Business, Billing/Closed Won, by Contract Live Date, excl Sri/Jesse).
+        { tab: "AE Attainment (Official)" },
+        { tab: "Pipeline" },
+        { tab: "Pipeline - WoW", range: "A1:BI400" },
+        { tab: "Query 1", range: "A1:Z1000" },
+        { tab: "Query 2", range: "A1:Z2000" },
+        { tab: "Forecasting", range: "A1:T45" },
+        { tab: "SOQL_ClosedDeals", range: "A1:V4000" },
+        { tab: "ARR_MoM_Rebuild", range: "A1:W400" },
+        { tab: "ACV_MoM", range: "A1:AZ20" },
+        { tab: "ARR_per_Location_MoM", range: "A1:K20" },
+        { tab: "SOQL_PaymentMix", range: "A1:M2000" },
+        { tab: "AE_Annual_Potential", range: "A1:L30" },
+        { tab: "Top_Booked_ARR", range: "A1:F12" },
+        { tab: "ARR_Forward", range: "A1:E24" },
+        { tab: "Deal Tracker (DRAFT)", range: "A1:K200" },
+        { tab: "Cash_Forecast", range: "A1:H4000" },
+        { tab: "ARR_Funnel", range: "A1:P4000" },
       ]);
 
     // ARR (monthly + weekly) is now built entirely from the full-book Rule A rebuild —
