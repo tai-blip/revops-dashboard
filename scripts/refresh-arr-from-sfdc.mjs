@@ -213,6 +213,22 @@ async function main() {
     ]);
   }
 
+  // 5c) ARR_Funnel — the three-tier ARR funnel (Booked = Trial/pilot, Contracted = final
+  //     order signed, Live = live-paying) with each deal's tier-transition dates, so the
+  //     dashboard can plot both a cumulative funnel and a point-in-time stock MoM series.
+  const funnelRecs = await sfQueryAll(instance, token,
+    `SELECT Owner.Name, Name, StageName, Status__c, convertCurrency(AnnualContractValueARR__c) arrUsd, Date_Reached_Trial__c, ContractSignedDate__c, Live_Paying_Date__c, Date_Reached_Closed_Lost__c, ContractEndDate__c FROM Opportunity WHERE Date_Reached_Trial__c != null OR ContractSignedDate__c != null OR Live_Paying_Date__c != null`);
+  const funnel = [[
+    "Owner","Opportunity","Stage","Status","ARR (USD)","TrialDate","SignedDate","LivePayingDate","LostDate","EndDate",
+  ]];
+  for (const x of funnelRecs) {
+    funnel.push([
+      x.Owner?.Name ?? "", x.Name ?? "", x.StageName ?? "", x.Status__c ?? "",
+      x.arrUsd ?? 0, x.Date_Reached_Trial__c ?? "", x.ContractSignedDate__c ?? "", x.Live_Paying_Date__c ?? "",
+      x.Date_Reached_Closed_Lost__c ?? "", x.ContractEndDate__c ?? "",
+    ]);
+  }
+
   // 6) ARR_MoM_Rebuild matrix (boundary = 1st of next month = $B+1)
   //    + churn (org's own marker: Status "Contracts Ended (Churned)", ending that month)
   //    + active-ARR split by RecordType (New Business / Renewals / Expansion; K+L+M ≈ C)
@@ -474,7 +490,7 @@ async function main() {
   const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "sheets.properties(sheetId,title)" });
   const byTitle = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
   const reqs = [];
-  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR","ARR_Forward","Cash_Forecast"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
+  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR","ARR_Forward","Cash_Forecast","ARR_Funnel"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
   reqs.push(
     { addSheet: { properties: { title: "SOQL_Pull" } } },
     { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 24 } } } },
@@ -487,6 +503,7 @@ async function main() {
     { addSheet: { properties: { title: "Top_Booked_ARR", gridProperties: { rowCount: 20, columnCount: 6 } } } },
     { addSheet: { properties: { title: "ARR_Forward", gridProperties: { rowCount: 24, columnCount: 6 } } } },
     { addSheet: { properties: { title: "Cash_Forecast", gridProperties: { rowCount: cashFc.length + 10, columnCount: 8 } } } },
+    { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 10 } } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   // Collapse all tab writes into TWO batched calls (one per valueInputOption) instead of
@@ -509,6 +526,7 @@ async function main() {
       { range: "SOQL_PaymentMix!A1", values: pmix },
       { range: "Top_Booked_ARR!A1", values: topBooked },
       { range: "Cash_Forecast!A1", values: cashFc },
+      { range: "ARR_Funnel!A1", values: funnel },
     ],
   } });
   // RAW so month labels ("2026-08", "Aug 2026") stay TEXT — USER_ENTERED would coerce them to dates.

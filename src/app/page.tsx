@@ -42,6 +42,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
+  arrFunnel?: { cumulative: { ym: string; label: string; booked: number; contracted: number; live: number }[]; stock: { ym: string; label: string; booked: number; contracted: number; live: number }[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -522,6 +523,7 @@ export default function Dashboard() {
   const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
   const [inclSql, setInclSql] = useState<boolean>(true); // Forecast Potential: include SQL-stage deals?
   const [cashAE, setCashAE] = useState<string>("all");
+  const [funnelModel, setFunnelModel] = useState<"cumulative" | "stock">("cumulative");
   const [dealAE, setDealAE] = useState<string>("all");
   const [dealConf, setDealConf] = useState<string>("all");
   const [dealSearch, setDealSearch] = useState<string>("");
@@ -2685,6 +2687,91 @@ export default function Dashboard() {
         const short = (s: string) => (s || "").split(" ")[0];
         return (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+            {/* ARR Funnel — Booked (pilot) → Contracted (signed, not live) → Live (paying), MoM, two models */}
+            {data.arrFunnel && data.arrFunnel.cumulative.length > 0 && (() => {
+              const AF = data.arrFunnel;
+              const series = funnelModel === "cumulative" ? AF.cumulative : AF.stock;
+              const cur = series[series.length - 1] ?? { booked: 0, contracted: 0, live: 0 };
+              const maxV = Math.max(1, ...series.map((p) => Math.max(p.booked, p.contracted, p.live)));
+              const W = 920, H = 240, padL = 58, padR = 16, padT = 16, padB = 30;
+              const iw = W - padL - padR, ih = H - padT - padB;
+              const xx = (i: number) => padL + (series.length <= 1 ? iw / 2 : (i / (series.length - 1)) * iw);
+              const yy = (v: number) => padT + ih - (v / (maxV * 1.08)) * ih;
+              const LINES = [
+                { key: "booked" as const, label: "Booked (pilot · Trial)", color: C.gold },
+                { key: "contracted" as const, label: "Contracted (signed, not live)", color: C.blue },
+                { key: "live" as const, label: "Live ARR (paying)", color: C.grn },
+              ];
+              const path = (key: "booked" | "contracted" | "live") => series.map((p, i) => `${i === 0 ? "M" : "L"}${xx(i).toFixed(1)} ${yy(p[key]).toFixed(1)}`).join(" ");
+              const every = Math.ceil(series.length / 12) || 1;
+              const ticks = [0, 0.5, 1].map((f) => f * maxV * 1.08);
+              const kM = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : "$" + Math.round(n / 1e3) + "k");
+              return (
+                <Card
+                  title="ARR Funnel — Booked → Contracted → Live (MoM)"
+                  sub={funnelModel === "cumulative"
+                    ? "Cumulative — running total of ARR that has reached each milestone by month-end: Booked by Trial date, Contracted by Contract Signed date, Live by Live Paying date. Note: pilots are optional (many deals skip Trial), so Booked can sit below Contracted / Live; Live here is lifetime gross (churn not netted)."
+                    : "Point-in-time — ARR sitting IN each tier at month-end: in pilot (Trial), signed-but-not-yet-paying (R&R/timing), and live-paying (churn excluded). Booked & Contracted convert into Live over time. Live here is by actual Live Paying date, so it runs below the date-based headline Live ARR."}
+                  accent={C.navy}
+                >
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 2px" }}>
+                    <div style={{ display: "inline-flex", background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 3 }}>
+                      {([["cumulative", "Cumulative"], ["stock", "Point-in-time"]] as const).map(([k, lbl]) => (
+                        <button key={k} onClick={() => setFunnelModel(k)}
+                          style={{ border: "none", cursor: "pointer", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                            background: funnelModel === k ? "#fff" : "transparent", color: funnelModel === k ? C.t1 : C.t3,
+                            boxShadow: funnelModel === k ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>{lbl}</button>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 16, marginLeft: "auto", flexWrap: "wrap" }}>
+                      {LINES.map((l) => (
+                        <span key={l.key} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.t2 }}>
+                          <span style={{ width: 12, height: 3, background: l.color, borderRadius: 2 }} />{l.label} <b style={{ color: l.color, fontFamily: "var(--font-dm-mono)" }}>{fmt(cur[l.key])}</b>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ padding: "6px 12px 4px", overflowX: "auto" }}>
+                    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: W, display: "block" }}>
+                      {ticks.map((t, i) => (
+                        <g key={i}>
+                          <line x1={padL} y1={yy(t)} x2={W - padR} y2={yy(t)} stroke={C.s1} strokeWidth={1} />
+                          <text x={padL - 8} y={yy(t) + 4} textAnchor="end" fontSize={11} fill={C.t3} fontFamily="var(--font-dm-mono)">{kM(t)}</text>
+                        </g>
+                      ))}
+                      {series.map((p, i) => i % every === 0 ? (
+                        <text key={i} x={xx(i)} y={H - 10} textAnchor="middle" fontSize={11} fill={C.t3}>{p.label}</text>
+                      ) : null)}
+                      {LINES.map((l) => <path key={l.key} d={path(l.key)} fill="none" stroke={l.color} strokeWidth={2.5} strokeLinejoin="round" />)}
+                      {LINES.map((l) => <circle key={l.key} cx={xx(series.length - 1)} cy={yy(cur[l.key])} r={3.5} fill={l.color} />)}
+                    </svg>
+                  </div>
+                  <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>Contracted</Th><Th>Live ARR</Th><Th>Live MoM</Th>
+                      </tr></thead>
+                      <tbody>
+                        {series.map((p, i) => {
+                          const prev = series[i - 1];
+                          const dLive = prev ? p.live - prev.live : null;
+                          return (
+                            <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === series.length - 1 ? C.s2 : undefined }}>
+                              <Td l bold>{p.label}</Td>
+                              <Td mono color={C.gold}>{p.booked > 0 ? fmt(p.booked) : "—"}</Td>
+                              <Td mono color={C.blue}>{p.contracted > 0 ? fmt(p.contracted) : "—"}</Td>
+                              <Td mono bold color={C.grn}>{p.live > 0 ? fmt(p.live) : "—"}</Td>
+                              <Td mono color={dLive == null ? C.t3 : dLive >= 0 ? C.grn : C.red}>{dLive == null ? "—" : (dLive >= 0 ? "+" : "") + fmt(dLive)}</Td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              );
+            })()}
+            <div style={{ height: 16 }} />
             {/* ARR Composition — Live vs Booked (item 1) + Churn + MoM breakdown + top-5 booked (item 2) */}
             {data.arr && (() => {
               const cf = data.cashForecast;

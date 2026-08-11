@@ -33,6 +33,7 @@ import {
   computeBookingReport,
   computeSignedLiveForecast,
   computeCashForecast,
+  computeArrFunnel,
 } from "@/lib/deals";
 import {
   SALES_Q,
@@ -59,7 +60,7 @@ export async function GET() {
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
   try {
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows] =
       await Promise.all([
         getSheetValues("ARR_WoW_Rebuild", "A1:J30").catch(() => [] as (string | number | null)[][]),
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) —
@@ -87,6 +88,7 @@ export async function GET() {
         getSheetValues("ARR_Forward", "A1:E24").catch(() => [] as (string | number | null)[][]),
         getSheetValues("Deal Tracker (DRAFT)", "A1:K200").catch(() => [] as (string | number | null)[][]),
         getSheetValues("Cash_Forecast", "A1:H4000").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_Funnel", "A1:J4000").catch(() => [] as (string | number | null)[][]),
       ]);
 
     // ARR (monthly + weekly) is now built entirely from the full-book Rule A rebuild —
@@ -194,6 +196,7 @@ export async function GET() {
     const bookingReport = computeBookingReport(closedDealsRows);
     const signedLive = computeSignedLiveForecast(closedDealsRows, qDef.start, qDef.end);
     const cashForecast = computeCashForecast(cashForecastRows);
+    const arrFunnel = computeArrFunnel(arrFunnelRows);
     const paymentMix = computePaymentMix(paymentMixRows);
 
     // Who Does What — open deals grouped by owner, flagged if stale (>60d since last stage change)
@@ -242,6 +245,7 @@ export async function GET() {
       bookingReport,
       signedLive,
       cashForecast,
+      arrFunnel,
       dealTracker,
       topBooked,
       arrForward,
