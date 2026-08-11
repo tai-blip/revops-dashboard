@@ -518,7 +518,11 @@ async function main() {
       { range: "SOQL_Pull!A1", values: pull },
       { range: "SOQL_ClosedDeals!A1", values: closed },
       { range: "ARR_MoM_Rebuild!A1", values: mom },
-      { range: "ARR_MoM_Rebuild!V1", values: [["Live ARR (as of today)", `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=TODAY())*(SOQL_Pull!$E$2:$E$${LAST}>TODAY())*SOQL_Pull!$C$2:$C$${LAST})`]] },
+      // Live ARR (as of today) = contract-live by date, MINUS Contracts Ended (Churned).
+      // The churn exclusion (col G) ties to finance's Quarterly Trend export (~$5.78M);
+      // without it a pure date rule counts churned contracts whose end date was never
+      // backdated. (Folded in from the fix-live-arr-status-filter work.)
+      { range: "ARR_MoM_Rebuild!V1", values: [["Live ARR (as of today)", `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=TODAY())*(SOQL_Pull!$E$2:$E$${LAST}>TODAY())*(SOQL_Pull!$G$2:$G$${LAST}<>"Contracts Ended (Churned)")*SOQL_Pull!$C$2:$C$${LAST})`]] },
       { range: "ARR_WoW_Rebuild!A1", values: wow },
       { range: "ARR_MoM_Segments!A1", values: seg },
       { range: "ACV_MoM!A1", values: acvTab },
