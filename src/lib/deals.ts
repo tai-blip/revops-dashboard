@@ -89,60 +89,48 @@ export function computeSignedLiveForecast(rows: Row[], qStart: string, qEnd: str
   return { byOwner, total };
 }
 
-// Cash-timing (Sai's lens). Two per-month series from SOQL_ClosedDeals:
-//   • Actual cash arriving  = ARR of already live-paying contracts, bucketed by the
-//     month of ContractLiveDate ("current revenue arriving into the account").
-//   • Forecast potential cash = signed-but-not-live deals (Stage Closed Won/Billing,
-//     Status NOT live-paying and NOT churned) land as cash at their live date + 45 days.
-//     Rip & Replace / LOC deals use Contract_Live_Date_Rip_Replace_LOC__c + 45 instead.
-// Returns deal-level events (so the UI can filter by AE) plus the ordered month window.
-const CF_LIVE_PAYING = new Set(["[LP] Live Paying", "[LP] Live Paying (Monthly)"]);
-const CF_FORECAST_EXCLUDE = new Set(["[LP] Live Paying", "[LP] Live Paying (Monthly)", "Contracts Ended (Churned)"]);
-export type CashFlowEvent = { owner: string; name: string; ym: string; kind: "actual" | "forecast"; arr: number };
-export type CashFlowResult = { months: { ym: string; label: string }[]; events: CashFlowEvent[]; owners: string[] };
-export function computeCashFlowByMonth(rows: Row[], monthsBack = 6, monthsFwd = 6): CashFlowResult {
-  const empty: CashFlowResult = { months: [], events: [], owners: [] };
+// Cash-flow FORECAST (Sai's lens) from the isolated Cash_Forecast tab. Deals that are
+// signed/committed but not yet paying — Stage in {Closed Won, Billing, Trial}, no Live
+// Paying Date, status not churned/paused — are forecast to turn into cash at their live
+// date + 45 days. Rip & Replace/LOC deals anchor
+// on Contract_Live_Date_Rip_Replace_LOC__c + 45 instead, and are tagged kind:"rr" so the
+// UI can break them out. Already-paying deals (Live Paying Date set) are Live ARR, not here.
+// Returns deal-level events (UI filters/aggregates by AE, month, and RR-vs-standard).
+const CF_STAGES = new Set(["Closed Won", "Billing", "Trial"]);
+const CF_EXCLUDE_STATUS = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
+export type CashForecastEvent = { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" };
+export type CashForecast = { events: CashForecastEvent[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
+export function computeCashForecast(rows: Row[]): CashForecast {
+  const empty: CashForecast = { events: [], owners: [], total: 0, rrTotal: 0, stdTotal: 0 };
   if (!rows || rows.length < 2) return empty;
   const h = rows[0].map((x) => String(x ?? "").toLowerCase());
   const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
   const cStage = ci("Stage"), cStatus = ci("Status"), cArr = ci("ARR (USD)"),
-    cLive = ci("ContractLiveDate"), cRR = ci("RR LOC Date"), cOwner = ci("Owner"), cOpp = ci("Opportunity");
-  if (cStage < 0 || cStatus < 0 || cArr < 0 || cLive < 0) return empty;
-
-  // Month window centered on the current month.
-  const now = new Date();
-  const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const months: { ym: string; label: string }[] = [];
-  for (let i = -monthsBack; i <= monthsFwd; i++) {
-    const d = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + i, 1));
-    months.push({ ym: d.toISOString().slice(0, 7), label: d.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }) });
-  }
-  const winSet = new Set(months.map((m) => m.ym));
+    cLive = ci("ContractLiveDate"), cRR = ci("RR LOC Date"), cLPD = ci("Live Paying Date"),
+    cOwner = ci("Owner"), cOpp = ci("Opportunity");
+  if (cStage < 0 || cArr < 0 || cLive < 0 || cLPD < 0) return empty;
   const ymOf = (d: Date) => d.toISOString().slice(0, 7);
   const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86400000);
 
-  const events: CashFlowEvent[] = [];
+  const events: CashForecastEvent[] = [];
   const owners = new Set<string>();
+  let rrTotal = 0, stdTotal = 0;
   for (const r of rows.slice(1)) {
-    const stage = String(r[cStage] ?? ""), status = String(r[cStatus] ?? "");
+    if (!CF_STAGES.has(String(r[cStage] ?? ""))) continue;              // Closed Won + Billing + Trial
+    if (CF_EXCLUDE_STATUS.has(String(r[cStatus] ?? ""))) continue;       // drop churned/paused
+    if (sheetsSerialToDate(r[cLPD])) continue;                          // already has a Live Paying Date → paying, not a forecast
     const arr = Number(r[cArr] ?? 0);
     if (!(arr > 0)) continue;
+    const rr = cRR >= 0 ? sheetsSerialToDate(r[cRR]) : null;
+    const anchor = rr ?? sheetsSerialToDate(r[cLive]);                   // Rip & Replace/LOC date wins
+    if (!anchor) continue;
+    const kind: "rr" | "std" = rr ? "rr" : "std";
     const owner = String(r[cOwner] ?? ""), name = cOpp >= 0 ? String(r[cOpp] ?? "") : "";
-    const live = sheetsSerialToDate(r[cLive]);
-    if (CF_LIVE_PAYING.has(status) && live) {
-      const ym = ymOf(live);
-      if (winSet.has(ym)) { events.push({ owner, name, ym, kind: "actual", arr }); owners.add(owner); }
-    }
-    if (/Billing|Closed Won/i.test(stage) && !CF_FORECAST_EXCLUDE.has(status)) {
-      const rr = cRR >= 0 ? sheetsSerialToDate(r[cRR]) : null;
-      const anchor = rr ?? live; // Rip & Replace/LOC date wins when present
-      if (anchor) {
-        const ym = ymOf(addDays(anchor, 45));
-        if (winSet.has(ym)) { events.push({ owner, name, ym, kind: "forecast", arr }); owners.add(owner); }
-      }
-    }
+    events.push({ owner, name, ym: ymOf(addDays(anchor, 45)), arr, kind });
+    owners.add(owner);
+    if (kind === "rr") rrTotal += arr; else stdTotal += arr;
   }
-  return { months, events, owners: [...owners].filter(Boolean).sort() };
+  return { events, owners: [...owners].filter(Boolean).sort(), total: rrTotal + stdTotal, rrTotal, stdTotal };
 }
 
 // --- Header-based column resolution -------------------------------------------
