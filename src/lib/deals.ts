@@ -178,10 +178,14 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
 
   const now = new Date();
   const cur = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const todayISO = now.toISOString().slice(0, 10);
   const stock: FunnelPoint[] = [];
-  // Fixed window: Jan 2026 → current month.
+  // Fixed window: Jan 2026 → current month. Past months snapshot at month-end; the CURRENT
+  // (incomplete) month snapshots as-of-today, so contracts whose term ends later this month
+  // aren't pre-dropped while they're still live — and it ties to finance's today snapshot.
   for (let m = new Date(Date.UTC(2026, 0, 1)); m <= cur; m = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1))) {
-    const me = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 0)).toISOString().slice(0, 10); // month-end
+    const isCurrent = m.getUTCFullYear() === cur.getUTCFullYear() && m.getUTCMonth() === cur.getUTCMonth();
+    const me = isCurrent ? todayISO : new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 0)).toISOString().slice(0, 10); // as-of-today for current month, else month-end
     const ym = m.toISOString().slice(0, 7);
     const label = m.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
     const before = (d: string) => d !== "" && d <= me;   // happened on/before month-end
