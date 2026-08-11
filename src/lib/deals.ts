@@ -143,7 +143,7 @@ export function computeCashForecast(rows: Row[]): CashForecast {
 // by whether payment has started. Window is fixed Jan-2026 → current month. Also returns
 // the current-snapshot list of deals sitting in the Contracted state.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
-export type FunnelPoint = { ym: string; label: string; booked: number; contracted: number; live: number };
+export type FunnelPoint = { ym: string; label: string; booked: number; contracted: number; live: number; churn: number };
 export type ContractedDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string };
 export type ArrFunnel = { stock: FunnelPoint[]; contractedDeals: ContractedDeal[] };
 export function computeArrFunnel(rows: Row[]): ArrFunnel {
@@ -187,16 +187,18 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
     const isCurrent = m.getUTCFullYear() === cur.getUTCFullYear() && m.getUTCMonth() === cur.getUTCMonth();
     const me = isCurrent ? todayISO : new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 0)).toISOString().slice(0, 10); // as-of-today for current month, else month-end
     const ym = m.toISOString().slice(0, 7);
+    const first = m.toISOString().slice(0, 10); // first of month
     const label = m.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
     const before = (d: string) => d !== "" && d <= me;   // happened on/before month-end
     const after = (d: string) => d === "" || d > me;      // not yet, as of month-end
-    let sB = 0, sC = 0, sL = 0;
+    let sB = 0, sC = 0, sL = 0, sChurn = 0;
     for (const d of deals) {
       if (before(d.trial) && after(d.signed) && after(d.livePay) && after(d.lost)) sB += d.arr;                        // in Trial
       if (d.signed_stage && before(d.liveDate) && after(d.livePay) && after(d.end) && after(d.lost) && !d.churn) sC += d.arr; // contract-live, not paying
       if (d.signed_stage && before(d.livePay) && after(d.end) && !d.churn) sL += d.arr;                                // paying
+      if (d.churn && d.end >= first && d.end <= me) sChurn += d.arr;                                                   // churned/paused, contract ended this month
     }
-    stock.push({ ym, label, booked: sB, contracted: sC, live: sL });
+    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn });
   }
 
   // Current snapshot: deals sitting in the Contracted state right now (contract-live, not paying).

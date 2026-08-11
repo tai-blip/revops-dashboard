@@ -42,7 +42,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -2738,7 +2738,7 @@ export default function Dashboard() {
                   <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>Contracted</Th><Th>Live ARR</Th><Th>Live MoM</Th>
+                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>Contracted</Th><Th>Live ARR</Th><Th>Live MoM</Th><Th>Churn</Th>
                       </tr></thead>
                       <tbody>
                         {series.map((p, i) => {
@@ -2751,6 +2751,7 @@ export default function Dashboard() {
                               <Td mono color={C.blue}>{p.contracted > 0 ? fmt(p.contracted) : "—"}</Td>
                               <Td mono bold color={C.grn}>{p.live > 0 ? fmt(p.live) : "—"}</Td>
                               <Td mono color={dLive == null ? C.t3 : dLive >= 0 ? C.grn : C.red}>{dLive == null ? "—" : (dLive >= 0 ? "+" : "") + fmt(dLive)}</Td>
+                              <Td mono color={p.churn > 0 ? C.red : C.t3}>{p.churn > 0 ? "−" + fmt(p.churn) : "—"}</Td>
                             </tr>
                           );
                         })}
