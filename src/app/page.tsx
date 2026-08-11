@@ -2738,7 +2738,7 @@ export default function Dashboard() {
                   <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>Contracted</Th><Th>Live ARR</Th><Th>Live MoM</Th><Th>Churn</Th>
+                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>Contracted</Th><Th>Live ARR</Th><Th>Churn</Th><Th>MoM</Th>
                       </tr></thead>
                       <tbody>
                         {series.map((p, i) => {
@@ -2750,8 +2750,8 @@ export default function Dashboard() {
                               <Td mono color={C.gold}>{p.booked > 0 ? fmt(p.booked) : "—"}</Td>
                               <Td mono color={C.blue}>{p.contracted > 0 ? fmt(p.contracted) : "—"}</Td>
                               <Td mono bold color={C.grn}>{p.live > 0 ? fmt(p.live) : "—"}</Td>
-                              <Td mono color={dLive == null ? C.t3 : dLive >= 0 ? C.grn : C.red}>{dLive == null ? "—" : (dLive >= 0 ? "+" : "") + fmt(dLive)}</Td>
                               <Td mono color={p.churn > 0 ? C.red : C.t3}>{p.churn > 0 ? "−" + fmt(p.churn) : "—"}</Td>
+                              <Td mono color={dLive == null ? C.t3 : dLive >= 0 ? C.grn : C.red}>{dLive == null ? "—" : (dLive >= 0 ? "+" : "") + fmt(dLive)}</Td>
                             </tr>
                           );
                         })}
