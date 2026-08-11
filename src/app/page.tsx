@@ -1251,12 +1251,20 @@ export default function Dashboard() {
               const churnMo = lastComplete?.churnedARR ?? 0;
               const liveArr = data.liveArrToday ?? 0;
               const booked = liveArr + br.total;
-              const anchor = lastComplete?.activeARR ?? liveArr;
+              // Anchor the current book + forward projection on the churned-excluded,
+              // as-of-today Live ARR (the "most relevant" number that ties to finance and
+              // matches the headline) rather than the date-based month-end. History stays
+              // date-based; only the latest actual point is swapped to the live-paying book.
+              const anchor = liveArr || (lastComplete?.activeARR ?? 0);
               type MPt = { label: string; newBusiness: number; expansion: number; churn: number; liveARR: number | null; bookedARR: number; forecast: boolean };
-              const histPts: MPt[] = hist.map((m) => ({
-                label: mLabel(m.label), newBusiness: m.newBusiness, expansion: m.expansion,
-                churn: m.churnedARR, liveARR: m.activeARR, bookedARR: m.activeARR, forecast: false,
-              }));
+              const histPts: MPt[] = hist.map((m, i) => {
+                const isLast = i === hist.length - 1;
+                const live = isLast ? anchor : m.activeARR;
+                return {
+                  label: mLabel(m.label), newBusiness: m.newBusiness, expansion: m.expansion,
+                  churn: m.churnedARR, liveARR: live, bookedARR: live, forecast: false,
+                };
+              });
               let cum = anchor;
               const fwdPts: MPt[] = (data.arrForward?.months ?? [])
                 .filter((f) => f.ym <= "2027-01")
@@ -1274,10 +1282,10 @@ export default function Dashboard() {
               );
               const top = data.topBooked ?? [];
               return (
-                <Card title="ARR Composition — Live vs Booked (Jan-26 → Jan-27)" sub="Actuals through the last complete month, then forward Booked ARR = last Live ARR + each future month's scheduled go-lives (contract live date). Live ARR line stops at actuals; Booked ARR projects forward. Computed in the sheet.">
+                <Card title="ARR Composition — Live vs Booked (Jan-26 → Jan-27)" sub="Actuals through the last complete month — the latest Live ARR point is the as-of-today live-paying book (churn excluded, ties to the headline). Forward Booked ARR = that Live ARR + each future month's scheduled go-lives (contract live date), i.e. the ARR as cash comes in at its future go-live. Live ARR line stops at today; Booked ARR projects forward.">
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, padding: "18px 20px" }}>
                     {box("Booked ARR", fmt(booked), `Live ${fmt(liveArr)} + ${fmt(br.total)} pending`, C.navy)}
-                    {box("Live ARR (as of today)", fmt(liveArr), "past ContractLiveDate", C.grn)}
+                    {box("Live ARR (as of today)", fmt(liveArr), "live-paying · churn excluded", C.grn)}
                     {box("Booked — not yet live", fmt(br.total), `${br.count} deals · NB ${fmt(br.nb)} / Exp ${fmt(br.exp)}`, C.navy)}
                     {box("Churn — last complete mo", fmt(churnMo), lastComplete ? mLabel(lastComplete.label) : "", C.red)}
                   </div>
