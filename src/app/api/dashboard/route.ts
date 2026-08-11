@@ -53,13 +53,35 @@ const DEMO_MODE =
   !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
   (!process.env.GOOGLE_PRIVATE_KEY && !process.env.GOOGLE_PRIVATE_KEY_B64);
 
+// Shared server cache: all viewers get one computed snapshot for CACHE_TTL_MS, so a
+// burst of concurrent loads no longer re-reads Sheets on every request (that's what
+// blew the read quota). `inflight` dedupes concurrent cache misses into one build; a
+// transient failure serves the last-good snapshot instead of erroring the whole dash.
+type Payload = Record<string, unknown>;
+const CACHE_TTL_MS = 60_000;
+let cache: { at: number; body: Payload } | null = null;
+let inflight: Promise<Payload> | null = null;
+
 export async function GET() {
   if (DEMO_MODE) {
     // No Google credentials configured — serve the bundled anonymized snapshot.
     const demo = (await import("@/data/demo-snapshot.json")).default;
     return NextResponse.json({ ...demo, updatedAt: new Date().toISOString() });
   }
+  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return NextResponse.json(cache.body);
+  if (!inflight) inflight = buildPayload().finally(() => { inflight = null; });
   try {
+    const body = await inflight;
+    cache = { at: Date.now(), body };
+    return NextResponse.json(body);
+  } catch (err) {
+    if (cache) return NextResponse.json(cache.body); // serve last-good data through a transient failure
+    console.error("Dashboard data fetch failed:", err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Unknown error" }, { status: 500 });
+  }
+}
+
+async function buildPayload(): Promise<Payload> {
     // ONE batched Sheets read for every tab (values.batchGet) — see getSheetValuesBatch.
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
@@ -235,7 +257,7 @@ export async function GET() {
       coverageByOwner[d.owner] = (coverageByOwner[d.owner] ?? 0) + d.arr;
     }
 
-    return NextResponse.json({
+    return {
       updatedAt: new Date().toISOString(),
       arr,
       arrMom,
@@ -267,12 +289,5 @@ export async function GET() {
       whoDoesWhat: byOwner,
       cwSplitByOwner,
       coverageByOwner,
-    });
-  } catch (err) {
-    console.error("Dashboard data fetch failed:", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Unknown error" },
-      { status: 500 }
-    );
-  }
+    };
 }
