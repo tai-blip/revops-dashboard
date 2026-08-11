@@ -42,7 +42,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { cumulative: { ym: string; label: string; booked: number; contracted: number; live: number }[]; stock: { ym: string; label: string; booked: number; contracted: number; live: number }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number }[]; contractedDeals: { account: string; owner: string; opp: string; arr: number; liveDate: string; end: string }[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -2687,7 +2687,7 @@ export default function Dashboard() {
         return (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
             {/* ARR Funnel — Booked (pilot) → Contracted (signed, not live) → Live (paying), MoM, two models */}
-            {data.arrFunnel && data.arrFunnel.cumulative.length > 0 && (() => {
+            {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
               const AF = data.arrFunnel;
               const series = AF.stock;
               const cur = series[series.length - 1] ?? { booked: 0, contracted: 0, live: 0 };
@@ -2698,7 +2698,7 @@ export default function Dashboard() {
               const yy = (v: number) => padT + ih - (v / (maxV * 1.08)) * ih;
               const LINES = [
                 { key: "booked" as const, label: "Booked (pilot · Trial)", color: C.gold },
-                { key: "contracted" as const, label: "Contracted (signed, not live)", color: C.blue },
+                { key: "contracted" as const, label: "Contracted (live, not paying)", color: C.blue },
                 { key: "live" as const, label: "Live ARR (paying)", color: C.grn },
               ];
               const path = (key: "booked" | "contracted" | "live") => series.map((p, i) => `${i === 0 ? "M" : "L"}${xx(i).toFixed(1)} ${yy(p[key]).toFixed(1)}`).join(" ");
@@ -2707,8 +2707,8 @@ export default function Dashboard() {
               const kM = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : "$" + Math.round(n / 1e3) + "k");
               return (
                 <Card
-                  title="ARR Funnel — Booked → Contracted → Live (MoM)"
-                  sub="Point-in-time — ARR sitting IN each tier at month-end: in pilot (Trial), signed-but-not-yet-paying (R&R/timing), and live-paying (churn excluded). Booked & Contracted convert into Live over time. Live here is by actual Live Paying date, so it runs below the date-based headline Live ARR ($5.79M) by the ~$1.05M of live-but-not-yet-paying contracts."
+                  title="ARR Funnel — Booked → Contracted → Live (MoM · Jan-26 → now)"
+                  sub="Point-in-time ARR in each tier at month-end: Booked = in pilot (Trial); Contracted = contract-live but not yet paying (R&R/timing); Live = live-paying (churn excluded). Contracted + Live = the contract-live book that ties to finance's ~$5.78M — split by whether payment has started."
                   accent={C.navy}
                 >
                   <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 2px" }}>
@@ -2757,6 +2757,36 @@ export default function Dashboard() {
                       </tbody>
                     </table>
                   </div>
+                  {/* All deals currently in the Contracted state (contract-live, not yet paying) */}
+                  {AF.contractedDeals.length > 0 && (() => {
+                    const cd = AF.contractedDeals;
+                    const cdTot = cd.reduce((s, d) => s + d.arr, 0);
+                    return (
+                      <div style={{ padding: "2px 20px 18px" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "8px 0 8px" }}>
+                          In Contracted right now — contract-live but not yet paying · {cd.length} deals · <span style={{ color: C.blue, fontFamily: "var(--font-dm-mono)" }}>{fmt(cdTot)}</span>
+                        </div>
+                        <div style={{ overflowX: "auto", border: `1px solid ${C.s1}`, borderRadius: 10 }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                            <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                              <Th l>Account</Th><Th l>AE</Th><Th>ARR</Th><Th l>Contract Live</Th><Th l>Contract End</Th>
+                            </tr></thead>
+                            <tbody>
+                              {cd.map((d, i) => (
+                                <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                                  <Td l bold>{d.account}</Td>
+                                  <Td l>{d.owner}</Td>
+                                  <Td mono bold color={C.blue}>{fmt(d.arr)}</Td>
+                                  <Td l>{d.liveDate}</Td>
+                                  <Td l>{d.end}</Td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </Card>
               );
             })()}

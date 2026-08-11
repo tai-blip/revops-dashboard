@@ -133,63 +133,77 @@ export function computeCashForecast(rows: Row[]): CashForecast {
   return { events, owners: [...owners].filter(Boolean).sort(), total: rrTotal + stdTotal, rrTotal, stdTotal };
 }
 
-// Three-tier ARR funnel MoM (from the ARR_Funnel tab). Two models:
-//   • cumulative — ARR that has REACHED each tier by month-end, dated by:
-//       Booked = Date Reached Trial, Contracted = Contract Signed Date, Live = Live Paying Date.
-//       Monotonic; Booked ≥ Contracted ≥ Live as deals flow down the funnel.
-//   • stock — ARR sitting IN each tier at month-end (interval logic): a deal is "in Trial"
-//       from its trial date until it signs / goes live / is lost; "contracted" from signed
-//       until live-paying / lost; "live" from live-paying until contract end. Live stock
-//       excludes churned/paused (ties to the Live ARR headline at the current edge).
+// Three-tier ARR funnel MoM (from the ARR_Funnel tab), point-in-time stock — ARR sitting
+// IN each tier at month-end (interval logic):
+//   • Booked     = in Trial (pilot): trial date reached, not yet signed / live / lost.
+//   • Contracted = contract-LIVE but not yet paying: ContractLiveDate ≤ M, no Live Paying
+//       Date, contract not ended, not churned. (R&R / timing gap before first payment.)
+//   • Live       = paying: Live Paying Date ≤ M, contract not ended, not churned.
+// Contracted + Live = the date-based contract-live book (ties to finance's $5.78M), split
+// by whether payment has started. Window is fixed Jan-2026 → current month. Also returns
+// the current-snapshot list of deals sitting in the Contracted state.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
 export type FunnelPoint = { ym: string; label: string; booked: number; contracted: number; live: number };
-export type ArrFunnel = { cumulative: FunnelPoint[]; stock: FunnelPoint[] };
-export function computeArrFunnel(rows: Row[], monthsBack = 17): ArrFunnel {
-  const empty: ArrFunnel = { cumulative: [], stock: [] };
+export type ContractedDeal = { account: string; owner: string; opp: string; arr: number; liveDate: string; end: string };
+export type ArrFunnel = { stock: FunnelPoint[]; contractedDeals: ContractedDeal[] };
+export function computeArrFunnel(rows: Row[]): ArrFunnel {
+  const empty: ArrFunnel = { stock: [], contractedDeals: [] };
   if (!rows || rows.length < 2) return empty;
   const h = rows[0].map((x) => String(x ?? "").toLowerCase());
   const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
-  const cArr = ci("ARR (USD)"), cStatus = ci("Status"), cTrial = ci("TrialDate"),
-    cSigned = ci("SignedDate"), cLive = ci("LivePayingDate"), cLost = ci("LostDate"), cEnd = ci("EndDate");
-  if (cArr < 0 || cTrial < 0 || cSigned < 0 || cLive < 0) return empty;
+  const cArr = ci("ARR (USD)"), cStatus = ci("Status"), cStage = ci("Stage"), cTrial = ci("TrialDate"), cSigned = ci("SignedDate"),
+    cLiveDate = ci("LiveDate"), cLivePay = ci("LivePayingDate"), cLost = ci("LostDate"), cEnd = ci("EndDate"),
+    cAcct = ci("Account"), cOwner = ci("Owner"), cOpp = ci("Opportunity");
+  if (cArr < 0 || cTrial < 0 || cLiveDate < 0 || cLivePay < 0) return empty;
   const iso = (v: unknown) => { const d = sheetsSerialToDate(v); return d ? d.toISOString().slice(0, 10) : ""; };
+  // Contracted/Live count only signed contracts (Billing / Closed Won stage) — same basis as
+  // finance's book. This drops renewal-stage opps (e.g. Renewal Pending) that share the
+  // account's contract-live date but aren't the active paying contract (double-counts).
+  const isSigned = (s: string) => s === "Billing" || s === "Closed Won";
 
-  type D = { arr: number; churn: boolean; trial: string; signed: string; live: string; lost: string; end: string };
+  type D = { arr: number; churn: boolean; signed_stage: boolean; trial: string; signed: string; liveDate: string; livePay: string; lost: string; end: string; account: string; owner: string; opp: string };
   const deals: D[] = [];
   for (const r of rows.slice(1)) {
     const arr = Number(r[cArr] ?? 0);
     if (!(arr > 0)) continue;
     deals.push({
-      arr, churn: FUNNEL_CHURN.has(String(r[cStatus] ?? "")),
-      trial: iso(r[cTrial]), signed: iso(r[cSigned]), live: iso(r[cLive]),
-      lost: cLost >= 0 ? iso(r[cLost]) : "", end: cEnd >= 0 ? iso(r[cEnd]) : "",
+      arr, churn: FUNNEL_CHURN.has(String(r[cStatus] ?? "")), signed_stage: isSigned(String(r[cStage] ?? "")),
+      trial: iso(r[cTrial]), signed: cSigned >= 0 ? iso(r[cSigned]) : "", liveDate: iso(r[cLiveDate]),
+      livePay: iso(r[cLivePay]), lost: cLost >= 0 ? iso(r[cLost]) : "", end: cEnd >= 0 ? iso(r[cEnd]) : "",
+      account: cAcct >= 0 ? String(r[cAcct] ?? "") : "", owner: cOwner >= 0 ? String(r[cOwner] ?? "") : "",
+      opp: cOpp >= 0 ? String(r[cOpp] ?? "") : "",
     });
   }
 
   const now = new Date();
-  const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const cumulative: FunnelPoint[] = [], stock: FunnelPoint[] = [];
-  for (let i = -monthsBack; i <= 0; i++) {
-    const first = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + i, 1));
-    const me = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).toISOString().slice(0, 10); // month-end
-    const ym = first.toISOString().slice(0, 7);
-    const label = first.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
-    const before = (d: string) => d !== "" && d <= me;      // event happened on/before month-end
-    const after = (d: string) => d === "" || d > me;        // not yet happened as of month-end
-    let cB = 0, cC = 0, cL = 0, sB = 0, sC = 0, sL = 0;
+  const cur = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const stock: FunnelPoint[] = [];
+  // Fixed window: Jan 2026 → current month.
+  for (let m = new Date(Date.UTC(2026, 0, 1)); m <= cur; m = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1))) {
+    const me = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 0)).toISOString().slice(0, 10); // month-end
+    const ym = m.toISOString().slice(0, 7);
+    const label = m.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
+    const before = (d: string) => d !== "" && d <= me;   // happened on/before month-end
+    const after = (d: string) => d === "" || d > me;      // not yet, as of month-end
+    let sB = 0, sC = 0, sL = 0;
     for (const d of deals) {
-      if (before(d.trial)) cB += d.arr;
-      if (before(d.signed)) cC += d.arr;
-      if (before(d.live)) cL += d.arr;
-      // stock: in-tier at month-end
-      if (before(d.trial) && after(d.signed) && after(d.live) && after(d.lost)) sB += d.arr;
-      if (before(d.signed) && after(d.live) && after(d.lost)) sC += d.arr;
-      if (before(d.live) && after(d.end) && !d.churn) sL += d.arr;
+      if (before(d.trial) && after(d.signed) && after(d.livePay) && after(d.lost)) sB += d.arr;                        // in Trial
+      if (d.signed_stage && before(d.liveDate) && after(d.livePay) && after(d.end) && after(d.lost) && !d.churn) sC += d.arr; // contract-live, not paying
+      if (d.signed_stage && before(d.livePay) && after(d.end) && !d.churn) sL += d.arr;                                // paying
     }
-    cumulative.push({ ym, label, booked: cB, contracted: cC, live: cL });
     stock.push({ ym, label, booked: sB, contracted: sC, live: sL });
   }
-  return { cumulative, stock };
+
+  // Current snapshot: deals sitting in the Contracted state right now (contract-live, not paying).
+  const T = now.toISOString().slice(0, 10);
+  const beforeT = (d: string) => d !== "" && d <= T;
+  const afterT = (d: string) => d === "" || d > T;
+  const contractedDeals: ContractedDeal[] = deals
+    .filter((d) => d.signed_stage && beforeT(d.liveDate) && afterT(d.livePay) && afterT(d.end) && afterT(d.lost) && !d.churn)
+    .map((d) => ({ account: d.account || d.opp, owner: d.owner.split(" ")[0], opp: d.opp, arr: d.arr, liveDate: d.liveDate, end: d.end || "(none)" }))
+    .sort((a, b) => b.arr - a.arr);
+
+  return { stock, contractedDeals };
 }
 
 // --- Header-based column resolution -------------------------------------------
