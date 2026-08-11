@@ -89,6 +89,62 @@ export function computeSignedLiveForecast(rows: Row[], qStart: string, qEnd: str
   return { byOwner, total };
 }
 
+// Cash-timing (Sai's lens). Two per-month series from SOQL_ClosedDeals:
+//   • Actual cash arriving  = ARR of already live-paying contracts, bucketed by the
+//     month of ContractLiveDate ("current revenue arriving into the account").
+//   • Forecast potential cash = signed-but-not-live deals (Stage Closed Won/Billing,
+//     Status NOT live-paying and NOT churned) land as cash at their live date + 45 days.
+//     Rip & Replace / LOC deals use Contract_Live_Date_Rip_Replace_LOC__c + 45 instead.
+// Returns deal-level events (so the UI can filter by AE) plus the ordered month window.
+const CF_LIVE_PAYING = new Set(["[LP] Live Paying", "[LP] Live Paying (Monthly)"]);
+const CF_FORECAST_EXCLUDE = new Set(["[LP] Live Paying", "[LP] Live Paying (Monthly)", "Contracts Ended (Churned)"]);
+export type CashFlowEvent = { owner: string; name: string; ym: string; kind: "actual" | "forecast"; arr: number };
+export type CashFlowResult = { months: { ym: string; label: string }[]; events: CashFlowEvent[]; owners: string[] };
+export function computeCashFlowByMonth(rows: Row[], monthsBack = 6, monthsFwd = 6): CashFlowResult {
+  const empty: CashFlowResult = { months: [], events: [], owners: [] };
+  if (!rows || rows.length < 2) return empty;
+  const h = rows[0].map((x) => String(x ?? "").toLowerCase());
+  const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
+  const cStage = ci("Stage"), cStatus = ci("Status"), cArr = ci("ARR (USD)"),
+    cLive = ci("ContractLiveDate"), cRR = ci("RR LOC Date"), cOwner = ci("Owner"), cOpp = ci("Opportunity");
+  if (cStage < 0 || cStatus < 0 || cArr < 0 || cLive < 0) return empty;
+
+  // Month window centered on the current month.
+  const now = new Date();
+  const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const months: { ym: string; label: string }[] = [];
+  for (let i = -monthsBack; i <= monthsFwd; i++) {
+    const d = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + i, 1));
+    months.push({ ym: d.toISOString().slice(0, 7), label: d.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }) });
+  }
+  const winSet = new Set(months.map((m) => m.ym));
+  const ymOf = (d: Date) => d.toISOString().slice(0, 7);
+  const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86400000);
+
+  const events: CashFlowEvent[] = [];
+  const owners = new Set<string>();
+  for (const r of rows.slice(1)) {
+    const stage = String(r[cStage] ?? ""), status = String(r[cStatus] ?? "");
+    const arr = Number(r[cArr] ?? 0);
+    if (!(arr > 0)) continue;
+    const owner = String(r[cOwner] ?? ""), name = cOpp >= 0 ? String(r[cOpp] ?? "") : "";
+    const live = sheetsSerialToDate(r[cLive]);
+    if (CF_LIVE_PAYING.has(status) && live) {
+      const ym = ymOf(live);
+      if (winSet.has(ym)) { events.push({ owner, name, ym, kind: "actual", arr }); owners.add(owner); }
+    }
+    if (/Billing|Closed Won/i.test(stage) && !CF_FORECAST_EXCLUDE.has(status)) {
+      const rr = cRR >= 0 ? sheetsSerialToDate(r[cRR]) : null;
+      const anchor = rr ?? live; // Rip & Replace/LOC date wins when present
+      if (anchor) {
+        const ym = ymOf(addDays(anchor, 45));
+        if (winSet.has(ym)) { events.push({ owner, name, ym, kind: "forecast", arr }); owners.add(owner); }
+      }
+    }
+  }
+  return { months, events, owners: [...owners].filter(Boolean).sort() };
+}
+
 // --- Header-based column resolution -------------------------------------------
 // The Salesforce → Coefficient export can reorder/insert columns, which silently
 // breaks fixed-index parsing (e.g. reading a date column as the deal Owner).
@@ -148,6 +204,9 @@ export type OpenDeal = {
   dateReachedSQL: Date | null;
   channel: string;
   lastStageChangeDate: Date | null;
+  amount: number;
+  probQ: number; // AE/AM Probability - Quarter (%), 0–100
+  probY: number; // AE/AM Probability - Year (%), 0–100
 };
 
 export function parseQuery1(rows: Row[]): OpenDeal[] {
@@ -169,6 +228,9 @@ export function parseQuery1(rows: Row[]): OpenDeal[] {
   const cOwner = colIdx(H, ["Owner.Name", "OwnerName", "Owner"], 7);
   const cRecord = colIdx(H, ["RecordType.Name", "RecordTypeName", "RecordType"], 8);
   const cLastStage = colIdx(H, ["LastStageChangeDate", "Last_Stage_Change_Date__c"], -1);
+  const cAmount = colIdx(H, ["Amount"], -1);
+  const cProbQ = colIdx(H, ["AE_AM_Probability__c", "AE/AM Probability - Quarter (%)"], -1);
+  const cProbY = colIdx(H, ["AE_AM_Probability_Year__c", "AE/AM Probability - Year (%)"], -1);
 
   const deals: OpenDeal[] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
@@ -187,6 +249,9 @@ export function parseQuery1(rows: Row[]): OpenDeal[] {
       dateReachedSQL: sheetsSerialToDate(cell(r, cSql)),
       channel: String(cell(r, cChannel) ?? ""),
       lastStageChangeDate: sheetsSerialToDate(cell(r, cLastStage)),
+      amount: Number(cell(r, cAmount) ?? 0),
+      probQ: Number(cell(r, cProbQ) ?? 0),
+      probY: Number(cell(r, cProbY) ?? 0),
     });
   }
   return deals;
@@ -435,12 +500,24 @@ export type ForecastRow = {
   openPipe: number;
   quota: number | null;
   closedWon: number;
-  potNB: number;
-  potExp: number;
-  potential: number;
+  // Stage-based open potential = AE/AM probability × the right size field:
+  // Early = SQL+SAL (Amount×%), Late = SQO+Trial (ARR×%). Q = quarter %, Y = year %.
+  // *Sql = the SQL-only slice of Early, so the UI can subtract it when "exclude SQL" is on.
+  potEarlyQ: number;
+  potLateQ: number;
+  potSqlQ: number;
+  potEarlyY: number;
+  potLateY: number;
+  potSqlY: number;
+  potential: number; // default: closedWon + potEarlyQ + potLateQ (quarter, incl SQL)
   variance: number | null;
   attainP: number | null;
 };
+
+// Open-pipeline stages that count toward Potential (Sai/Davi rule). Early stages use
+// Amount × probability; late stages use ARR × probability.
+const POT_EARLY_STAGES = new Set(["SQL", "SAL"]);
+const POT_LATE_STAGES = new Set(["SQO", "Trial"]);
 
 const isExpRt = (rt: string) => rt.includes("Expansion");
 const isRenewalRt = (rt: string) => rt.includes("Renewal");
@@ -574,28 +651,42 @@ export function computeForecastTab(
     else if (isNBRt(d.recordType)) cwByOwner[d.owner].nb += d.arr;
   }
 
-  const openByOwner: Record<string, { pipe: number; potNB: number; potExp: number }> = {};
+  type PotAgg = { pipe: number; earlyQ: number; lateQ: number; sqlQ: number; earlyY: number; lateY: number; sqlY: number };
+  const openByOwner: Record<string, PotAgg> = {};
   for (const d of openDeals) {
     if (!rosterNames.has(d.owner)) continue;
-    if (!openByOwner[d.owner]) openByOwner[d.owner] = { pipe: 0, potNB: 0, potExp: 0 };
-    openByOwner[d.owner].pipe += d.arr;
+    const o = (openByOwner[d.owner] ??= { pipe: 0, earlyQ: 0, lateQ: 0, sqlQ: 0, earlyY: 0, lateY: 0, sqlY: 0 });
+    o.pipe += d.arr;
     if (isRenewalRt(d.recordType)) continue;
-    if (isExpRt(d.recordType)) openByOwner[d.owner].potExp += d.expectedRevQ;
-    else if (isNBRt(d.recordType)) openByOwner[d.owner].potNB += d.expectedRevQ;
+    const early = POT_EARLY_STAGES.has(d.stage);
+    const late = POT_LATE_STAGES.has(d.stage);
+    if (!early && !late) continue; // Potential = only SQL/SAL/SQO/Trial
+    const size = early ? d.amount : d.arr; // SQL/SAL → Amount; SQO/Trial → ARR
+    const wQ = size * (d.probQ / 100);
+    const wY = size * (d.probY / 100);
+    if (early) {
+      o.earlyQ += wQ; o.earlyY += wY;
+      if (d.stage === "SQL") { o.sqlQ += wQ; o.sqlY += wY; }
+    } else {
+      o.lateQ += wQ; o.lateY += wY;
+    }
   }
 
   const rows: ForecastRow[] = roster.map((a) => {
     const s = sheetRows?.[a.name];
+    const o = openByOwner[a.name];
     const cw =
       attByOwner?.[a.name] != null
         ? attByOwner[a.name]
         : s
         ? s.closedWon
         : (cwByOwner[a.name]?.nb ?? 0) + (cwByOwner[a.name]?.exp ?? 0);
-    const potNB = s ? s.potNB : openByOwner[a.name]?.potNB ?? 0;
-    const potExp = s ? s.potExp : openByOwner[a.name]?.potExp ?? 0;
-    const openPipe = s ? s.openPipe : openByOwner[a.name]?.pipe ?? 0;
-    const potential = s ? s.potential : cw + potNB + potExp;
+    // Open pipeline stays sheet-derived when available (unchanged); potential is now
+    // computed directly from open deals by stage, never from the sheet/expectedRevQ.
+    const openPipe = s ? s.openPipe : o?.pipe ?? 0;
+    const potEarlyQ = o?.earlyQ ?? 0, potLateQ = o?.lateQ ?? 0, potSqlQ = o?.sqlQ ?? 0;
+    const potEarlyY = o?.earlyY ?? 0, potLateY = o?.lateY ?? 0, potSqlY = o?.sqlY ?? 0;
+    const potential = cw + potEarlyQ + potLateQ; // default: quarter, SQL included
     return {
       name: a.name,
       short: a.short,
@@ -604,8 +695,8 @@ export function computeForecastTab(
       openPipe,
       quota: a.quota,
       closedWon: cw,
-      potNB,
-      potExp,
+      potEarlyQ, potLateQ, potSqlQ,
+      potEarlyY, potLateY, potSqlY,
       potential,
       variance: a.quota != null ? potential - a.quota : null,
       attainP: a.quota ? potential / a.quota : null,
@@ -620,8 +711,8 @@ export function computeForecastTab(
       openPipe: s("openPipe"),
       quota,
       closedWon: s("closedWon"),
-      potNB: s("potNB"),
-      potExp: s("potExp"),
+      potEarlyQ: s("potEarlyQ"), potLateQ: s("potLateQ"), potSqlQ: s("potSqlQ"),
+      potEarlyY: s("potEarlyY"), potLateY: s("potLateY"), potSqlY: s("potSqlY"),
       potential,
       variance: potential - quota,
       attainP: quota ? potential / quota : null,
@@ -733,18 +824,19 @@ export function computeForecastTab(
   const teamActualNB = roster.filter((r) => !r.am && !r.lead).reduce((s, a) => s + (cwByOwner[a.name]?.nb ?? 0), 0);
   const potentialLanding = teamActualNB + potOpenQ;
 
-  // "Deals that make the quarter" — per Stephen: filter by STAGE (SQL/SAL/SQO = live,
-  // in-quarter opportunity) instead of by AE, and rank by QUARTERLY Potential ARR
-  // (expectedRevQ = Expected_Revenue_Quarter_AE__c) rather than raw ARR, so it shows
-  // deals that can realistically close THIS quarter.
+  // "Deals that make the quarter" — filter by STAGE (SQL/SAL/SQO) and rank by the same
+  // stage-based quarterly Potential ARR as the per-AE table: SQL/SAL use Amount×AE/AM%,
+  // SQO uses ARR×AE/AM% (AE_AM_Probability__c). Shows deals that can realistically close.
   const DECIDE_STAGES = new Set(["SQL", "SAL", "SQO"]);
   const decideDeals = openDeals
-    .filter((d) => rosterNames.has(d.owner) && DECIDE_STAGES.has(d.stage) && d.expectedRevQ > 0)
+    .filter((d) => rosterNames.has(d.owner) && DECIDE_STAGES.has(d.stage))
     .map((d) => {
       const ref = d.lastStageChangeDate ?? d.createdDate;
       const ageDays = ref ? Math.floor((now.getTime() - ref.getTime()) / 86400000) : null;
-      return { name: d.name, owner: d.owner, stage: d.stage, arr: d.arr, potARR: d.expectedRevQ, ageDays };
+      const potARR = (POT_EARLY_STAGES.has(d.stage) ? d.amount : d.arr) * (d.probQ / 100);
+      return { name: d.name, owner: d.owner, stage: d.stage, arr: d.arr, potARR, ageDays };
     })
+    .filter((d) => d.potARR > 0)
     .sort((a, b) => b.potARR - a.potARR)
     .slice(0, 40);
 

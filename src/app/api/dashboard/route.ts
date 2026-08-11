@@ -32,6 +32,7 @@ import {
   computeAcvDistribution,
   computeBookingReport,
   computeSignedLiveForecast,
+  computeCashFlowByMonth,
 } from "@/lib/deals";
 import {
   SALES_Q,
@@ -75,7 +76,7 @@ export async function GET() {
         getSheetValues("Forecasting", "A1:T45"),
         // Daily SFDC pull (all closed deals + dimensions) — powers ACV & Deal Size.
         // Tolerate absence so the dashboard still loads if the pull hasn't run.
-        getSheetValues("SOQL_ClosedDeals", "A1:T4000").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("SOQL_ClosedDeals", "A1:V4000").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_MoM_Rebuild", "A1:W400").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ACV_MoM", "A1:AZ20").catch(() => [] as (string | number | null)[][]),
         getSheetValues("ARR_per_Location_MoM", "A1:K20").catch(() => [] as (string | number | null)[][]),
@@ -190,6 +191,7 @@ export async function GET() {
     const acvInsights = computeAcvInsights(closedDealsRows);
     const bookingReport = computeBookingReport(closedDealsRows);
     const signedLive = computeSignedLiveForecast(closedDealsRows, qDef.start, qDef.end);
+    const cashFlow = computeCashFlowByMonth(closedDealsRows);
     const paymentMix = computePaymentMix(paymentMixRows);
 
     // Who Does What — open deals grouped by owner, flagged if stale (>60d since last stage change)
@@ -237,6 +239,7 @@ export async function GET() {
       liveArrToday,
       bookingReport,
       signedLive,
+      cashFlow,
       dealTracker,
       topBooked,
       arrForward,

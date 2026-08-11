@@ -40,6 +40,7 @@ type DashboardData = {
   bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
+  cashFlow?: { months: { ym: string; label: string }[]; events: { owner: string; name: string; ym: string; kind: "actual" | "forecast"; arr: number }[]; owners: string[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -76,10 +77,10 @@ type DashboardData = {
     byStage: Record<string, { raw: number; weighted: number; count: number }>;
   };
   forecastTab: {
-    rows: { name: string; short?: string; am: boolean; lead?: boolean; openPipe: number; quota: number | null; closedWon: number; potNB: number; potExp: number; potential: number; variance: number | null; attainP: number | null }[];
-    aeTeam: { openPipe: number; quota: number; closedWon: number; potNB: number; potExp: number; potential: number; variance: number; attainP: number | null };
-    totalInclAM: { openPipe: number; quota: number; closedWon: number; potNB: number; potExp: number; potential: number; variance: number; attainP: number | null };
-    totalInclLead?: { openPipe: number; quota: number; closedWon: number; potNB: number; potExp: number; potential: number; variance: number; attainP: number | null };
+    rows: { name: string; short?: string; am: boolean; lead?: boolean; openPipe: number; quota: number | null; closedWon: number; potEarlyQ: number; potLateQ: number; potSqlQ: number; potEarlyY: number; potLateY: number; potSqlY: number; potential: number; variance: number | null; attainP: number | null }[];
+    aeTeam: { openPipe: number; quota: number; closedWon: number; potEarlyQ: number; potLateQ: number; potSqlQ: number; potEarlyY: number; potLateY: number; potSqlY: number; potential: number; variance: number; attainP: number | null };
+    totalInclAM: { openPipe: number; quota: number; closedWon: number; potEarlyQ: number; potLateQ: number; potSqlQ: number; potEarlyY: number; potLateY: number; potSqlY: number; potential: number; variance: number; attainP: number | null };
+    totalInclLead?: { openPipe: number; quota: number; closedWon: number; potEarlyQ: number; potLateQ: number; potSqlQ: number; potEarlyY: number; potLateY: number; potSqlY: number; potential: number; variance: number; attainP: number | null };
     teamProjected: number;
     teamQuota: number;
     teamActual: number;
@@ -517,8 +518,10 @@ export default function Dashboard() {
   const [decideAE, setDecideAE] = useState<string>("all");
   const [attView, setAttView] = useState<"quarterly" | "annual">("quarterly");
   const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
+  const [inclSql, setInclSql] = useState<boolean>(true); // Forecast Potential: include SQL-stage deals?
+  const [cashAE, setCashAE] = useState<string>("all");
+  const [cashSeries, setCashSeries] = useState<"both" | "actual" | "forecast">("both");
   const [dealAE, setDealAE] = useState<string>("all");
-  const [dealSource, setDealSource] = useState<string>("all"); // all | q3 | key
   const [dealConf, setDealConf] = useState<string>("all");
   const [dealSearch, setDealSearch] = useState<string>("");
   const [dealCalls, setDealCalls] = useState<Record<string, "commit" | "best" | "pipeline" | "omit">>({});
@@ -2273,9 +2276,24 @@ export default function Dashboard() {
         const money = (n: number | null) => (n == null ? "\u2014" : fmt(n));
         const short = (name: string) => name.split(" ")[0];
 
-        // Totals incl. AM + Davi (grand total) drive the forecast headline numbers.
+        // Stage-based open potential, honoring the Include/Exclude-SQL toggle.
+        // Quarterly uses AE/AM quarter %, Yearly uses AE/AM year %. Early = SQL+SAL
+        // (Amount×%), Late = SQO+Trial (ARR×%); excluding SQL drops its slice of Early.
+        type PotRow = { potEarlyQ: number; potLateQ: number; potSqlQ: number; potEarlyY: number; potLateY: number; potSqlY: number };
+        const earlyPot = (r: PotRow, yearly: boolean) =>
+          (yearly ? r.potEarlyY : r.potEarlyQ) - (inclSql ? 0 : (yearly ? r.potSqlY : r.potSqlQ));
+        const latePot = (r: PotRow, yearly: boolean) => (yearly ? r.potLateY : r.potLateQ);
+        const openPot = (r: PotRow, yearly: boolean) => earlyPot(r, yearly) + latePot(r, yearly);
+        // Quarterly per-row cells (toggle-aware). Potential = Closed Won + Early + Late.
+        const qCells = (r: PotRow & { closedWon: number; quota: number | null }) => {
+          const early = earlyPot(r, false), late = latePot(r, false);
+          const pot = r.closedWon + early + late;
+          return { early, late, pot, variance: r.quota != null ? pot - r.quota : null, attainP: r.quota ? pot / r.quota : null };
+        };
+
+        // Totals incl. AM + Davi (grand total) drive the forecast headline numbers (quarter basis).
         const T = F.totalInclLead ?? F.totalInclAM;
-        const totalPot = T.potential;
+        const totalPot = T.closedWon + openPot(T, false);
         const totalQuota = T.quota;
         const totalCW = T.closedWon;
         // End-of-Q2 live ARR = Active/Live ARR of the calendar month before the quarter starts.
@@ -2332,21 +2350,43 @@ export default function Dashboard() {
         // Quarterly ⇄ Yearly toggle (shown on both views). Yearly uses the AE/AM % YEAR
         // forecast (AE_AM_Probability_Year__c) from the AE_Annual_Potential feed.
         const fcastToggle = (
-          <div style={{ display: "inline-flex", background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 3, marginBottom: 16 }}>
-            {(["quarterly", "yearly"] as const).map((v) => (
-              <button key={v} onClick={() => setFcastView(v)}
-                style={{ border: "none", cursor: "pointer", borderRadius: 8, padding: "6px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit",
-                  background: fcastView === v ? "#fff" : "transparent", color: fcastView === v ? C.t1 : C.t3,
-                  boxShadow: fcastView === v ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>
-                {v === "quarterly" ? Q.label : "Yearly (FY26)"}
-              </button>
-            ))}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 16 }}>
+            <div style={{ display: "inline-flex", background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 3 }}>
+              {(["quarterly", "yearly"] as const).map((v) => (
+                <button key={v} onClick={() => setFcastView(v)}
+                  style={{ border: "none", cursor: "pointer", borderRadius: 8, padding: "6px 16px", fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                    background: fcastView === v ? "#fff" : "transparent", color: fcastView === v ? C.t1 : C.t3,
+                    boxShadow: fcastView === v ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>
+                  {v === "quarterly" ? Q.label : "Yearly (FY26)"}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "inline-flex", background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 3 }}>
+              {([["incl", true, "Incl. SQL"], ["excl", false, "Excl. SQL"]] as const).map(([k, val, lbl]) => (
+                <button key={k} onClick={() => setInclSql(val)}
+                  style={{ border: "none", cursor: "pointer", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                    background: inclSql === val ? "#fff" : "transparent", color: inclSql === val ? C.t1 : C.t3,
+                    boxShadow: inclSql === val ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
           </div>
         );
 
-        // Yearly numbers (AE/AM % YEAR) for the in-quarter card's Yearly toggle.
+        // Yearly numbers (AE/AM % YEAR). Potential is recomputed client-side with the same
+        // stage rule + SQL toggle as Quarterly (from F.rows' year buckets); goal / YTD /
+        // Yr%-missing still come from the AE_Annual_Potential feed. Projection = YTD + Potential.
         const annY = data.aeAnnual;
-        const annYReps = [...(annY?.reps ?? [])].sort((a, b) => b.pctProj - a.pctProj);
+        const fByName = Object.fromEntries(F.rows.map((r) => [r.name, r]));
+        const annYReps = [...(annY?.reps ?? [])]
+          .map((r) => {
+            const fr = fByName[r.name];
+            const pot = fr ? openPot(fr, true) : r.potTotal;
+            const projection = r.ytdTotal + pot;
+            return { ...r, potTotal: pot, projection, pctProj: r.goal > 0 ? projection / r.goal : 0 };
+          })
+          .sort((a, b) => b.pctProj - a.pctProj);
         const kMY = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : "$" + Math.round(n / 1e3) + "k");
         const annYTot = annYReps.reduce((t, r) => ({ goal: t.goal + r.goal, ytd: t.ytd + r.ytdTotal, pot: t.pot + r.potTotal, proj: t.proj + r.projection, miss: t.miss + r.yrMissing }), { goal: 0, ytd: 0, pot: 0, proj: 0, miss: 0 });
 
@@ -2378,8 +2418,8 @@ export default function Dashboard() {
           <Card
             title={fcastView === "quarterly" ? `In-quarter forecast — ${Q.label}` : "Yearly forecast by AE — FY26"}
             sub={fcastView === "quarterly"
-              ? "Per AE (incl. AM). Potential = Closed Won + Pot. New Biz + Pot. Expansion (open-deal quarter-expected revenue; Closed Won excluded from weighting)."
-              : "Per AE. YTD (by Contract Live Date) + Potential ARR (Year) using AE/AM % YEAR → full-year projection vs annual goal."}
+              ? `Per AE (incl. AM). Potential = Closed Won + Early (SQL+SAL, Amount×AE/AM %) + Late (SQO+Trial, ARR×AE/AM %). ${inclSql ? "SQL included" : "SQL excluded"}.`
+              : `Per AE. YTD (by Contract Live Date) + Potential (Early SQL+SAL Amount×%, Late SQO+Trial ARR×%) using AE/AM % YEAR → full-year projection vs goal. ${inclSql ? "SQL included" : "SQL excluded"}.`}
           >
             {fcastView === "yearly" ? (
               <div style={{ overflowX: "auto" }}>
@@ -2416,7 +2456,7 @@ export default function Dashboard() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed Won</Th><Th>Pot. New Biz</Th><Th>Pot. Expansion</Th><Th>Potential</Th><Th>vs Quota</Th>
+                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed Won</Th><Th>Pot. Early (SQL+SAL)</Th><Th>Pot. Late (SQO+Trial)</Th><Th>Potential</Th><Th>vs Quota</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2426,23 +2466,23 @@ export default function Dashboard() {
                       <Td mono color={C.blue}>{fmt(r.openPipe)}</Td>
                       <Td mono color={C.t2}>{r.quota != null && r.quota > 0 ? fmt(r.quota) : "\u2014"}</Td>
                       <Td mono color={r.closedWon > 0 ? C.coralDk : C.t1}>{fmt(r.closedWon)}</Td>
-                      <Td mono color={C.coralDk}>{fmt(r.potNB)}</Td>
-                      <Td mono color={C.purp}>{fmt(r.potExp)}</Td>
-                      <Td mono bold>{fmt(r.potential)}</Td>
-                      <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(r.attainP, r.variance)}</td>
+                      <Td mono color={C.coralDk}>{fmt(earlyPot(r, false))}</Td>
+                      <Td mono color={C.purp}>{fmt(latePot(r, false))}</Td>
+                      <Td mono bold>{fmt(qCells(r).pot)}</Td>
+                      <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(r).attainP, qCells(r).variance)}</td>
                     </tr>
                   ))}
                   <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
                     <Td l bold>AE team</Td>
                     <Td mono>{fmt(F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono>{fmt(F.aeTeam.closedWon)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(F.aeTeam.potNB)}</Td><Td mono color={C.purp}>{fmt(F.aeTeam.potExp)}</Td><Td mono bold>{fmt(F.aeTeam.potential)}</Td>
-                    <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(F.aeTeam.attainP, F.aeTeam.variance)}</td>
+                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.aeTeam, false))}</Td><Td mono color={C.purp}>{fmt(latePot(F.aeTeam, false))}</Td><Td mono bold>{fmt(qCells(F.aeTeam).pot)}</Td>
+                    <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.aeTeam).attainP, qCells(F.aeTeam).variance)}</td>
                   </tr>
                   <tr style={{ background: "#EEF2F8", fontWeight: 700 }}>
                     <Td l bold>Total · incl AM</Td>
                     <Td mono>{fmt(F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono>{fmt(F.totalInclAM.closedWon)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(F.totalInclAM.potNB)}</Td><Td mono color={C.purp}>{fmt(F.totalInclAM.potExp)}</Td><Td mono bold>{fmt(F.totalInclAM.potential)}</Td>
-                    <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(F.totalInclAM.attainP, null)}</td>
+                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.totalInclAM, false))}</Td><Td mono color={C.purp}>{fmt(latePot(F.totalInclAM, false))}</Td><Td mono bold>{fmt(qCells(F.totalInclAM).pot)}</Td>
+                    <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.totalInclAM).attainP, null)}</td>
                   </tr>
                   {hasLead && (() => {
                     const G = F.totalInclLead ?? F.totalInclAM;
@@ -2450,8 +2490,8 @@ export default function Dashboard() {
                       <tr style={{ background: "#E4EAF2", fontWeight: 700 }}>
                         <Td l bold>Total · incl AM + Davi</Td>
                         <Td mono>{fmt(G.openPipe)}</Td><Td mono>{fmt(G.quota)}</Td><Td mono>{fmt(G.closedWon)}</Td>
-                        <Td mono color={C.coralDk}>{fmt(G.potNB)}</Td><Td mono color={C.purp}>{fmt(G.potExp)}</Td><Td mono bold>{fmt(G.potential)}</Td>
-                        <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(G.attainP, null)}</td>
+                        <Td mono color={C.coralDk}>{fmt(earlyPot(G, false))}</Td><Td mono color={C.purp}>{fmt(latePot(G, false))}</Td><Td mono bold>{fmt(qCells(G).pot)}</Td>
+                        <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(G).attainP, null)}</td>
                       </tr>
                     );
                   })()}
@@ -2493,6 +2533,72 @@ export default function Dashboard() {
                         <Td mono bold color={C.coralDk}>{fmt(SL.total.signed)}</Td>
                         <Td mono bold color={C.grn}>{fmt(SL.total.live)}</Td>
                         <Td mono bold color={C.ylw}>{SL.total.signedNotLive > 0 ? fmt(SL.total.signedNotLive) : "—"}</Td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            );
+          })()}
+
+          {/* Cash timing — actual arrivals (by live date) vs forecast cash-in (live+45) */}
+          {data.cashFlow && data.cashFlow.months.length > 0 && (() => {
+            const CF = data.cashFlow;
+            const evs = CF.events.filter((e) => cashAE === "all" || e.owner === cashAE);
+            const actual: Record<string, number> = {}, forecast: Record<string, number> = {};
+            for (const m of CF.months) { actual[m.ym] = 0; forecast[m.ym] = 0; }
+            for (const e of evs) { (e.kind === "actual" ? actual : forecast)[e.ym] += e.arr; }
+            const nowYm = new Date().toISOString().slice(0, 7);
+            const pts = CF.months.map((m) => ({
+              label: m.label,
+              value: cashSeries === "actual" ? actual[m.ym] : cashSeries === "forecast" ? forecast[m.ym] : actual[m.ym] + forecast[m.ym],
+              forecast: m.ym > nowYm,
+            }));
+            const totA = CF.months.reduce((s, m) => s + actual[m.ym], 0);
+            const totF = CF.months.reduce((s, m) => s + forecast[m.ym], 0);
+            const cashAEs = ["all", ...CF.owners];
+            return (
+              <Card
+                title="Cash timing — actual arrivals vs forecast cash-in"
+                sub="Actual = ARR of live-paying contracts by go-live month. Forecast = signed-but-not-yet-live deals (Closed Won/Billing, not live-paying or churned) landing as cash at contract live date + 45 days (Rip & Replace/LOC date + 45 where set)."
+                accent={C.navy}
+              >
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 4px" }}>
+                  <select value={cashAE} onChange={(e) => setCashAE(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit" }}>
+                    {cashAEs.map((a) => <option key={a} value={a}>{a === "all" ? "All AEs" : short(a)}</option>)}
+                  </select>
+                  <div style={{ display: "inline-flex", background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 3 }}>
+                    {([["both", "Both"], ["actual", "Actual"], ["forecast", "Forecast"]] as const).map(([k, lbl]) => (
+                      <button key={k} onClick={() => setCashSeries(k)}
+                        style={{ border: "none", cursor: "pointer", borderRadius: 8, padding: "5px 12px", fontSize: 12.5, fontWeight: 600, fontFamily: "inherit",
+                          background: cashSeries === k ? "#fff" : "transparent", color: cashSeries === k ? C.t1 : C.t3,
+                          boxShadow: cashSeries === k ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                  <span style={{ fontSize: 13, color: C.t2, marginLeft: "auto" }}>Actual <b style={{ color: C.grn }}>{fmt(totA)}</b> · Forecast <b style={{ color: C.blue }}>{fmt(totF)}</b></span>
+                </div>
+                <div style={{ padding: "10px 12px 4px" }}>
+                  <ArrMovementChart points={pts} />
+                </div>
+                <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      <Th l>Month</Th><Th>Actual cash (live-paying)</Th><Th>Forecast cash (live+45)</Th>
+                    </tr></thead>
+                    <tbody>
+                      {CF.months.map((m) => (
+                        <tr key={m.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: m.ym > nowYm ? C.s2 : undefined }}>
+                          <Td l bold>{m.label}{m.ym > nowYm && <span style={{ color: C.t3, fontWeight: 400, fontSize: 11 }}> · fcast</span>}</Td>
+                          <Td mono color={actual[m.ym] > 0 ? C.grn : C.t3}>{actual[m.ym] > 0 ? fmt(actual[m.ym]) : "—"}</Td>
+                          <Td mono color={forecast[m.ym] > 0 ? C.blue : C.t3}>{forecast[m.ym] > 0 ? fmt(forecast[m.ym]) : "—"}</Td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
+                        <Td l bold>Total</Td>
+                        <Td mono bold color={C.grn}>{fmt(totA)}</Td>
+                        <Td mono bold color={C.blue}>{fmt(totF)}</Td>
                       </tr>
                     </tbody>
                   </table>
@@ -2742,72 +2848,82 @@ export default function Dashboard() {
         const qq = dealSearch.trim().toLowerCase();
         const view = all.filter((d) =>
           (dealAE === "all" || d.ae === dealAE) &&
-          (dealSource === "all" || d.source === dealSource) &&
           (dealConf === "all" || d.conf === dealConf) &&
           (!qq || (d.name + " " + d.ae + " " + d.nextStep).toLowerCase().includes(qq))
         );
-        const totalPot = view.reduce((s, d) => s + d.pot, 0);
+        // Two components: the live Q3 pipeline vs Davi's hand-tracked key deals.
+        const q3View = view.filter((d) => d.source.startsWith("Q3"));
+        const keyView = view.filter((d) => d.source === "Davi Key Deal");
+        const kfmt = (n: number) => fmt(n);
         const confTone: Record<string, { bg: string; fg: string }> = {
           Medium: { bg: C.grnBg, fg: C.grn }, Pilot: { bg: C.blueBg, fg: C.blue },
           Hard: { bg: C.ylwBg, fg: C.ylw }, "Very Hard": { bg: C.redBg, fg: C.red },
         };
         const nConf = (c: string) => all.filter((d) => d.conf === c).length;
         const sheetUrl = "https://docs.google.com/spreadsheets/d/1QPpNHeUuPqlAtWA5VyF0_AxXCLM3MZia5UokMSwhFNc/edit";
+        const dealTable = (list: typeof view) => (
+          <div style={{ overflow: "auto", maxHeight: 520, padding: "6px 20px 18px" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr style={{ borderBottom: `1px solid ${C.bd}`, position: "sticky", top: 0, background: "#fff" }}>
+                <Th l>Deal</Th><Th l>AE</Th><Th l>Stage</Th><Th>Potential</Th><Th l>Confidence</Th><Th l>Est. Live</Th><Th l>Call</Th><Th l>Next step</Th><Th l>Updated</Th>
+              </tr></thead>
+              <tbody>
+                {list.map((d, i) => {
+                  const t = confTone[d.conf];
+                  return (
+                    <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                      <Td l bold>{d.name}</Td>
+                      <Td l>{d.ae}</Td>
+                      <Td l><Pill tone={/SQO/.test(d.stage) ? "good" : /SAL|SQL/.test(d.stage) ? "blue" : undefined}>{d.stage}</Pill></Td>
+                      <Td mono bold>{d.pot ? kfmt(d.pot) : "—"}</Td>
+                      <Td l>{d.conf ? <span style={{ background: t?.bg ?? C.s2, color: t?.fg ?? C.t2, padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>{d.conf}</span> : "—"}</Td>
+                      <Td l>{d.live || "—"}</Td>
+                      <Td l>{d.call || <span style={{ color: C.t3 }}>—</span>}</Td>
+                      <Td l><span style={{ fontSize: 12, color: C.t2 }}>{d.nextStep || "—"}</span></Td>
+                      <Td l>{d.updated || <span style={{ color: C.t3 }}>—</span>}</Td>
+                    </tr>
+                  );
+                })}
+                {list.length === 0 && (
+                  <tr><td colSpan={9} style={{ padding: "16px 20px", color: C.t3, fontSize: 13 }}>No deals match the current filters.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        );
+        const potOf = (list: typeof view) => list.reduce((s, d) => s + d.pot, 0);
         return (
           <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
             {all.length === 0 ? (
               <div style={{ background: "#fff", border: `1px solid ${C.bd}`, borderRadius: 14, padding: 22, color: C.t2 }}>Deal Tracker not populated yet — run <code>build-deal-tracker.mjs</code>.</div>
             ) : (
-            <Card
-              title="Deal Tracker — Q3 FY26"
-              sub={`Live mirror of the editable "Deal Tracker (DRAFT)" sheet: the deals that decide Q3 + Davi's key deals. The team updates Call / Next step / Updated in the sheet; this view reflects it. ${nConf("Medium")} Medium · ${nConf("Pilot")} Pilot · ${nConf("Hard")} Hard · ${nConf("Very Hard")} Very Hard.`}
-            >
-              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 4px" }}>
+            <>
+              {/* Shared filters (apply to both components) */}
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
                 <select value={dealAE} onChange={(e) => setDealAE(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit" }}>
                   {aes.map((a) => <option key={a} value={a}>{a === "all" ? "All AEs" : a}</option>)}
-                </select>
-                <select value={dealSource} onChange={(e) => setDealSource(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit" }}>
-                  <option value="all">All sources</option>
-                  <option value="Q3 Pipeline">Q3 pipeline only</option>
-                  <option value="Q3 + Key Deal">Q3 + Davi key deal</option>
-                  <option value="Davi Key Deal">Davi key deal only</option>
                 </select>
                 <select value={dealConf} onChange={(e) => setDealConf(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit" }}>
                   <option value="all">All confidence</option>
                   {["Medium", "Pilot", "Hard", "Very Hard"].map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
                 <input value={dealSearch} onChange={(e) => setDealSearch(e.target.value)} placeholder="Search deal / AE / note…" style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.bd}`, fontSize: 13, fontFamily: "inherit", minWidth: 180 }} />
-                <span style={{ fontSize: 13, color: C.t2 }}>{view.length} deals · <b>{fmt(totalPot)}</b> potential</span>
                 <a href={sheetUrl} target="_blank" rel="noreferrer" style={{ marginLeft: "auto", fontSize: 13, color: C.blue, fontWeight: 600, textDecoration: "none" }}>Edit in Google Sheets ↗</a>
               </div>
-              <div style={{ overflow: "auto", maxHeight: 620, padding: "6px 20px 18px" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead><tr style={{ borderBottom: `1px solid ${C.bd}`, position: "sticky", top: 0, background: "#fff" }}>
-                    <Th l>Deal</Th><Th l>AE</Th><Th l>Source</Th><Th l>Stage</Th><Th>Potential</Th><Th l>Confidence</Th><Th l>Est. Live</Th><Th l>Call</Th><Th l>Next step</Th><Th l>Updated</Th>
-                  </tr></thead>
-                  <tbody>
-                    {view.map((d, i) => {
-                      const t = confTone[d.conf];
-                      const srcTone = d.source.startsWith("Q3") ? { bg: C.blueBg, fg: C.blue } : { bg: C.s2, fg: C.t2 };
-                      return (
-                        <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                          <Td l bold>{d.name}</Td>
-                          <Td l>{d.ae}</Td>
-                          <Td l><span style={{ background: srcTone.bg, color: srcTone.fg, padding: "2px 8px", borderRadius: 20, fontSize: 10.5, fontWeight: 600, whiteSpace: "nowrap" }}>{d.source}</span></Td>
-                          <Td l><Pill tone={/SQO/.test(d.stage) ? "good" : /SAL|SQL/.test(d.stage) ? "blue" : undefined}>{d.stage}</Pill></Td>
-                          <Td mono bold>{d.pot ? fmt(d.pot) : "—"}</Td>
-                          <Td l>{d.conf ? <span style={{ background: t?.bg ?? C.s2, color: t?.fg ?? C.t2, padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>{d.conf}</span> : "—"}</Td>
-                          <Td l>{d.live || "—"}</Td>
-                          <Td l>{d.call || <span style={{ color: C.t3 }}>—</span>}</Td>
-                          <Td l><span style={{ fontSize: 12, color: C.t2 }}>{d.nextStep || "—"}</span></Td>
-                          <Td l>{d.updated || <span style={{ color: C.t3 }}>—</span>}</Td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+              <Card
+                title="Deals that make Q3"
+                sub={`Live Q3 pipeline from Salesforce (the deals that decide the quarter). ${q3View.length} deals · ${fmt(potOf(q3View))} potential.`}
+              >
+                {dealTable(q3View)}
+              </Card>
+              <div style={{ height: 16 }} />
+              <Card
+                title="Key deals from Davi's tab"
+                sub={`Davi's hand-tracked key deals (editable in the sheet: Call / Next step / Updated). ${keyView.length} deals · ${fmt(potOf(keyView))} potential · ${nConf("Medium")} Medium · ${nConf("Pilot")} Pilot · ${nConf("Hard")} Hard · ${nConf("Very Hard")} Very Hard.`}
+              >
+                {dealTable(keyView)}
+              </Card>
+            </>
             )}
           </div>
         );

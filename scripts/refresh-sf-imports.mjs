@@ -68,11 +68,13 @@ async function main() {
   const { token, instance } = await sfAuth();
 
   // ---- Query 1: open opportunities ----
+  // Amount, AE_AM_Probability__c (quarter %) and AE_AM_Probability_Year__c (year %) power
+  // the Forecast tab's stage-based Potential (SQL/SAL use Amount×%, SQO/Trial use ARR×%).
   const q1 = await sfQueryAll(instance, token,
-    `SELECT Id, Name, StageName, Annual_Contract_Value_ARR_Formula__c, Expected_Revenue_Quarter_AE__c, CloseDate, CreatedDate, Date_Reached_SQL__c, ChannelofContact__c, Owner.Name, RecordType.Name, LastStageChangeDate FROM Opportunity WHERE IsClosed = false`);
+    `SELECT Id, Name, StageName, Annual_Contract_Value_ARR_Formula__c, Expected_Revenue_Quarter_AE__c, CloseDate, CreatedDate, Date_Reached_SQL__c, ChannelofContact__c, Owner.Name, RecordType.Name, LastStageChangeDate, Amount, AE_AM_Probability__c, AE_AM_Probability_Year__c FROM Opportunity WHERE IsClosed = false`);
   await writeTab(api, "Query 1",
-    ["Id","Name","StageName","Annual_Contract_Value_ARR_Formula__c","Expected_Revenue_Quarter_AE__c","CloseDate","CreatedDate","Date_Reached_SQL__c","ChannelofContact__c","Owner.Name","RecordType.Name","LastStageChangeDate"],
-    q1.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.CreatedDate), val(x.Date_Reached_SQL__c), val(x.ChannelofContact__c), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.LastStageChangeDate)]));
+    ["Id","Name","StageName","Annual_Contract_Value_ARR_Formula__c","Expected_Revenue_Quarter_AE__c","CloseDate","CreatedDate","Date_Reached_SQL__c","ChannelofContact__c","Owner.Name","RecordType.Name","LastStageChangeDate","Amount","AE_AM_Probability__c","AE_AM_Probability_Year__c"],
+    q1.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.CreatedDate), val(x.Date_Reached_SQL__c), val(x.ChannelofContact__c), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.LastStageChangeDate), val(x.Amount), val(x.AE_AM_Probability__c), val(x.AE_AM_Probability_Year__c)]));
 
   // ---- Open pipeline - SOQL pull: open opps in the exact 18-col layout the
   //      "Pipeline" and "Pipeline - WoW" tab formulas expect. This tab used to be

@@ -53,7 +53,7 @@ const SOQL = `SELECT Id, Name, AccountId, Account.Name, Account.Payment_Terms__c
   Merchant_Segment__c, Location_Tiers__c, DealCountry__c, Region__c, ChannelofContact__c,
   Locations_in_Contract__c, CloseDate, Date_Reached_SQL__c, Date_Reached_Closed_Won__c,
   Date_Reached_Closed_Lost__c, ContractLiveDate__c, ContractEndDate__c, CreatedDate,
-  PaymentTerms__c, AccountManager__r.Name
+  PaymentTerms__c, AccountManager__r.Name, Contract_Live_Date_Rip_Replace_LOC__c
   FROM Opportunity WHERE StageName IN ('Billing','Closed Won','Closed Lost')`.replace(/\s+/g, " ");
 
 // Normalize the messy PaymentTerms__c picklist into Annual / Bi-Annual / Quarterly /
@@ -182,6 +182,7 @@ async function main() {
     "Id","Opportunity","Owner","RecordType","Stage","Outcome","Merchant Segment","Location Tier",
     "Deal Country","Region","Channel of Contact","ARR (USD)","Locations","CloseDate",
     "Date Reached SQL","Date Reached Closed Won","Date Reached Closed Lost","ContractLiveDate","ContractEndDate","CreatedDate",
+    "Status","RR LOC Date",
   ]];
   for (const x of all) {
     closed.push([
@@ -192,6 +193,7 @@ async function main() {
       x.AnnualContractValueARR__c ?? 0, x.Locations_in_Contract__c ?? "",
       x.CloseDate ?? "", x.Date_Reached_SQL__c ?? "", x.Date_Reached_Closed_Won__c ?? "",
       x.Date_Reached_Closed_Lost__c ?? "", x.ContractLiveDate__c ?? "", x.ContractEndDate__c ?? "", (x.CreatedDate ?? "").slice(0, 10),
+      x.Status__c ?? "", x.Contract_Live_Date_Rip_Replace_LOC__c ?? "",
     ]);
   }
 
@@ -459,7 +461,7 @@ async function main() {
   for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR","ARR_Forward"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
   reqs.push(
     { addSheet: { properties: { title: "SOQL_Pull" } } },
-    { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 22 } } } },
+    { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 24 } } } },
     { addSheet: { properties: { title: "ARR_MoM_Rebuild" } } },
     { addSheet: { properties: { title: "ARR_WoW_Rebuild", gridProperties: { rowCount: wow.length + 5, columnCount: 10 } } } },
     { addSheet: { properties: { title: "ARR_MoM_Segments", gridProperties: { rowCount: seg.length + 10, columnCount: 30 } } } },
