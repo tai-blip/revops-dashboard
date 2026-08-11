@@ -476,14 +476,16 @@ async function main() {
   // USER_ENTERED so date columns land as real dates (the ACV_MoM AVERAGEIFS compare against them).
   // ARR_MoM_Rebuild!V1 = Live ARR AS OF TODAY (contracts live & not yet ended as of TODAY()) —
   // the true point-in-time live ARR, vs the current-month row which projects month-end.
-  // Status gate (col G): only count contracts whose Status__c is one of the "money is
-  // actually flowing / expected to flow" states. This excludes Churned / Paused / Renewed
-  // (superseded) contracts whose ContractEndDate was never backdated, which a pure date
-  // rule would otherwise keep alive. Historical MoM columns stay date-based on purpose —
-  // a contract that is Churned *today* was genuinely Live Paying in past months, so the
-  // current-status snapshot must NOT be applied retroactively to history.
-  const LIVE_STATUSES = ["[LP] Live Paying", "[LP] Live Paying (Monthly)", "Pending Billing", "Pending Initial Payment", "In Arrears"];
-  const statusOK = `(${LIVE_STATUSES.map((s) => `(SOQL_Pull!$G$2:$G$${LAST}="${s}")`).join("+")}>0)`;
+  // Status gate (col G): exclude only Contracts Ended (Churned). Verified against finance's
+  // "Quarterly Trend by Account" Q3 export (2026-08-11): their active book = the date-live
+  // book minus churned-status contracts, and NOTHING else — they keep Paused and keep
+  // renewals. This single exclusion ties to $5,784,266 vs finance $5,781,046 (within $3.2k /
+  // 0.06%). A broader status whitelist over-removes (~$47k too low). The churned contracts
+  // leak in because their ContractEndDate was never backdated, so a pure date rule keeps
+  // them alive. Historical MoM columns stay date-based on purpose — a contract Churned
+  // *today* was genuinely live in past months, so this snapshot must NOT apply to history.
+  const EXCLUDE_STATUSES = ["Contracts Ended (Churned)"];
+  const statusOK = `(${EXCLUDE_STATUSES.map((s) => `(SOQL_Pull!$G$2:$G$${LAST}<>"${s}")`).join("*")})`;
   await api.spreadsheets.values.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: {
     valueInputOption: "USER_ENTERED",
     data: [
