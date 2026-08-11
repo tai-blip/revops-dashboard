@@ -476,13 +476,21 @@ async function main() {
   // USER_ENTERED so date columns land as real dates (the ACV_MoM AVERAGEIFS compare against them).
   // ARR_MoM_Rebuild!V1 = Live ARR AS OF TODAY (contracts live & not yet ended as of TODAY()) —
   // the true point-in-time live ARR, vs the current-month row which projects month-end.
+  // Status gate (col G): only count contracts whose Status__c is one of the "money is
+  // actually flowing / expected to flow" states. This excludes Churned / Paused / Renewed
+  // (superseded) contracts whose ContractEndDate was never backdated, which a pure date
+  // rule would otherwise keep alive. Historical MoM columns stay date-based on purpose —
+  // a contract that is Churned *today* was genuinely Live Paying in past months, so the
+  // current-status snapshot must NOT be applied retroactively to history.
+  const LIVE_STATUSES = ["[LP] Live Paying", "[LP] Live Paying (Monthly)", "Pending Billing", "Pending Initial Payment", "In Arrears"];
+  const statusOK = `(${LIVE_STATUSES.map((s) => `(SOQL_Pull!$G$2:$G$${LAST}="${s}")`).join("+")}>0)`;
   await api.spreadsheets.values.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: {
     valueInputOption: "USER_ENTERED",
     data: [
       { range: "SOQL_Pull!A1", values: pull },
       { range: "SOQL_ClosedDeals!A1", values: closed },
       { range: "ARR_MoM_Rebuild!A1", values: mom },
-      { range: "ARR_MoM_Rebuild!V1", values: [["Live ARR (as of today)", `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=TODAY())*(SOQL_Pull!$E$2:$E$${LAST}>TODAY())*SOQL_Pull!$C$2:$C$${LAST})`]] },
+      { range: "ARR_MoM_Rebuild!V1", values: [["Live ARR (as of today)", `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=TODAY())*(SOQL_Pull!$E$2:$E$${LAST}>TODAY())*${statusOK}*SOQL_Pull!$C$2:$C$${LAST})`]] },
       { range: "ARR_WoW_Rebuild!A1", values: wow },
       { range: "ARR_MoM_Segments!A1", values: seg },
       { range: "ACV_MoM!A1", values: acvTab },
