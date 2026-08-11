@@ -88,7 +88,7 @@ export async function GET() {
         getSheetValues("ARR_Forward", "A1:E24").catch(() => [] as (string | number | null)[][]),
         getSheetValues("Deal Tracker (DRAFT)", "A1:K200").catch(() => [] as (string | number | null)[][]),
         getSheetValues("Cash_Forecast", "A1:H4000").catch(() => [] as (string | number | null)[][]),
-        getSheetValues("ARR_Funnel", "A1:L4000").catch(() => [] as (string | number | null)[][]),
+        getSheetValues("ARR_Funnel", "A1:P4000").catch(() => [] as (string | number | null)[][]),
       ]);
 
     // ARR (monthly + weekly) is now built entirely from the full-book Rule A rebuild —

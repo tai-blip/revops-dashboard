@@ -144,7 +144,7 @@ export function computeCashForecast(rows: Row[]): CashForecast {
 // the current-snapshot list of deals sitting in the Contracted state.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
 export type FunnelPoint = { ym: string; label: string; booked: number; contracted: number; live: number };
-export type ContractedDeal = { account: string; owner: string; opp: string; arr: number; liveDate: string; end: string };
+export type ContractedDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string };
 export type ArrFunnel = { stock: FunnelPoint[]; contractedDeals: ContractedDeal[] };
 export function computeArrFunnel(rows: Row[]): ArrFunnel {
   const empty: ArrFunnel = { stock: [], contractedDeals: [] };
@@ -153,7 +153,7 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
   const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
   const cArr = ci("ARR (USD)"), cStatus = ci("Status"), cStage = ci("Stage"), cTrial = ci("TrialDate"), cSigned = ci("SignedDate"),
     cLiveDate = ci("LiveDate"), cLivePay = ci("LivePayingDate"), cLost = ci("LostDate"), cEnd = ci("EndDate"),
-    cAcct = ci("Account"), cOwner = ci("Owner"), cOpp = ci("Opportunity");
+    cAcct = ci("Account"), cOwner = ci("Owner"), cOpp = ci("Opportunity"), cAM = ci("AM"), cType = ci("Type"), cRR = ci("RRDate");
   if (cArr < 0 || cTrial < 0 || cLiveDate < 0 || cLivePay < 0) return empty;
   const iso = (v: unknown) => { const d = sheetsSerialToDate(v); return d ? d.toISOString().slice(0, 10) : ""; };
   // Contracted/Live count only signed contracts (Billing / Closed Won stage) — same basis as
@@ -161,7 +161,7 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
   // account's contract-live date but aren't the active paying contract (double-counts).
   const isSigned = (s: string) => s === "Billing" || s === "Closed Won";
 
-  type D = { arr: number; churn: boolean; signed_stage: boolean; trial: string; signed: string; liveDate: string; livePay: string; lost: string; end: string; account: string; owner: string; opp: string };
+  type D = { arr: number; churn: boolean; signed_stage: boolean; trial: string; signed: string; liveDate: string; livePay: string; lost: string; end: string; account: string; owner: string; opp: string; am: string; type: string; rr: boolean };
   const deals: D[] = [];
   for (const r of rows.slice(1)) {
     const arr = Number(r[cArr] ?? 0);
@@ -171,7 +171,8 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
       trial: iso(r[cTrial]), signed: cSigned >= 0 ? iso(r[cSigned]) : "", liveDate: iso(r[cLiveDate]),
       livePay: iso(r[cLivePay]), lost: cLost >= 0 ? iso(r[cLost]) : "", end: cEnd >= 0 ? iso(r[cEnd]) : "",
       account: cAcct >= 0 ? String(r[cAcct] ?? "") : "", owner: cOwner >= 0 ? String(r[cOwner] ?? "") : "",
-      opp: cOpp >= 0 ? String(r[cOpp] ?? "") : "",
+      opp: cOpp >= 0 ? String(r[cOpp] ?? "") : "", am: cAM >= 0 ? String(r[cAM] ?? "") : "",
+      type: cType >= 0 ? String(r[cType] ?? "") : "", rr: cRR >= 0 ? iso(r[cRR]) !== "" : false,
     });
   }
 
@@ -200,7 +201,7 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
   const afterT = (d: string) => d === "" || d > T;
   const contractedDeals: ContractedDeal[] = deals
     .filter((d) => d.signed_stage && beforeT(d.liveDate) && afterT(d.livePay) && afterT(d.end) && afterT(d.lost) && !d.churn)
-    .map((d) => ({ account: d.account || d.opp, owner: d.owner.split(" ")[0], opp: d.opp, arr: d.arr, liveDate: d.liveDate, end: d.end || "(none)" }))
+    .map((d) => ({ account: d.account || d.opp, opp: d.opp, owner: d.owner.split(" ")[0], am: d.am.split(" ")[0], type: d.type, rr: d.rr, arr: d.arr, liveDate: d.liveDate, end: d.end || "(none)" }))
     .sort((a, b) => b.arr - a.arr);
 
   return { stock, contractedDeals };

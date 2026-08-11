@@ -42,7 +42,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number }[]; contractedDeals: { account: string; owner: string; opp: string; arr: number; liveDate: string; end: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -2769,13 +2769,15 @@ export default function Dashboard() {
                         <div style={{ overflowX: "auto", border: `1px solid ${C.s1}`, borderRadius: 10 }}>
                           <table style={{ width: "100%", borderCollapse: "collapse" }}>
                             <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                              <Th l>Account</Th><Th l>AE</Th><Th>ARR</Th><Th l>Contract Live</Th><Th l>Contract End</Th>
+                              <Th l>Deal</Th><Th l>AE</Th><Th l>AM</Th><Th l>Type</Th><Th>ARR</Th><Th l>Contract Live</Th><Th l>Contract End</Th>
                             </tr></thead>
                             <tbody>
                               {cd.map((d, i) => (
                                 <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                                  <Td l bold>{d.account}</Td>
-                                  <Td l>{d.owner}</Td>
+                                  <Td l bold>{d.opp || d.account}{d.rr && <span style={{ marginLeft: 6, background: C.ylwBg, color: C.ylw, padding: "1px 7px", borderRadius: 20, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>R&amp;R</span>}</Td>
+                                  <Td l>{d.owner || "—"}</Td>
+                                  <Td l>{d.am || "—"}</Td>
+                                  <Td l>{d.type ? <Pill tone={/Renewal/i.test(d.type) ? "warn" : /Expansion/i.test(d.type) ? "blue" : undefined}>{d.type.replace(/^\d+\.\s*/, "")}</Pill> : "—"}</Td>
                                   <Td mono bold color={C.blue}>{fmt(d.arr)}</Td>
                                   <Td l>{d.liveDate}</Td>
                                   <Td l>{d.end}</Td>

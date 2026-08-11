@@ -217,14 +217,14 @@ async function main() {
   //     order signed, Live = live-paying) with each deal's tier-transition dates, so the
   //     dashboard can plot both a cumulative funnel and a point-in-time stock MoM series.
   const funnelRecs = await sfQueryAll(instance, token,
-    `SELECT Owner.Name, Name, Account.Name, StageName, Status__c, convertCurrency(AnnualContractValueARR__c) arrUsd, Date_Reached_Trial__c, ContractSignedDate__c, ContractLiveDate__c, Live_Paying_Date__c, Date_Reached_Closed_Lost__c, ContractEndDate__c FROM Opportunity WHERE Date_Reached_Trial__c != null OR ContractSignedDate__c != null OR ContractLiveDate__c != null OR Live_Paying_Date__c != null`);
+    `SELECT Owner.Name, AccountManager__r.Name, Name, Account.Name, StageName, RecordType.Name, Status__c, convertCurrency(AnnualContractValueARR__c) arrUsd, Date_Reached_Trial__c, ContractSignedDate__c, ContractLiveDate__c, Contract_Live_Date_Rip_Replace_LOC__c, Live_Paying_Date__c, Date_Reached_Closed_Lost__c, ContractEndDate__c FROM Opportunity WHERE Date_Reached_Trial__c != null OR ContractSignedDate__c != null OR ContractLiveDate__c != null OR Live_Paying_Date__c != null`);
   const funnel = [[
-    "Owner","Opportunity","Account","Stage","Status","ARR (USD)","TrialDate","SignedDate","LiveDate","LivePayingDate","LostDate","EndDate",
+    "Owner","AM","Opportunity","Account","Stage","Type","Status","ARR (USD)","TrialDate","SignedDate","LiveDate","RRDate","LivePayingDate","LostDate","EndDate",
   ]];
   for (const x of funnelRecs) {
     funnel.push([
-      x.Owner?.Name ?? "", x.Name ?? "", x.Account?.Name ?? "", x.StageName ?? "", x.Status__c ?? "",
-      x.arrUsd ?? 0, x.Date_Reached_Trial__c ?? "", x.ContractSignedDate__c ?? "", x.ContractLiveDate__c ?? "", x.Live_Paying_Date__c ?? "",
+      x.Owner?.Name ?? "", x.AccountManager__r?.Name ?? "", x.Name ?? "", x.Account?.Name ?? "", x.StageName ?? "", x.RecordType?.Name ?? "", x.Status__c ?? "",
+      x.arrUsd ?? 0, x.Date_Reached_Trial__c ?? "", x.ContractSignedDate__c ?? "", x.ContractLiveDate__c ?? "", x.Contract_Live_Date_Rip_Replace_LOC__c ?? "", x.Live_Paying_Date__c ?? "",
       x.Date_Reached_Closed_Lost__c ?? "", x.ContractEndDate__c ?? "",
     ]);
   }
@@ -503,7 +503,7 @@ async function main() {
     { addSheet: { properties: { title: "Top_Booked_ARR", gridProperties: { rowCount: 20, columnCount: 6 } } } },
     { addSheet: { properties: { title: "ARR_Forward", gridProperties: { rowCount: 24, columnCount: 6 } } } },
     { addSheet: { properties: { title: "Cash_Forecast", gridProperties: { rowCount: cashFc.length + 10, columnCount: 8 } } } },
-    { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 12 } } } },
+    { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 16 } } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   // Collapse all tab writes into TWO batched calls (one per valueInputOption) instead of
