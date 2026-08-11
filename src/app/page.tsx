@@ -523,7 +523,6 @@ export default function Dashboard() {
   const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
   const [inclSql, setInclSql] = useState<boolean>(true); // Forecast Potential: include SQL-stage deals?
   const [cashAE, setCashAE] = useState<string>("all");
-  const [funnelModel, setFunnelModel] = useState<"cumulative" | "stock">("cumulative");
   const [dealAE, setDealAE] = useState<string>("all");
   const [dealConf, setDealConf] = useState<string>("all");
   const [dealSearch, setDealSearch] = useState<string>("");
@@ -2690,7 +2689,7 @@ export default function Dashboard() {
             {/* ARR Funnel — Booked (pilot) → Contracted (signed, not live) → Live (paying), MoM, two models */}
             {data.arrFunnel && data.arrFunnel.cumulative.length > 0 && (() => {
               const AF = data.arrFunnel;
-              const series = funnelModel === "cumulative" ? AF.cumulative : AF.stock;
+              const series = AF.stock;
               const cur = series[series.length - 1] ?? { booked: 0, contracted: 0, live: 0 };
               const maxV = Math.max(1, ...series.map((p) => Math.max(p.booked, p.contracted, p.live)));
               const W = 920, H = 240, padL = 58, padR = 16, padT = 16, padB = 30;
@@ -2709,20 +2708,10 @@ export default function Dashboard() {
               return (
                 <Card
                   title="ARR Funnel — Booked → Contracted → Live (MoM)"
-                  sub={funnelModel === "cumulative"
-                    ? "Cumulative — running total of ARR that has reached each milestone by month-end: Booked by Trial date, Contracted by Contract Signed date, Live by Live Paying date. Note: pilots are optional (many deals skip Trial), so Booked can sit below Contracted / Live; Live here is lifetime gross (churn not netted)."
-                    : "Point-in-time — ARR sitting IN each tier at month-end: in pilot (Trial), signed-but-not-yet-paying (R&R/timing), and live-paying (churn excluded). Booked & Contracted convert into Live over time. Live here is by actual Live Paying date, so it runs below the date-based headline Live ARR."}
+                  sub="Point-in-time — ARR sitting IN each tier at month-end: in pilot (Trial), signed-but-not-yet-paying (R&R/timing), and live-paying (churn excluded). Booked & Contracted convert into Live over time. Live here is by actual Live Paying date, so it runs below the date-based headline Live ARR ($5.79M) by the ~$1.05M of live-but-not-yet-paying contracts."
                   accent={C.navy}
                 >
                   <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 2px" }}>
-                    <div style={{ display: "inline-flex", background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 3 }}>
-                      {([["cumulative", "Cumulative"], ["stock", "Point-in-time"]] as const).map(([k, lbl]) => (
-                        <button key={k} onClick={() => setFunnelModel(k)}
-                          style={{ border: "none", cursor: "pointer", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600, fontFamily: "inherit",
-                            background: funnelModel === k ? "#fff" : "transparent", color: funnelModel === k ? C.t1 : C.t3,
-                            boxShadow: funnelModel === k ? "0 1px 3px rgba(0,0,0,.08)" : "none" }}>{lbl}</button>
-                      ))}
-                    </div>
                     <div style={{ display: "flex", gap: 16, marginLeft: "auto", flexWrap: "wrap" }}>
                       {LINES.map((l) => (
                         <span key={l.key} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.t2 }}>
