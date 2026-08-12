@@ -193,7 +193,7 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
     const after = (d: string) => d === "" || d > me;      // not yet, as of month-end
     let sB = 0, sC = 0, sL = 0, sChurn = 0;
     for (const d of deals) {
-      if (before(d.trial) && after(d.signed) && after(d.livePay) && after(d.lost)) sB += d.arr;                        // in Trial
+      if (before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost)) sB += d.arr;                     // in Trial (exits Booked once contract-live, so tiers don't overlap)
       if (d.signed_stage && before(d.liveDate) && after(d.livePay) && after(d.end) && after(d.lost) && !d.churn) sC += d.arr; // contract-live, not paying
       if (d.signed_stage && before(d.livePay) && after(d.end) && !d.churn) sL += d.arr;                                // paying
       if (d.churn && d.end >= first && d.end <= me) sChurn += d.arr;                                                   // churned/paused, contract ended this month
