@@ -228,6 +228,27 @@ async function main() {
       x.Date_Reached_Closed_Lost__c ?? "", x.ContractEndDate__c ?? "",
     ]);
   }
+  // "Tier (today)" — the Booked/Contracted/Live classification computed IN the sheet
+  // (col P), so finance/RevOps can verify the buckets without the dashboard code. Mirrors
+  // computeArrFunnel's as-of-today logic. Cols: E Stage, G Status, H ARR, I Trial, K Live,
+  // M LivePaying, N Lost, O End. ISNUMBER(date) = "the date is set" (blank cells aren't numbers).
+  const signedF = (r) => `OR($E${r}="Billing",$E${r}="Closed Won")`;
+  const notChurnF = (r) => `$G${r}<>"Contracts Ended (Churned)",$G${r}<>"Contract Paused"`;
+  const tierF = (r) =>
+    `=IF(NOT(AND(ISNUMBER($H${r}),$H${r}>0)),"",` +
+    `IF(AND(${signedF(r)},${notChurnF(r)},ISNUMBER($M${r}),$M${r}<=TODAY(),OR(NOT(ISNUMBER($O${r})),$O${r}>TODAY())),"Live",` +
+    `IF(AND(${signedF(r)},${notChurnF(r)},ISNUMBER($K${r}),$K${r}<=TODAY(),OR(NOT(ISNUMBER($M${r})),$M${r}>TODAY()),OR(NOT(ISNUMBER($O${r})),$O${r}>TODAY()),OR(NOT(ISNUMBER($N${r})),$N${r}>TODAY())),"Contracted",` +
+    `IF(AND(ISNUMBER($I${r}),$I${r}<=TODAY(),OR(NOT(ISNUMBER($K${r})),$K${r}>TODAY()),OR(NOT(ISNUMBER($M${r})),$M${r}>TODAY()),OR(NOT(ISNUMBER($N${r})),$N${r}>TODAY())),"Booked",""))))`;
+  funnel[0].push("Tier (today)");
+  for (let i = 1; i < funnel.length; i++) funnel[i].push(tierF(i + 1));
+  // Verifiable tier totals (cols R:S), SUMIF over the Tier column.
+  const funnelSummary = [
+    ["Tier totals — as of today", ""],
+    ["Booked (pilot / Trial)", `=SUMIF($P:$P,"Booked",$H:$H)`],
+    ["Contracted (live, not paying)", `=SUMIF($P:$P,"Contracted",$H:$H)`],
+    ["Live ARR (paying)", `=SUMIF($P:$P,"Live",$H:$H)`],
+    ["Contracted + Live (ties to finance)", `=S3+S4`],
+  ];
 
   // 6) ARR_MoM_Rebuild matrix (boundary = 1st of next month = $B+1)
   //    + churn (org's own marker: Status "Contracts Ended (Churned)", ending that month)
@@ -503,7 +524,7 @@ async function main() {
     { addSheet: { properties: { title: "Top_Booked_ARR", gridProperties: { rowCount: 20, columnCount: 6 } } } },
     { addSheet: { properties: { title: "ARR_Forward", gridProperties: { rowCount: 24, columnCount: 6 } } } },
     { addSheet: { properties: { title: "Cash_Forecast", gridProperties: { rowCount: cashFc.length + 10, columnCount: 8 } } } },
-    { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 16 } } } },
+    { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 20 } } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   // Collapse all tab writes into TWO batched calls (one per valueInputOption) instead of
@@ -531,6 +552,7 @@ async function main() {
       { range: "Top_Booked_ARR!A1", values: topBooked },
       { range: "Cash_Forecast!A1", values: cashFc },
       { range: "ARR_Funnel!A1", values: funnel },
+      { range: "ARR_Funnel!R1", values: funnelSummary },
     ],
   } });
   // RAW so month labels ("2026-08", "Aug 2026") stay TEXT — USER_ENTERED would coerce them to dates.
