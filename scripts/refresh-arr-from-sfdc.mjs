@@ -217,31 +217,64 @@ async function main() {
   //     order signed, Live = live-paying) with each deal's tier-transition dates, so the
   //     dashboard can plot both a cumulative funnel and a point-in-time stock MoM series.
   const funnelRecs = await sfQueryAll(instance, token,
-    `SELECT Owner.Name, AccountManager__r.Name, Name, Account.Name, StageName, RecordType.Name, Status__c, convertCurrency(AnnualContractValueARR__c) arrUsd, Date_Reached_Trial__c, ContractSignedDate__c, ContractLiveDate__c, Contract_Live_Date_Rip_Replace_LOC__c, Live_Paying_Date__c, Date_Reached_Closed_Lost__c, ContractEndDate__c FROM Opportunity WHERE Date_Reached_Trial__c != null OR ContractSignedDate__c != null OR ContractLiveDate__c != null OR Live_Paying_Date__c != null`);
+    `SELECT Owner.Name, AccountManager__r.Name, Name, Account.Name, StageName, RecordType.Name, Status__c, PaymentTerms__c, convertCurrency(AnnualContractValueARR__c) arrUsd, Date_Reached_Trial__c, TrialStartDate__c, ContractSignedDate__c, ContractLiveDate__c, Contract_Live_Date_Rip_Replace_LOC__c, Live_Paying_Date__c, Date_Reached_Closed_Lost__c, ContractEndDate__c FROM Opportunity WHERE Date_Reached_Trial__c != null OR ContractSignedDate__c != null OR ContractLiveDate__c != null OR Live_Paying_Date__c != null`);
   const funnel = [[
     "Owner","AM","Opportunity","Account","Stage","Type","Status","ARR (USD)","TrialDate","SignedDate","LiveDate","RRDate","LivePayingDate","LostDate","EndDate",
   ]];
+  const funnelTerms = [], funnelPilot = []; // parallel to funnel data rows: PaymentTerms__c, TrialStartDate__c (Pilot Start) per opp
   for (const x of funnelRecs) {
     funnel.push([
       x.Owner?.Name ?? "", x.AccountManager__r?.Name ?? "", x.Name ?? "", x.Account?.Name ?? "", x.StageName ?? "", x.RecordType?.Name ?? "", x.Status__c ?? "",
       x.arrUsd ?? 0, x.Date_Reached_Trial__c ?? "", x.ContractSignedDate__c ?? "", x.ContractLiveDate__c ?? "", x.Contract_Live_Date_Rip_Replace_LOC__c ?? "", x.Live_Paying_Date__c ?? "",
       x.Date_Reached_Closed_Lost__c ?? "", x.ContractEndDate__c ?? "",
     ]);
+    funnelTerms.push(x.PaymentTerms__c ?? "");
+    funnelPilot.push(x.TrialStartDate__c ?? "");
   }
-  // "Tier (today)" — the Booked/Contracted/Live classification computed IN the sheet
-  // (col P), so finance/RevOps can verify the buckets without the dashboard code. Mirrors
-  // computeArrFunnel's as-of-today logic. Cols: E Stage, G Status, H ARR, I Trial, K Live,
-  // M LivePaying, N Lost, O End. ISNUMBER(date) = "the date is set" (blank cells aren't numbers).
+  // Payment-term → billing cycles/yr + cadence label (order: quarter, then annual/bi-annual, then month).
+  const cyclesOf = (term) => { const t = String(term || "").toLowerCase();
+    if (t.includes("quarter")) return { py: 4, cad: "Quarterly" };
+    if (t.includes("bi-annual") || t.includes("24_month") || t.includes("annual") || t.includes("year")) return { py: 1, cad: "Annual" };
+    if (t.includes("month")) return { py: 12, cad: "Monthly" };
+    return { py: null, cad: "Unknown" }; };
+  // "Tier (today)" — the Booked/Contracted/Live classification computed IN the sheet (col P),
+  // v2 (team-agreed 2026-08-14): Booked = reached Trial AND Pilot Start Date (TrialStartDate, col
+  // U) known; Contracted = signed-stage + contract-live, not paying (Truc fallback, keeps unsigned);
+  // Live = live-paying. Cols: E Stage, G Status, H ARR, I Trial, K Live, M LivePaying, N Lost,
+  // O End, U PilotStart. ISNUMBER(date) = "the date is set" (blank cells aren't numbers).
   const signedF = (r) => `OR($E${r}="Billing",$E${r}="Closed Won")`;
   const notChurnF = (r) => `$G${r}<>"Contracts Ended (Churned)",$G${r}<>"Contract Paused"`;
-  const tierF = (r) =>
-    `=IF(NOT(AND(ISNUMBER($H${r}),$H${r}>0)),"",` +
-    `IF(AND(${signedF(r)},${notChurnF(r)},ISNUMBER($M${r}),$M${r}<=TODAY(),OR(NOT(ISNUMBER($O${r})),$O${r}>TODAY())),"Live",` +
-    `IF(AND(${signedF(r)},${notChurnF(r)},ISNUMBER($K${r}),$K${r}<=TODAY(),OR(NOT(ISNUMBER($M${r})),$M${r}>TODAY()),OR(NOT(ISNUMBER($O${r})),$O${r}>TODAY()),OR(NOT(ISNUMBER($N${r})),$N${r}>TODAY())),"Contracted",` +
-    `IF(AND(ISNUMBER($I${r}),$I${r}<=TODAY(),OR(NOT(ISNUMBER($K${r})),$K${r}>TODAY()),OR(NOT(ISNUMBER($M${r})),$M${r}>TODAY()),OR(NOT(ISNUMBER($N${r})),$N${r}>TODAY())),"Booked",""))))`;
-  funnel[0].push("Tier (today)");
-  for (let i = 1; i < funnel.length; i++) funnel[i].push(tierF(i + 1));
-  // Verifiable tier totals (cols R:S), SUMIF over the Tier column.
+  // Tier with two cutoffs: cE = ENTRY cutoff (trial/live/paying dates must be reached by cE);
+  // cX = EXIT cutoff (end/lost roll-off — a deal still active as of cX isn't dropped). Point-in-time
+  // uses cE=cX=TODAY(). "Expand to Q3-end" uses cE=Sep-30 (count forward conversions) but cX=TODAY()
+  // so contracts whose term ends within the quarter aren't rolled off (a true expansion, not a drop).
+  // Contracted anchor (col X) = fallback logic: Contract Signed Date (J) → Contract Live Date (K)
+  // → Rip & Replace date (L). A signed deal counts as Contracted from its signed date; unsigned
+  // deals fall back to go-live / R&R. Contracted + Booked gate on this anchor instead of raw K.
+  const anchorF = (r) => `=IF(ISNUMBER($J${r}),$J${r},IF(ISNUMBER($K${r}),$K${r},IF(ISNUMBER($L${r}),$L${r},"")))`;
+  // Booked (concluded 2026-08-14): a deal is Booked when it's currently in an active pilot —
+  // Stage = "Trial" (E) AND a Pilot Start Date (U) is set. Not date-based (which let rolled-back
+  // SQO/SAL deals leak in), and a bare Contract Live Date on an unsigned Trial no longer ejects it.
+  // ARR gate is >= 0 (keeps $0 pilots like FHS – Chat Agent, matching Truc's count).
+  const tierFAt = (r, cE, cX) =>
+    `=IF(NOT(AND(ISNUMBER($H${r}),$H${r}>=0)),"",` +
+    `IF(AND(${signedF(r)},${notChurnF(r)},ISNUMBER($M${r}),$M${r}<=${cE},OR(NOT(ISNUMBER($O${r})),$O${r}>${cX})),"Live",` +
+    `IF(AND(${signedF(r)},${notChurnF(r)},ISNUMBER($X${r}),$X${r}<=${cE},OR(NOT(ISNUMBER($M${r})),$M${r}>${cE}),OR(NOT(ISNUMBER($O${r})),$O${r}>${cX}),OR(NOT(ISNUMBER($N${r})),$N${r}>${cX})),"Contracted",` +
+    `IF(AND($E${r}="Trial",ISNUMBER($U${r})),"Booked",""))))`;
+  const tierF = (r) => tierFAt(r, "TODAY()", "TODAY()");
+  const QEND = "DATE(2026,9,30)"; // end of Q3 FY26 — the ARR-snapshot tabs project entry events to here
+  // P = Tier (today, v2 formula). Q–T = payment-term columns (PaymentTerms, Cadence, Invoice per
+  // cycle = ARR/cycles, Monthly-equiv = ARR/12). U = Pilot Start Date (TrialStartDate, gates Booked
+  // v2). V = "Signed on file?" flag (Yes if a Contract Signed Date exists, else Live/RR fallback).
+  // W = Tier (Q3-end): same rules snapshotted at Sep-30 (the snapshot tabs read this). All sit AFTER
+  // the dashboard's A:P read range, so nothing the dashboard consumes shifts.
+  const signedFlagF = (r) => `=IF(ISNUMBER($J${r}),"Yes","No — Live/RR fallback")`;
+  funnel[0].push("Tier (today)", "PaymentTerms", "Cadence", "Invoice per cycle", "Monthly-equiv", "Pilot Start Date", "Signed on file?", "Tier (Q3-end)", "Contracted anchor");
+  for (let i = 1; i < funnel.length; i++) {
+    const term = funnelTerms[i - 1], arr = Number(funnel[i][7] || 0), c = cyclesOf(term);
+    funnel[i].push(tierF(i + 1), term || "(blank)", c.cad, c.py ? Math.round(arr / c.py) : "", Math.round(arr / 12), funnelPilot[i - 1] || "", signedFlagF(i + 1), tierFAt(i + 1, QEND, "TODAY()"), anchorF(i + 1));
+  }
+  // Verifiable tier totals, SUMIF over the Tier column (P). Written to Y:Z (clear of the Q–V data).
   const funnelSummary = [
     ["Tier totals — as of today", ""],
     ["Booked (pilot / Trial)", `=SUMIF($P:$P,"Booked",$H:$H)`],
@@ -524,7 +557,7 @@ async function main() {
     { addSheet: { properties: { title: "Top_Booked_ARR", gridProperties: { rowCount: 20, columnCount: 6 } } } },
     { addSheet: { properties: { title: "ARR_Forward", gridProperties: { rowCount: 24, columnCount: 6 } } } },
     { addSheet: { properties: { title: "Cash_Forecast", gridProperties: { rowCount: cashFc.length + 10, columnCount: 8 } } } },
-    { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 20 } } } },
+    { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 28 } } } },
   );
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
   // Collapse all tab writes into TWO batched calls (one per valueInputOption) instead of
@@ -552,7 +585,7 @@ async function main() {
       { range: "Top_Booked_ARR!A1", values: topBooked },
       { range: "Cash_Forecast!A1", values: cashFc },
       { range: "ARR_Funnel!A1", values: funnel },
-      { range: "ARR_Funnel!R1", values: funnelSummary },
+      { range: "ARR_Funnel!Y1", values: funnelSummary },
     ],
   } });
   // RAW so month labels ("2026-08", "Aug 2026") stay TEXT — USER_ENTERED would coerce them to dates.

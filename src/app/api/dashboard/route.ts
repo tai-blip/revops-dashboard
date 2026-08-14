@@ -108,7 +108,7 @@ async function buildPayload(): Promise<Payload> {
         { tab: "ARR_Forward", range: "A1:E24" },
         { tab: "Deal Tracker (DRAFT)", range: "A1:K200" },
         { tab: "Cash_Forecast", range: "A1:H4000" },
-        { tab: "ARR_Funnel", range: "A1:P4000" },
+        { tab: "ARR_Funnel", range: "A1:U4000" },
       ]);
 
     // ARR (monthly + weekly) is now built entirely from the full-book Rule A rebuild —

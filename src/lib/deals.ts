@@ -153,7 +153,8 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
   const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
   const cArr = ci("ARR (USD)"), cStatus = ci("Status"), cStage = ci("Stage"), cTrial = ci("TrialDate"), cSigned = ci("SignedDate"),
     cLiveDate = ci("LiveDate"), cLivePay = ci("LivePayingDate"), cLost = ci("LostDate"), cEnd = ci("EndDate"),
-    cAcct = ci("Account"), cOwner = ci("Owner"), cOpp = ci("Opportunity"), cAM = ci("AM"), cType = ci("Type"), cRR = ci("RRDate");
+    cAcct = ci("Account"), cOwner = ci("Owner"), cOpp = ci("Opportunity"), cAM = ci("AM"), cType = ci("Type"), cRR = ci("RRDate"),
+    cPilot = ci("Pilot Start Date");
   if (cArr < 0 || cTrial < 0 || cLiveDate < 0 || cLivePay < 0) return empty;
   const iso = (v: unknown) => { const d = sheetsSerialToDate(v); return d ? d.toISOString().slice(0, 10) : ""; };
   // Contracted/Live count only signed contracts (Billing / Closed Won stage) — same basis as
@@ -161,13 +162,14 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
   // account's contract-live date but aren't the active paying contract (double-counts).
   const isSigned = (s: string) => s === "Billing" || s === "Closed Won";
 
-  type D = { arr: number; churn: boolean; signed_stage: boolean; trial: string; signed: string; liveDate: string; livePay: string; lost: string; end: string; account: string; owner: string; opp: string; am: string; type: string; rr: boolean };
+  type D = { arr: number; churn: boolean; signed_stage: boolean; stage: string; pilotStart: string; trial: string; signed: string; liveDate: string; livePay: string; lost: string; end: string; account: string; owner: string; opp: string; am: string; type: string; rr: boolean };
   const deals: D[] = [];
   for (const r of rows.slice(1)) {
     const arr = Number(r[cArr] ?? 0);
-    if (!(arr > 0)) continue;
+    if (typeof r[cArr] !== "number" || arr < 0) continue; // ARR >= 0 (keep $0 pilots; drop blank/non-numeric)
     deals.push({
       arr, churn: FUNNEL_CHURN.has(String(r[cStatus] ?? "")), signed_stage: isSigned(String(r[cStage] ?? "")),
+      stage: String(r[cStage] ?? ""), pilotStart: cPilot >= 0 ? iso(r[cPilot]) : "",
       trial: iso(r[cTrial]), signed: cSigned >= 0 ? iso(r[cSigned]) : "", liveDate: iso(r[cLiveDate]),
       livePay: iso(r[cLivePay]), lost: cLost >= 0 ? iso(r[cLost]) : "", end: cEnd >= 0 ? iso(r[cEnd]) : "",
       account: cAcct >= 0 ? String(r[cAcct] ?? "") : "", owner: cOwner >= 0 ? String(r[cOwner] ?? "") : "",
@@ -193,7 +195,11 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
     const after = (d: string) => d === "" || d > me;      // not yet, as of month-end
     let sB = 0, sC = 0, sL = 0, sChurn = 0;
     for (const d of deals) {
-      if (before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost)) sB += d.arr;                     // in Trial (exits Booked once contract-live, so tiers don't overlap)
+      // Booked (concluded): current month = actively in pilot (Stage = Trial + Pilot Start set);
+      // past months keep the date-based reconstruction (historical stage is unrecoverable) + the
+      // Pilot-Start gate. A bare contract-live date on an unsigned Trial no longer ejects it.
+      if (isCurrent ? (d.stage === "Trial" && d.pilotStart !== "")
+                    : (d.pilotStart !== "" && before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost))) sB += d.arr;
       if (d.signed_stage && before(d.liveDate) && after(d.livePay) && after(d.end) && after(d.lost) && !d.churn) sC += d.arr; // contract-live, not paying
       if (d.signed_stage && before(d.livePay) && after(d.end) && !d.churn) sL += d.arr;                                // paying
       if (d.churn && d.end >= first && d.end <= me) sChurn += d.arr;                                                   // churned/paused, contract ended this month
