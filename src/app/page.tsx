@@ -638,6 +638,22 @@ export default function Dashboard() {
     return pts;
   }, [data]);
 
+  // Weekly ARR-trend series. The current (latest) week is in progress, and its raw Active
+  // ARR uses a next-Monday boundary that projects a few days forward — so it disagrees with
+  // the as-of-today headline. Anchor the current-week point on the same true Live ARR (W1)
+  // the monthly series and the headline use, so the chart endpoint matches the headline in
+  // BOTH the monthly and weekly toggle views (they used to show different "current" numbers).
+  const arrWeeklyPoints = useMemo<ArrPoint[]>(() => {
+    if (!data) return [];
+    const pts = data.arr.weekly.map((p) => ({ ...p }));
+    if (pts.length && data.liveArrToday != null) {
+      const li = pts.length - 1;
+      const prev = pts[li - 1];
+      pts[li] = { ...pts[li], activeARR: data.liveArrToday, changePct: prev && prev.activeARR > 0 ? (data.liveArrToday - prev.activeARR) / prev.activeARR : pts[li].changePct };
+    }
+    return pts;
+  }, [data]);
+
   // Pipeline created within Q3 FY26, per AE — sourced from the Pipeline-WoW tab's
   // "New ARR Created ($)" rep-by-rep MoM table (Jul–Sep 2026 columns). This is the
   // warehouse's own figure, so the headline total and the per-rep table reconcile
@@ -1102,7 +1118,7 @@ export default function Dashboard() {
     );
   }
 
-  const chartPoints = period === "monthly" ? arrMomPoints : data.arr.weekly;
+  const chartPoints = period === "monthly" ? arrMomPoints : arrWeeklyPoints;
 
   return (
     <div style={{ fontFamily: "var(--font-dm-sans)", background: C.bg, minHeight: "100vh" }}>
@@ -1304,7 +1320,7 @@ export default function Dashboard() {
               </div>
             </Card>
 
-            <Card title="ARR Trend — Path to $10M" sub="Hover a point for details · dashed line = $10M milestone" accent={C.coral}>
+            <Card title="ARR Trend — Path to $10M" sub={`Hover a point for details · dashed line = $10M milestone · latest ${period === "monthly" ? "month" : "week"} = today's live ARR (in progress)`} accent={C.coral}>
               <div style={{ padding: "16px 20px" }}>
                 <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
                   <ChartPeriodToggle period={period} onChange={setPeriod} />
