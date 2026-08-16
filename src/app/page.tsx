@@ -697,6 +697,11 @@ export default function Dashboard() {
 
   const execSummary = useMemo(() => {
     if (!data) return null;
+    // Every Command number is a computed cell on the Headline sheet tab — read it BY KEY so the
+    // dashboard does no math (audit any number by opening Headline). The in-code expressions below
+    // stay ONLY as a break-glass fallback if a key is ever missing. H = number, Hn = nullable.
+    const H = (k: string, fb: number): number => data.headlineSource?.[k] ?? fb;
+    const Hn = (k: string, fb: number | null): number | null => data.headlineSource?.[k] ?? fb;
     const months = data.arr.monthly;
     const latest = months[months.length - 1];
     // "Current month" = the row matching today's YYYY-MM, else the latest row that
@@ -730,22 +735,27 @@ export default function Dashboard() {
     const arrNow = data.liveArrToday ?? (arrMomCur ? arrMomCur.totalARR : currentMonth?.activeARR ?? 0);
     // MoM = as-of-today Live ARR vs last complete month's active ARR (not the current-month
     // month-end projection, which read as a false drop).
-    const curMoM =
+    const curMoM = Hn(
+      "mom_pct",
       data.liveArrToday != null && prevMonth && prevMonth.activeARR > 0
         ? (data.liveArrToday - prevMonth.activeARR) / prevMonth.activeARR
-        : arrMomCur ? arrMomCur.momGrowth / 100 : currentMonth?.changePct ?? null;
-    const gap = 10000000 - arrNow;
+        : arrMomCur ? arrMomCur.momGrowth / 100 : currentMonth?.changePct ?? null
+    );
+    const gap = H("gap_to_10m", 10000000 - arrNow);
 
     // Q3 pipe generation vs quota vs time elapsed. Headline "Created in Q3" = the Pipeline tab's
     // canonical "Created This Quarter (ARR)" (all sources), the single auditable figure. The per-AE
     // table below is a rep-ATTRIBUTION view (excludes AM/lead/unassigned) so it sums to less.
     const aeRows = data.pipeline.aeBreakdown.filter((r) => r.name !== "TOTAL");
-    const quota = aeRows.reduce((s, r) => s + (r.quota ?? 0), 0);
+    const quota = H("pipe_quota", aeRows.reduce((s, r) => s + (r.quota ?? 0), 0));
     const genRows = data.forecastTab.rows.filter((r) => !r.am && !r.lead);
     const genAe = genRows.reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
-    const gen =
-      data.pipeline.metricSections["4. PIPELINE CREATED (NEW)"]?.find((m) => m.metric === "Created This Quarter (ARR)")?.value ?? genAe;
-    const genPct = quota > 0 ? (gen / quota) * 100 : 0;
+    const gen = H(
+      "pipe_created_q3",
+      data.pipeline.metricSections["4. PIPELINE CREATED (NEW)"]?.find((m) => m.metric === "Created This Quarter (ARR)")?.value ?? genAe
+    );
+    // gen_pct is stored as a fraction on Headline; fall back to the ratio of the sourced values.
+    const genPct = data.headlineSource?.gen_pct != null ? data.headlineSource.gen_pct * 100 : quota > 0 ? (gen / quota) * 100 : 0;
     const qStart = new Date("2026-07-02").getTime();
     const qEnd = new Date("2026-10-01").getTime();
     const elapsedPct = Math.min(100, Math.max(0, ((Date.now() - qStart) / (qEnd - qStart)) * 100));
@@ -759,7 +769,7 @@ export default function Dashboard() {
 
     // Weekly ARR creation WoW
     const arrRow = wowMetrics.find((m) => m.raw.includes("New ARR pipeline Created"));
-    const wowDelta = arrRow ? wowDeltaPct(arrRow.values) : null;
+    const wowDelta = data.headlineSource?.pipe_wow_pct != null ? data.headlineSource.pipe_wow_pct * 100 : arrRow ? wowDeltaPct(arrRow.values) : null;
 
     // Churn: latest month vs prior 3-month average
     const churnLast = latest?.churnedARR ?? 0;
@@ -773,10 +783,10 @@ export default function Dashboard() {
         ? { label: "Low", tone: "good" as const }
         : { label: "Watch", tone: "warn" as const };
 
-    const coverage =
-      data.pipeline.metricSections["3. PIPELINE COVERAGE"]?.find(
-        (m) => m.metric === "Pipeline Coverage Ratio"
-      )?.value ?? 0;
+    const coverage = H(
+      "coverage",
+      data.pipeline.metricSections["3. PIPELINE COVERAGE"]?.find((m) => m.metric === "Pipeline Coverage Ratio")?.value ?? 0
+    );
     const coverageStatus =
       coverage >= 3
         ? { label: "Healthy", tone: "good" as const }
@@ -823,14 +833,17 @@ export default function Dashboard() {
     const teamPct = teamQuota > 0 ? (teamActual / teamQuota) * 100 : 0;
     const below10 = reps.filter((r) => r.pctOfQuota < 0.1).length;
 
+    // Pipeline totals + this-week read from the Headline tab (computed cells); Pipeline tab as fallback.
     const totalOpps =
+      data.headlineSource?.total_opps ??
       data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Opportunities")?.value ?? 0;
     const totalPipe =
+      data.headlineSource?.total_pipeline ??
       data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Pipeline (ARR)")?.value ?? 0;
 
     const arrRow = wowMetrics.find((m) => m.raw.includes("New ARR pipeline Created"));
     const arrClean = arrRow?.values.filter((v): v is number => v != null) ?? [];
-    const arrThisWeek = arrClean[arrClean.length - 1] ?? 0;
+    const arrThisWeek = data.headlineSource?.pipe_created_week ?? arrClean[arrClean.length - 1] ?? 0;
     const wowPhrase =
       S.wowDelta == null
         ? ""
@@ -865,7 +878,7 @@ export default function Dashboard() {
           { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const, sub: "signed contracts — SFDC stages Billing + Closed Won (contract-live & not churned) · as of today" },
           { label: "New ARR (mo)", value: fmt(data.headlineSource?.new_arr_mo ?? S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
           { label: "Churned (mo)", value: fmt(data.headlineSource?.churn_mo ?? S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
-          { label: "Up for renewal (mo)", value: fmt(data.arrForward?.renewalDue ?? 0), sub: "contract term ends this month · in renewal", tone: "warn" as const },
+          { label: "Up for renewal (mo)", value: fmt(data.headlineSource?.up_for_renewal_mo ?? data.arrForward?.renewalDue ?? 0), sub: "contract term ends this month · in renewal", tone: "warn" as const },
           { label: "MoM change", value: gp(S.arrMoM), tone: (S.arrMoM ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
           {
             label: "Total pipeline",
@@ -993,10 +1006,10 @@ export default function Dashboard() {
     const qEnd = new Date(qDef.end).getTime();
     const weeksLeft = Math.max(0, Math.ceil((qEnd - now.getTime()) / (7 * 86400000)));
 
-    // Run-rate needed per week — computed from the sourced primitives so gap/pace always reflect
-    // the single plan source (Targets q3_target) and actuals (Headline q3_booked), never diverge.
-    const arrGap = Math.max(0, q3Target - q3Booked);
-    const arrPerWeek = weeksLeft > 0 ? arrGap / weeksLeft : 0;
+    // Gap & run-rate read from the Headline tab's computed cells; the arithmetic below is only a
+    // break-glass fallback so the dashboard does no math when the sheet is present.
+    const arrGap = HS("gap_to_target", Math.max(0, q3Target - q3Booked));
+    const arrPerWeek = HS("arr_needed_week", weeksLeft > 0 ? arrGap / weeksLeft : 0);
 
     // Pipeline: Q3 created vs quota, weekly run-rate. Created = the Pipeline tab's canonical
     // "Created This Quarter (ARR)" (all sources) so Command gap & the header agree; fall back to
@@ -1004,13 +1017,16 @@ export default function Dashboard() {
     const pipeGenAe = data.forecastTab.rows
       .filter((r) => !r.am && !r.lead)
       .reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
-    const pipeGen =
-      data.pipeline.metricSections["4. PIPELINE CREATED (NEW)"]?.find((m) => m.metric === "Created This Quarter (ARR)")?.value ?? pipeGenAe;
-    const pipeQuota = data.pipeline.aeBreakdown
-      .filter((r) => r.name !== "TOTAL")
-      .reduce((s, r) => s + (r.quota ?? 0), 0);
-    const pipeGap = Math.max(0, pipeQuota - pipeGen);
-    const pipePerWeek = weeksLeft > 0 ? pipeGap / weeksLeft : 0;
+    const pipeGen = HS(
+      "pipe_created_q3",
+      data.pipeline.metricSections["4. PIPELINE CREATED (NEW)"]?.find((m) => m.metric === "Created This Quarter (ARR)")?.value ?? pipeGenAe
+    );
+    const pipeQuota = HS(
+      "pipe_quota",
+      data.pipeline.aeBreakdown.filter((r) => r.name !== "TOTAL").reduce((s, r) => s + (r.quota ?? 0), 0)
+    );
+    const pipeGap = HS("pipe_gap", Math.max(0, pipeQuota - pipeGen));
+    const pipePerWeek = HS("pipe_needed_week", weeksLeft > 0 ? pipeGap / weeksLeft : 0);
 
     // Last *completed* week — NOT the current in-progress week. The weekly ARR tab and
     // the WoW table both carry a row/column for the running week, which understates

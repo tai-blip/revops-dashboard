@@ -53,7 +53,24 @@ const newArrMoF = `IFERROR(INDEX(${A}!$Q:$Q,${curMatch}),0)`;
 const churnMoF = `IFERROR(INDEX(${A}!$J:$J,${curMatch}),0)`;
 const momPctF = `IFERROR((${A}!$W$1-${prevActive})/${prevActive},"")`;
 const wowPctF = `IFERROR((${wLast}-${wPrev})/${wPrev},"")`;
-const q3PctF = `IFERROR(${q3Qtd}/${q3Target.toFixed(0)},"")`;
+// Cross-tab reads for the REST of the Command tab, so EVERY Command number is a computed cell here
+// (nothing left to page.tsx math). All sources are tabs that survive the nightly refresh: Pipeline /
+// Pipeline - WoW are formula tabs (never deleted); ARR_Forward is cleared-in-place; Targets is a
+// source tab. Pipeline metrics are read BY LABEL (INDEX/MATCH) so row shifts don't break them.
+const PL = "Pipeline", PW = "Pipeline - WoW", TG = "Targets";
+const mL = (label) => `INDEX('${PL}'!$B:$B,MATCH("${label}",'${PL}'!$A:$A,0))`;
+const totalPipeF = mL("Total Pipeline (ARR)");
+const totalOppsF = mL("Total Opportunities");
+const coverageF = mL("Pipeline Coverage Ratio");
+const pipeCreatedQ3F = mL("Created This Quarter (ARR)");
+const pipeQuotaF = mL("Total Q3 Pipe Quota (All AEs)");
+const pipeCreatedWeekF = `INDEX('${PW}'!$A:$I,MATCH("New ARR pipeline Created ($)",'${PW}'!$A:$A,0),9)`;
+const pipeCreatedWeekPrevF = `INDEX('${PW}'!$A:$I,MATCH("New ARR pipeline Created ($)",'${PW}'!$A:$A,0),8)`;
+const pipeWowF = `IFERROR((${pipeCreatedWeekF}-${pipeCreatedWeekPrevF})/${pipeCreatedWeekPrevF},"")`;
+const renewalF = `'ARR_Forward'!$B$1`;                 // "up for renewal this month" (renewalDue)
+const q3TargetF = `SUM('${TG}'!$B$13:$B$15)`;          // Q3 plan (Jul/Aug/Sep) — single home = Targets tab
+const q3PctF = `IFERROR(${q3Qtd}/(${q3TargetF}),"")`;
+const genPctF = `IFERROR(${pipeCreatedQ3F}/(${pipeQuotaF}),"")`;
 const elapsedF = `IFERROR(1-(DATE(2026,10,1)-TODAY())/(DATE(2026,10,1)-DATE(2026,7,2)),"")`;
 
 async function main() {
@@ -80,10 +97,10 @@ async function main() {
     ["Source: ARR_MoM_Rebuild — New ARR Added (col Q), summed over Q3 · target = fixed finance plan"],
     ["Days left in Q3", "=DATE(2026,10,1)-TODAY()"],
     ["Weeks left", `=${weeksLeft}`],
-    ["Q3 New ARR target (fixed plan)", Math.round(q3Target)],
+    ["Q3 New ARR target (from Targets plan)", `=${q3TargetF}`],
     ["Q3 New ARR booked (QTD)", `=${q3Qtd}`],
-    ["Gap to target", `=${Math.round(q3Target)}-${q3Qtd}`],
-    ["ARR needed / week", `=(${Math.round(q3Target)}-${q3Qtd})/${weeksLeft}`],
+    ["Gap to target", `=(${q3TargetF})-${q3Qtd}`],
+    ["ARR needed / week", `=((${q3TargetF})-${q3Qtd})/${weeksLeft}`],
     B,
     ["③ LAST WEEK vs PACE · Q3 QTD vs TARGET"],
     ["Source: ARR_WoW_Rebuild — Active ARR (col B) · ARR_MoM_Rebuild — New ARR (col Q)"],
@@ -122,15 +139,27 @@ async function main() {
     ["══ MACHINE-READABLE — powers the dashboard Command tab · DO NOT EDIT ══"],
     ["key", "value", "feeds"],
     ["live_arr", `=${A}!$W$1`, "Exec: Live ARR (as of today)"],
+    ["gap_to_10m", `=10000000-${A}!$W$1`, "Exec: gap to $10M milestone"],
     ["new_arr_mo", `=${newArrMoF}`, "Exec: New ARR (current month)"],
     ["churn_mo", `=${churnMoF}`, "Exec: Churned (current month)"],
+    ["up_for_renewal_mo", `=${renewalF}`, "Exec: up for renewal this month"],
     ["mom_pct", `=${momPctF}`, "Exec: MoM change (fraction)"],
-    ["q3_target", q3Target.toFixed(0), "Gap: Q3 New ARR target (fixed plan)"],
+    ["total_pipeline", `=${totalPipeF}`, "Exec: open pipeline (ARR)"],
+    ["total_opps", `=${totalOppsF}`, "Exec: open opportunities (#)"],
+    ["coverage", `=${coverageF}`, "Exec: coverage ratio (open ÷ Q3 quota)"],
+    ["pipe_created_q3", `=${pipeCreatedQ3F}`, "Exec/Pipeline: created this quarter (ARR)"],
+    ["pipe_quota", `=${pipeQuotaF}`, "Exec/Pipeline: Q3 pipe quota (all AEs)"],
+    ["gen_pct", `=${genPctF}`, "Exec: pipe gen % of quota (fraction)"],
+    ["pipe_created_week", `=${pipeCreatedWeekF}`, "Exec: new pipeline this week (ARR)"],
+    ["pipe_wow_pct", `=${pipeWowF}`, "Exec: pipeline creation WoW (fraction)"],
+    ["pipe_gap", `=MAX(0,(${pipeQuotaF})-(${pipeCreatedQ3F}))`, "Command: pipeline gap to quota"],
+    ["pipe_needed_week", `=IFERROR(MAX(0,(${pipeQuotaF})-(${pipeCreatedQ3F}))/${weeksLeft},0)`, "Command: pipeline needed/week"],
+    ["q3_target", `=${q3TargetF}`, "Gap: Q3 New ARR target (from Targets tab plan)"],
     ["q3_booked", `=${q3Qtd}`, "Gap: Q3 New ARR booked (QTD)"],
-    ["gap_to_target", `=${q3Target.toFixed(0)}-${q3Qtd}`, "Gap: Q3 gap to target"],
+    ["gap_to_target", `=(${q3TargetF})-${q3Qtd}`, "Gap: Q3 gap to target"],
     ["days_left", "=DATE(2026,10,1)-TODAY()", "Gap: days left in Q3"],
     ["weeks_left", `=${weeksLeft}`, "Gap: weeks left"],
-    ["arr_needed_week", `=(${q3Target.toFixed(0)}-${q3Qtd})/${weeksLeft}`, "Gap: ARR needed/week"],
+    ["arr_needed_week", `=((${q3TargetF})-${q3Qtd})/${weeksLeft}`, "Gap: ARR needed/week"],
     ["last_week_active", `=${wLast}`, "Pace: latest weekly Active ARR"],
     ["wow_pct", `=${wowPctF}`, "Pace: WoW change (fraction)"],
     ["q3_pct", `=${q3PctF}`, "Pace: Q3 % of target (fraction)"],
