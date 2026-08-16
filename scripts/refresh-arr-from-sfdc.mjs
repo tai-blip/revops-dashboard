@@ -286,8 +286,14 @@ async function main() {
   // 6) ARR_MoM_Rebuild matrix (boundary = 1st of next month = $B+1)
   //    + churn (org's own marker: Status "Contracts Ended (Churned)", ending that month)
   //    + active-ARR split by RecordType (New Business / Renewals / Expansion; K+L+M ≈ C)
+  // Current (in-progress) period is CLAMPED to as-of-today via MIN($B+1, TODAY()) so it doesn't book
+  // month-end roll-off that hasn't happened yet (past months: month-end+1 < today, so unchanged).
+  // Churned status excluded so the whole series ties to the W1 "Live ARR (as of today)" headline —
+  // fixes the finance-audit 3-way spread + Booked>=Live invariant, and the MoM% false-dip.
+  const BND_M = (r) => `MIN($B${r}+1,TODAY())`;
+  const NOCHURN = `*(SOQL_Pull!$G$2:$G$${LAST}<>"Contracts Ended (Churned)")`;
   const activeAt = (r, extra = "") =>
-    `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$B${r}+1)*(SOQL_Pull!$E$2:$E$${LAST}>$B${r}+1)${extra}*SOQL_Pull!$C$2:$C$${LAST})`;
+    `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=${BND_M(r)})*(SOQL_Pull!$E$2:$E$${LAST}>${BND_M(r)})${extra}${NOCHURN}*SOQL_Pull!$C$2:$C$${LAST})`;
   // FLOW: ARR that went LIVE during this month (full book — counts a deal even if it
   // later churned, unlike the survivor-only "ARR & recurring revenue" tab). Bounded by
   // ContractLiveDate in (prev-month-end+1, this-month-end+1], same 1st-of-next boundary.
@@ -327,11 +333,12 @@ async function main() {
       // MS = Managed Services Y1 revenue; Core = Active − Alfie − MS — same definition
       // as the old recurring tab, now on the point-in-time full book.)
       activeAt(r, `*(SOQL_Pull!$R$2:$R$${LAST}=TRUE)`),
-      `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$B${r}+1)*(SOQL_Pull!$E$2:$E$${LAST}>$B${r}+1)*SOQL_Pull!$S$2:$S$${LAST})`,
+      `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=${BND_M(r)})*(SOQL_Pull!$E$2:$E$${LAST}>${BND_M(r)})${NOCHURN}*SOQL_Pull!$S$2:$S$${LAST})`,
       `=C${r}-R${r}-S${r}`,
       // U — Booked ARR: signed on/before boundary and not yet ended (gate on Signed Date T
-      // instead of ContractLiveDate D), so it counts signed-but-not-yet-live deals too.
-      `=SUMPRODUCT((SOQL_Pull!$T$2:$T$${LAST}<>"")*(SOQL_Pull!$T$2:$T$${LAST}<=$B${r}+1)*(SOQL_Pull!$E$2:$E$${LAST}>$B${r}+1)*SOQL_Pull!$C$2:$C$${LAST})`,
+      // instead of ContractLiveDate D), so it counts signed-but-not-yet-live deals too. Same
+      // as-of-today clamp + churn-excl as Active, so Booked >= Live holds in the in-progress month.
+      `=SUMPRODUCT((SOQL_Pull!$T$2:$T$${LAST}<>"")*(SOQL_Pull!$T$2:$T$${LAST}<=${BND_M(r)})*(SOQL_Pull!$E$2:$E$${LAST}>${BND_M(r)})${NOCHURN}*SOQL_Pull!$C$2:$C$${LAST})`,
     ]);
   });
 
@@ -339,8 +346,11 @@ async function main() {
   //      dashboard's weekly ARR chart is Rule A too and the survivor "recurring" tab can
   //      be retired. Boundary A+7 (next Monday) mirrors the monthly $B+1.
   const weeks = weekList(16);
+  // Weekly Active clamped the same way: MIN($A+7, TODAY()) so the in-progress week snapshots
+  // as-of-today (not next Monday), + churn-excl. Ties the latest weekly point to the W1 headline.
+  const BND_W = (r) => `MIN($A${r}+7,TODAY())`;
   const wActive = (r, extra = "") =>
-    `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$A${r}+7)*(SOQL_Pull!$E$2:$E$${LAST}>$A${r}+7)${extra}*SOQL_Pull!$C$2:$C$${LAST})`;
+    `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=${BND_W(r)})*(SOQL_Pull!$E$2:$E$${LAST}>${BND_W(r)})${extra}${NOCHURN}*SOQL_Pull!$C$2:$C$${LAST})`;
   const wAdded = (r, extra = "") =>
     `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}>$A${r})*(SOQL_Pull!$D$2:$D$${LAST}<=$A${r}+7)${extra}*SOQL_Pull!$C$2:$C$${LAST})`;
   const wow = [[
@@ -357,7 +367,7 @@ async function main() {
       wAdded(r, `*(SOQL_Pull!$F$2:$F$${LAST}="2.Renewals")`),
       `=D${r}+E${r}`,
       wActive(r, `*(SOQL_Pull!$R$2:$R$${LAST}=TRUE)`),
-      `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=$A${r}+7)*(SOQL_Pull!$E$2:$E$${LAST}>$A${r}+7)*SOQL_Pull!$S$2:$S$${LAST})`,
+      `=SUMPRODUCT((SOQL_Pull!$D$2:$D$${LAST}<=${BND_W(r)})*(SOQL_Pull!$E$2:$E$${LAST}>${BND_W(r)})${NOCHURN}*SOQL_Pull!$S$2:$S$${LAST})`,
       `=B${r}-H${r}-I${r}`,
     ]);
   });
