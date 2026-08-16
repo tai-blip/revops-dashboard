@@ -857,7 +857,7 @@ export default function Dashboard() {
       command: {
         sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
         stats: [
-          { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const },
+          { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const, sub: "signed contracts — SFDC stages Billing + Closed Won (contract-live & not churned) · as of today" },
           { label: "New ARR (mo)", value: fmt(S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
           { label: "Churned (mo)", value: fmt(S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
           { label: "Up for renewal (mo)", value: fmt(data.arrForward?.renewalDue ?? 0), sub: "contract term ends this month · in renewal", tone: "warn" as const },
@@ -2780,10 +2780,19 @@ export default function Dashboard() {
                   {AF.contractedDeals.length > 0 && (() => {
                     const cd = AF.contractedDeals;
                     const cdTot = cd.reduce((s, d) => s + d.arr, 0);
+                    // Split Contracted into Renewals vs the rest (New Business + Expansion).
+                    const cdRenew = cd.filter((d) => /Renewal/i.test(d.type));
+                    const cdRest = cd.filter((d) => !/Renewal/i.test(d.type));
+                    const renewTot = cdRenew.reduce((s, d) => s + d.arr, 0);
+                    const restTot = cdRest.reduce((s, d) => s + d.arr, 0);
                     return (
                       <div style={{ padding: "2px 20px 18px" }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "8px 0 8px" }}>
                           In Contracted right now — contract-live but not yet paying · {cd.length} deals · <span style={{ color: C.blue, fontFamily: "var(--font-dm-mono)" }}>{fmt(cdTot)}</span>
+                        </div>
+                        <div style={{ display: "flex", gap: 22, flexWrap: "wrap", margin: "0 0 12px", fontSize: 12 }}>
+                          <div><span style={{ color: C.t3 }}>New / Expansion (the rest): </span><span style={{ color: C.blue, fontFamily: "var(--font-dm-mono)", fontWeight: 700 }}>{fmt(restTot)}</span> <span style={{ color: C.t3 }}>· {cdRest.length} deals</span></div>
+                          <div><span style={{ color: C.t3 }}>Renewal only: </span><span style={{ color: C.ylw, fontFamily: "var(--font-dm-mono)", fontWeight: 700 }}>{fmt(renewTot)}</span> <span style={{ color: C.t3 }}>· {cdRenew.length} deals</span></div>
                         </div>
                         <div style={{ overflowX: "auto", border: `1px solid ${C.s1}`, borderRadius: 10 }}>
                           <table style={{ width: "100%", borderCollapse: "collapse" }}>
