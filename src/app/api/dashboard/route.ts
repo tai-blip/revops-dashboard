@@ -86,7 +86,7 @@ async function buildPayload(): Promise<Payload> {
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
     // NOTE: order here MUST match the destructured variables below.
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows] =
       await getSheetValuesBatch([
         { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
@@ -112,17 +112,26 @@ async function buildPayload(): Promise<Payload> {
         // Headline tab = the single source powering the Command tab (machine-readable key→value
         // block at the bottom). Read by key so layout changes above it don't break the dashboard.
         { tab: "Headline", range: "A1:C160" },
+        // Targets tab = the single source powering the Targets & Progress tab (fixed finance plan +
+        // YTD/Q3 rollups as a machine-readable key→value block). Same read-by-key pattern.
+        { tab: "Targets", range: "A1:C120" },
       ]);
-    // Parse the Headline tab's machine-readable key→value block (col A = key, col B = value).
-    const headlineSource: Record<string, number> = {};
-    for (const r of headlineRows ?? []) {
-      const k = String(r?.[0] ?? "").trim();
-      if (/^[a-z][a-z0-9_]+$/.test(k) && typeof r?.[1] === "number") headlineSource[k] = r[1] as number;
-    }
+    // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
+    const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
+      const out: Record<string, number> = {};
+      for (const r of rows ?? []) {
+        const k = String(r?.[0] ?? "").trim();
+        if (/^[a-z][a-z0-9_]+$/.test(k) && typeof r?.[1] === "number") out[k] = r[1] as number;
+      }
+      return out;
+    };
+    const headlineSource = parseKeyValue(headlineRows);
     const hasHeadline = Object.keys(headlineSource).length > 0;
     // Prefer the Headline source when present; fall back to the in-code computation otherwise, so a
     // missing/edited Headline tab degrades gracefully instead of breaking the Command tab.
     const hs = (key: string, fallback: number | null): number | null => (hasHeadline && key in headlineSource ? headlineSource[key] : fallback);
+    // Targets source — powers the Targets & Progress tab (plan literals live here as the audit source).
+    const targetsSource = parseKeyValue(targetsRows);
 
     // ARR (monthly + weekly) is now built entirely from the full-book Rule A rebuild —
     // ARR_MoM_Rebuild (monthly) + ARR_WoW_Rebuild (weekly). The survivor-biased
@@ -276,6 +285,7 @@ async function buildPayload(): Promise<Payload> {
       arrMom,
       liveArrToday: hs("live_arr", liveArrToday),
       headlineSource,
+      targetsSource,
       bookingReport,
       signedLive,
       cashForecast,

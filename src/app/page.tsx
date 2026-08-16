@@ -39,6 +39,7 @@ type DashboardData = {
   arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
   liveArrToday?: number | null;
   headlineSource?: Record<string, number>; // key→value block from the Headline tab (single source)
+  targetsSource?: Record<string, number>; // key→value block from the Targets tab (plan + rollups)
   bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
@@ -735,12 +736,15 @@ export default function Dashboard() {
         : arrMomCur ? arrMomCur.momGrowth / 100 : currentMonth?.changePct ?? null;
     const gap = 10000000 - arrNow;
 
-    // Q3 pipe generation vs quota vs time elapsed. Team gen sums the same AE rows the
-    // per-rep table shows (real AEs — excluding AM & lead) so headline == table total.
+    // Q3 pipe generation vs quota vs time elapsed. Headline "Created in Q3" = the Pipeline tab's
+    // canonical "Created This Quarter (ARR)" (all sources), the single auditable figure. The per-AE
+    // table below is a rep-ATTRIBUTION view (excludes AM/lead/unassigned) so it sums to less.
     const aeRows = data.pipeline.aeBreakdown.filter((r) => r.name !== "TOTAL");
     const quota = aeRows.reduce((s, r) => s + (r.quota ?? 0), 0);
     const genRows = data.forecastTab.rows.filter((r) => !r.am && !r.lead);
-    const gen = genRows.reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
+    const genAe = genRows.reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
+    const gen =
+      data.pipeline.metricSections["4. PIPELINE CREATED (NEW)"]?.find((m) => m.metric === "Created This Quarter (ARR)")?.value ?? genAe;
     const genPct = quota > 0 ? (gen / quota) * 100 : 0;
     const qStart = new Date("2026-07-02").getTime();
     const qEnd = new Date("2026-10-01").getTime();
@@ -963,31 +967,45 @@ export default function Dashboard() {
       }
     }
 
-    // YTD booked = sum of booked months that have data
-    const ytdBooked = bookedByMonth.reduce((s: number, v) => s + (v ?? 0), 0);
-    const ytdTargetThroughNow = TARGETS.newARR
-      .slice(0, now.getUTCMonth() + 1)
-      .reduce((s, v) => s + v, 0);
+    // ── Targets source: the fixed finance plan + YTD/Q3 rollups now live on the Targets sheet tab
+    // as the single auditable source. TS() prefers the sheet value, falling back to the in-code
+    // plan (planConfig.ts) so a missing/edited tab degrades gracefully instead of breaking the tab.
+    const TS = (k: string, fb: number): number => data.targetsSource?.[k] ?? fb;
+    const planNewArr = TARGETS.newARR.map((v, i) => TS(`plan_newarr_m${i + 1}`, v));
+    const planEndArr = TARGETS.endARR.map((v, i) => TS(`plan_endarr_m${i + 1}`, v));
+
+    // YTD booked = sum of booked months that have data (prefer the Targets tab's SUMIFS rollup)
+    const ytdBooked = TS("ytd_new_arr_booked", bookedByMonth.reduce((s: number, v) => s + (v ?? 0), 0));
+    const ytdTargetThroughNow = TS(
+      "ytd_new_arr_target",
+      planNewArr.slice(0, now.getUTCMonth() + 1).reduce((s, v) => s + v, 0)
+    );
 
     // Q3 booked & target — sourced from the Headline tab's key→value block when present (single
     // source of truth), falling back to the in-code computation. HS() = Headline source lookup.
     const HS = (k: string, fb: number): number => data.headlineSource?.[k] ?? fb;
     const q3Booked = HS("q3_booked", qMonthIdxs.reduce((s, i) => s + (bookedByMonth[i] ?? 0), 0));
-    const q3Target = HS("q3_target", qMonthIdxs.reduce((s, i) => s + TARGETS.newARR[i], 0));
-    const fy26NewArrTarget = TARGETS.newARR.reduce((s, v) => s + v, 0);
+    // Q3 target's single home is the Targets tab (the plan owner); fall back to Headline, then plan.
+    const q3Target = TS("q3_target", HS("q3_target", qMonthIdxs.reduce((s, i) => s + planNewArr[i], 0)));
+    const fy26NewArrTarget = TS("fy26_new_arr_target", planNewArr.reduce((s, v) => s + v, 0));
 
     // Weeks left in quarter
     const qEnd = new Date(qDef.end).getTime();
     const weeksLeft = Math.max(0, Math.ceil((qEnd - now.getTime()) / (7 * 86400000)));
 
-    // Run-rate needed per week
-    const arrGap = HS("gap_to_target", Math.max(0, q3Target - q3Booked));
-    const arrPerWeek = HS("arr_needed_week", weeksLeft > 0 ? arrGap / weeksLeft : 0);
+    // Run-rate needed per week — computed from the sourced primitives so gap/pace always reflect
+    // the single plan source (Targets q3_target) and actuals (Headline q3_booked), never diverge.
+    const arrGap = Math.max(0, q3Target - q3Booked);
+    const arrPerWeek = weeksLeft > 0 ? arrGap / weeksLeft : 0;
 
-    // Pipeline: Q3 created vs quota, weekly run-rate
-    const pipeGen = data.forecastTab.rows
+    // Pipeline: Q3 created vs quota, weekly run-rate. Created = the Pipeline tab's canonical
+    // "Created This Quarter (ARR)" (all sources) so Command gap & the header agree; fall back to
+    // the AE-only rep sum if the metric is absent.
+    const pipeGenAe = data.forecastTab.rows
       .filter((r) => !r.am && !r.lead)
       .reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
+    const pipeGen =
+      data.pipeline.metricSections["4. PIPELINE CREATED (NEW)"]?.find((m) => m.metric === "Created This Quarter (ARR)")?.value ?? pipeGenAe;
     const pipeQuota = data.pipeline.aeBreakdown
       .filter((r) => r.name !== "TOTAL")
       .reduce((s, r) => s + (r.quota ?? 0), 0);
@@ -1011,7 +1029,7 @@ export default function Dashboard() {
     // Chart series: booked vs target, with H2 rebased flag
     const chart = PLAN_MONTHS.map((m, i) => ({
       month: m,
-      target: TARGETS.newARR[i],
+      target: planNewArr[i],
       booked: bookedByMonth[i],
       isH2: i >= 6,
     }));
@@ -1027,9 +1045,10 @@ export default function Dashboard() {
     // Elapsed-month QTD target: sum of this quarter's monthly targets whose month
     // has already started (e.g. mid-July → only July's target counts).
     const nowMonth = now.getUTCMonth();
-    const qtdArrTarget = qMonthIdxs
-      .filter((i) => i <= nowMonth)
-      .reduce((s, i) => s + TARGETS.newARR[i], 0);
+    const qtdArrTarget = TS(
+      "qtd_arr_target",
+      qMonthIdxs.filter((i) => i <= nowMonth).reduce((s, i) => s + planNewArr[i], 0)
+    );
 
     // Pace = the flat weekly run-rate implied by the full-quarter target.
     const arrPace = totalQuarterWeeks > 0 ? q3Target / totalQuarterWeeks : 0;
@@ -1058,7 +1077,9 @@ export default function Dashboard() {
       ytdBooked,
       q3Booked,
       fy26NewArrTarget,
-      annualEnd: ANNUAL_END_TARGET,
+      annualEnd: TS("fy26_ending_arr_target", ANNUAL_END_TARGET),
+      planNewArr,
+      planEndArr,
       chart,
     };
   }, [data, q3CreatedByOwner]);
@@ -1575,7 +1596,7 @@ export default function Dashboard() {
                           </>,
                           c.target,
                           i <= nowMonth ? (c.booked ?? 0) : null,
-                          TARGETS.endARR[i],
+                          P.planEndArr[i],
                           i >= 6,
                           false,
                           false
@@ -1583,7 +1604,7 @@ export default function Dashboard() {
                       )}
                       {[0, 1, 2, 3].map((qi) => {
                         const idxs = [qi * 3, qi * 3 + 1, qi * 3 + 2];
-                        const target = idxs.reduce((s, i) => s + TARGETS.newARR[i], 0);
+                        const target = idxs.reduce((s, i) => s + P.planNewArr[i], 0);
                         const elapsed = idxs.filter((i) => i <= nowMonth);
                         const booked = elapsed.length
                           ? elapsed.reduce((s, i) => s + (P.chart[i].booked ?? 0), 0)
