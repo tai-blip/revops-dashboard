@@ -38,6 +38,7 @@ type DashboardData = {
   };
   arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
   liveArrToday?: number | null;
+  headlineSource?: Record<string, number>; // key→value block from the Headline tab (single source)
   bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
@@ -858,8 +859,8 @@ export default function Dashboard() {
         sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
         stats: [
           { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const, sub: "signed contracts — SFDC stages Billing + Closed Won (contract-live & not churned) · as of today" },
-          { label: "New ARR (mo)", value: fmt(S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
-          { label: "Churned (mo)", value: fmt(S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
+          { label: "New ARR (mo)", value: fmt(data.headlineSource?.new_arr_mo ?? S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
+          { label: "Churned (mo)", value: fmt(data.headlineSource?.churn_mo ?? S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
           { label: "Up for renewal (mo)", value: fmt(data.arrForward?.renewalDue ?? 0), sub: "contract term ends this month · in renewal", tone: "warn" as const },
           { label: "MoM change", value: gp(S.arrMoM), tone: (S.arrMoM ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
           {
@@ -968,9 +969,11 @@ export default function Dashboard() {
       .slice(0, now.getUTCMonth() + 1)
       .reduce((s, v) => s + v, 0);
 
-    // Q3 booked & target
-    const q3Booked = qMonthIdxs.reduce((s, i) => s + (bookedByMonth[i] ?? 0), 0);
-    const q3Target = qMonthIdxs.reduce((s, i) => s + TARGETS.newARR[i], 0);
+    // Q3 booked & target — sourced from the Headline tab's key→value block when present (single
+    // source of truth), falling back to the in-code computation. HS() = Headline source lookup.
+    const HS = (k: string, fb: number): number => data.headlineSource?.[k] ?? fb;
+    const q3Booked = HS("q3_booked", qMonthIdxs.reduce((s, i) => s + (bookedByMonth[i] ?? 0), 0));
+    const q3Target = HS("q3_target", qMonthIdxs.reduce((s, i) => s + TARGETS.newARR[i], 0));
     const fy26NewArrTarget = TARGETS.newARR.reduce((s, v) => s + v, 0);
 
     // Weeks left in quarter
@@ -978,8 +981,8 @@ export default function Dashboard() {
     const weeksLeft = Math.max(0, Math.ceil((qEnd - now.getTime()) / (7 * 86400000)));
 
     // Run-rate needed per week
-    const arrGap = Math.max(0, q3Target - q3Booked);
-    const arrPerWeek = weeksLeft > 0 ? arrGap / weeksLeft : 0;
+    const arrGap = HS("gap_to_target", Math.max(0, q3Target - q3Booked));
+    const arrPerWeek = HS("arr_needed_week", weeksLeft > 0 ? arrGap / weeksLeft : 0);
 
     // Pipeline: Q3 created vs quota, weekly run-rate
     const pipeGen = data.forecastTab.rows
