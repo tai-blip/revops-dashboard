@@ -135,6 +135,22 @@ async function main() {
   const countFor = (name) => (name === "TOTAL" ? AE_TABS.reduce((t, rep) => t + (byRep[rep] ?? 0), 0) : name in byRep && AE_TABS.includes(name) ? byRep[name] : AE_TABS.includes(name) ? 0 : "");
   const colValues = [[label], ...sum.slice(1).map((row) => [countFor(row[0])])];
   const a1col = (i) => (i < 26 ? "" : String.fromCharCode(64 + Math.floor(i / 26))) + String.fromCharCode(65 + (i % 26));
+  // Grow the Summary grid if this week's new column runs past the sheet's current width.
+  // The tab appends one column per week; it reached the 24-column default (col Y) and the
+  // out-of-bounds write 500'd the ENTIRE daily refresh. Auto-widen with headroom so this
+  // never blocks the pipeline again.
+  {
+    const sp = await api.spreadsheets.get({
+      spreadsheetId: TEAM_ID, fields: "sheets(properties(title,sheetId,gridProperties.columnCount))",
+    }).then((r) => r.data.sheets.find((s) => s.properties.title === "Summary")?.properties);
+    const haveCols = sp?.gridProperties?.columnCount ?? 0;
+    if (sp && col + 1 > haveCols) {
+      await api.spreadsheets.batchUpdate({
+        spreadsheetId: TEAM_ID,
+        requestBody: { requests: [{ appendDimension: { sheetId: sp.sheetId, dimension: "COLUMNS", length: (col + 1 - haveCols) + 6 } }] },
+      });
+    }
+  }
   await api.spreadsheets.values.update({
     spreadsheetId: TEAM_ID, range: `'Summary'!${a1col(col)}1`, valueInputOption: "RAW",
     requestBody: { values: colValues },
