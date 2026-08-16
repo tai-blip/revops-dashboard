@@ -561,13 +561,18 @@ async function main() {
   // 7) Create-or-replace + bulk write (one values.update per tab)
   const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "sheets.properties(sheetId,title)" });
   const byTitle = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
+  // Tabs that formula-driven SOURCE tabs (Headline, Targets, …) reference MUST NOT be deleted:
+  // deleting a sheet permanently rewrites every cross-tab reference to it as #REF! (references
+  // bind to the sheetId, not the name — a same-named replacement does NOT restore them). So we
+  // clear & rewrite these IN PLACE: the sheetId, and therefore every downstream formula, survives.
+  // Their layouts are fixed (col A/B dates, C+ numbers) so the preserved cell formats stay correct.
+  const KEEP_IN_PLACE = { ARR_MoM_Rebuild: { rowCount: mom.length + 20, columnCount: 26, lastCol: "Z" }, ARR_WoW_Rebuild: { rowCount: wow.length + 20, columnCount: 10, lastCol: "J" } };
   const reqs = [];
-  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR","ARR_Forward","Cash_Forecast","ARR_Funnel"]) if (byTitle[t] != null) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
+  for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR","ARR_Forward","Cash_Forecast","ARR_Funnel"])
+    if (byTitle[t] != null && !(t in KEEP_IN_PLACE)) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
   reqs.push(
     { addSheet: { properties: { title: "SOQL_Pull" } } },
     { addSheet: { properties: { title: "SOQL_ClosedDeals", gridProperties: { rowCount: closed.length + 10, columnCount: 24 } } } },
-    { addSheet: { properties: { title: "ARR_MoM_Rebuild" } } },
-    { addSheet: { properties: { title: "ARR_WoW_Rebuild", gridProperties: { rowCount: wow.length + 5, columnCount: 10 } } } },
     { addSheet: { properties: { title: "ARR_MoM_Segments", gridProperties: { rowCount: seg.length + 10, columnCount: 30 } } } },
     { addSheet: { properties: { title: "ACV_MoM", gridProperties: { rowCount: 20, columnCount: 50 } } } },
     { addSheet: { properties: { title: "ARR_per_Location_MoM", gridProperties: { rowCount: 20, columnCount: 12 } } } },
@@ -577,7 +582,16 @@ async function main() {
     { addSheet: { properties: { title: "Cash_Forecast", gridProperties: { rowCount: cashFc.length + 10, columnCount: 8 } } } },
     { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 28 } } } },
   );
+  // Keep-in-place tabs: create on first run, else resize the grid (preserving sheetId + refs).
+  for (const [t, g] of Object.entries(KEEP_IN_PLACE)) {
+    if (byTitle[t] == null) reqs.push({ addSheet: { properties: { title: t, gridProperties: { rowCount: g.rowCount, columnCount: g.columnCount } } } });
+    else reqs.push({ updateSheetProperties: { properties: { sheetId: byTitle[t], gridProperties: { rowCount: g.rowCount, columnCount: g.columnCount } }, fields: "gridProperties.rowCount,gridProperties.columnCount" } });
+  }
   await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: reqs } });
+  // Clear the keep-in-place tabs' VALUES only (sheetId + cell formats preserved) before rewriting.
+  for (const [t, g] of Object.entries(KEEP_IN_PLACE)) {
+    if (byTitle[t] != null) await api.spreadsheets.values.clear({ spreadsheetId: SHEET_ID, range: `${t}!A1:${g.lastCol}${g.rowCount}` });
+  }
   // Collapse all tab writes into TWO batched calls (one per valueInputOption) instead of
   // ~10 individual values.update calls — keeps us well under the Sheets API "write
   // requests per minute" quota so the downstream daily-digest step doesn't get rate-limited.
