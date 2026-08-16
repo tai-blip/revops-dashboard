@@ -42,7 +42,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -2301,7 +2301,15 @@ export default function Dashboard() {
         // Yr%-missing still come from the AE_Annual_Potential feed. Projection = YTD + Potential.
         const annY = data.aeAnnual;
         const fByName = Object.fromEntries(F.rows.map((r) => [r.name, r]));
-        const annYReps = [...(annY?.reps ?? [])]
+        const annNames = new Set((annY?.reps ?? []).map((r) => r.name));
+        // Leads (e.g. Davi) sit in the forecast roster but not the annual-potential feed. Inject
+        // them so they appear in the Yearly (FY26) view. Annual goal is TBD until leadership sets
+        // the residual quota; YTD shows their recent Closed Won until the annual feed carries them.
+        const annLeadRows = F.rows.filter((r) => r.lead && !annNames.has(r.name)).map((r) => ({
+          name: r.name, goal: 0, ytdNB: 0, ytdExp: 0, ytdTotal: r.closedWon, pctOfGoal: 0,
+          potNB: 0, potExp: 0, potTotal: 0, projection: 0, pctProj: 0, yrMissing: 0,
+        }));
+        const annYReps = [...(annY?.reps ?? []), ...annLeadRows]
           .filter((r) => !FORECAST_EXCLUDE.has(r.name))
           .map((r) => {
             const fr = fByName[r.name];
@@ -2354,7 +2362,7 @@ export default function Dashboard() {
                     {annYReps.map((r, i) => (
                       <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
                         <Td l bold>{r.name.split(" ")[0]}</Td>
-                        <Td mono color={C.t2}>{kMY(r.goal)}</Td>
+                        <Td mono color={C.t2}>{r.goal > 0 ? kMY(r.goal) : "—"}</Td>
                         <Td mono color={r.ytdTotal > 0 ? C.coralDk : C.t1}>{kMY(r.ytdTotal)}</Td>
                         <Td mono color={C.purp}>{kMY(r.potTotal)}</Td>
                         <Td mono bold>{kMY(r.projection)}</Td>
@@ -2756,7 +2764,7 @@ export default function Dashboard() {
                   <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>Contracted</Th><Th>Live ARR</Th><Th>Churn</Th><Th>MoM</Th>
+                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>$ B→C</Th><Th>Contracted</Th><Th>$ C→L</Th><Th>Live ARR</Th><Th>Churn</Th><Th>MoM</Th>
                       </tr></thead>
                       <tbody>
                         {series.map((p, i) => {
@@ -2766,7 +2774,9 @@ export default function Dashboard() {
                             <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === series.length - 1 ? C.s2 : undefined }}>
                               <Td l bold>{p.label}</Td>
                               <Td mono color={C.gold}>{p.booked > 0 ? fmt(p.booked) : "—"}</Td>
+                              <Td mono color={p.bToC > 0 ? C.blue : C.t3}>{p.bToC > 0 ? "+" + fmt(p.bToC) : "—"}</Td>
                               <Td mono color={C.blue}>{p.contracted > 0 ? fmt(p.contracted) : "—"}</Td>
+                              <Td mono color={p.cToL > 0 ? C.grn : C.t3}>{p.cToL > 0 ? "+" + fmt(p.cToL) : "—"}</Td>
                               <Td mono bold color={C.grn}>{p.live > 0 ? fmt(p.live) : "—"}</Td>
                               <Td mono color={p.churn > 0 ? C.red : C.t3}>{p.churn > 0 ? "−" + fmt(p.churn) : "—"}</Td>
                               <Td mono color={dLive == null ? C.t3 : dLive >= 0 ? C.grn : C.red}>{dLive == null ? "—" : (dLive >= 0 ? "+" : "") + fmt(dLive)}</Td>

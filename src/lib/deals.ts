@@ -143,7 +143,7 @@ export function computeCashForecast(rows: Row[]): CashForecast {
 // by whether payment has started. Window is fixed Jan-2026 → current month. Also returns
 // the current-snapshot list of deals sitting in the Contracted state.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
-export type FunnelPoint = { ym: string; label: string; booked: number; contracted: number; live: number; churn: number };
+export type FunnelPoint = { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number };
 export type ContractedDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string };
 export type ArrFunnel = { stock: FunnelPoint[]; contractedDeals: ContractedDeal[] };
 export function computeArrFunnel(rows: Row[]): ArrFunnel {
@@ -182,6 +182,10 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
   const cur = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const todayISO = now.toISOString().slice(0, 10);
   const stock: FunnelPoint[] = [];
+  // Track each deal's tier from the prior month so we can tally the $ that moved Booked→Contracted
+  // and Contracted→Live between consecutive months.
+  const prevTier: string[] = new Array(deals.length).fill("");
+  let firstMonth = true;
   // Fixed window: Jan 2026 → current month. Past months snapshot at month-end; the CURRENT
   // (incomplete) month snapshots as-of-today, so contracts whose term ends later this month
   // aren't pre-dropped while they're still live — and it ties to finance's today snapshot.
@@ -193,18 +197,29 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
     const label = m.toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
     const before = (d: string) => d !== "" && d <= me;   // happened on/before month-end
     const after = (d: string) => d === "" || d > me;      // not yet, as of month-end
-    let sB = 0, sC = 0, sL = 0, sChurn = 0;
-    for (const d of deals) {
-      // Booked (concluded): current month = actively in pilot (Stage = Trial + Pilot Start set);
-      // past months keep the date-based reconstruction (historical stage is unrecoverable) + the
-      // Pilot-Start gate. A bare contract-live date on an unsigned Trial no longer ejects it.
-      if (isCurrent ? (d.stage === "Trial" && d.pilotStart !== "")
-                    : (d.pilotStart !== "" && before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost))) sB += d.arr;
-      if (d.signed_stage && before(d.liveDate) && after(d.livePay) && after(d.end) && after(d.lost) && !d.churn) sC += d.arr; // contract-live, not paying
-      if (d.signed_stage && before(d.livePay) && after(d.end) && !d.churn) sL += d.arr;                                // paying
+    // Tier of a deal at this month-end (priority Live > Contracted > Booked). Booked (concluded):
+    // current month = actively in pilot (Stage = Trial + Pilot Start set); past months keep the
+    // date-based reconstruction (historical stage is unrecoverable) + the Pilot-Start gate.
+    const tierOf = (d: D): "" | "Booked" | "Contracted" | "Live" => {
+      if (d.signed_stage && before(d.livePay) && after(d.end) && !d.churn) return "Live";
+      if (d.signed_stage && before(d.liveDate) && after(d.livePay) && after(d.end) && after(d.lost) && !d.churn) return "Contracted";
+      const booked = isCurrent ? (d.stage === "Trial" && d.pilotStart !== "")
+                               : (d.pilotStart !== "" && before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost));
+      return booked ? "Booked" : "";
+    };
+    let sB = 0, sC = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0;
+    deals.forEach((d, di) => {
+      const t = tierOf(d);
+      if (t === "Booked") sB += d.arr; else if (t === "Contracted") sC += d.arr; else if (t === "Live") sL += d.arr;
       if (d.churn && d.end >= first && d.end <= me) sChurn += d.arr;                                                   // churned/paused, contract ended this month
-    }
-    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn });
+      if (!firstMonth) {                                                                                               // $ that moved tier vs the prior month
+        if (prevTier[di] === "Booked" && t === "Contracted") bToC += d.arr;
+        if (prevTier[di] === "Contracted" && t === "Live") cToL += d.arr;
+      }
+      prevTier[di] = t;
+    });
+    firstMonth = false;
+    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn, bToC, cToL });
   }
 
   // Current snapshot: deals sitting in the Contracted state right now (contract-live, not paying).
