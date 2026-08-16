@@ -40,7 +40,6 @@ type DashboardData = {
   liveArrToday?: number | null;
   headlineSource?: Record<string, number>; // key→value block from the Headline tab (single source)
   targetsSource?: Record<string, number>; // key→value block from the Targets tab (plan + rollups)
-  pipelineSource?: Record<string, number>; // key→value block from the Pipeline Pulse tab (pulse scalars)
   bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
@@ -737,12 +736,15 @@ export default function Dashboard() {
         : arrMomCur ? arrMomCur.momGrowth / 100 : currentMonth?.changePct ?? null;
     const gap = 10000000 - arrNow;
 
-    // Q3 pipe generation vs quota vs time elapsed. Team gen sums the same AE rows the
-    // per-rep table shows (real AEs — excluding AM & lead) so headline == table total.
+    // Q3 pipe generation vs quota vs time elapsed. Headline "Created in Q3" = the Pipeline tab's
+    // canonical "Created This Quarter (ARR)" (all sources), the single auditable figure. The per-AE
+    // table below is a rep-ATTRIBUTION view (excludes AM/lead/unassigned) so it sums to less.
     const aeRows = data.pipeline.aeBreakdown.filter((r) => r.name !== "TOTAL");
     const quota = aeRows.reduce((s, r) => s + (r.quota ?? 0), 0);
     const genRows = data.forecastTab.rows.filter((r) => !r.am && !r.lead);
-    const gen = genRows.reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
+    const genAe = genRows.reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
+    const gen =
+      data.pipeline.metricSections["4. PIPELINE CREATED (NEW)"]?.find((m) => m.metric === "Created This Quarter (ARR)")?.value ?? genAe;
     const genPct = quota > 0 ? (gen / quota) * 100 : 0;
     const qStart = new Date("2026-07-02").getTime();
     const qEnd = new Date("2026-10-01").getTime();
@@ -771,9 +773,7 @@ export default function Dashboard() {
         ? { label: "Low", tone: "good" as const }
         : { label: "Watch", tone: "warn" as const };
 
-    // Prefer the Pipeline Pulse source tab (single audit source); fall back to the Pipeline tab.
     const coverage =
-      data.pipelineSource?.pipe_coverage ??
       data.pipeline.metricSections["3. PIPELINE COVERAGE"]?.find(
         (m) => m.metric === "Pipeline Coverage Ratio"
       )?.value ?? 0;
@@ -824,10 +824,8 @@ export default function Dashboard() {
     const below10 = reps.filter((r) => r.pctOfQuota < 0.1).length;
 
     const totalOpps =
-      data.pipelineSource?.pipe_opps ??
       data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Opportunities")?.value ?? 0;
     const totalPipe =
-      data.pipelineSource?.pipe_open ??
       data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Pipeline (ARR)")?.value ?? 0;
 
     const arrRow = wowMetrics.find((m) => m.raw.includes("New ARR pipeline Created"));
@@ -1000,10 +998,14 @@ export default function Dashboard() {
     const arrGap = Math.max(0, q3Target - q3Booked);
     const arrPerWeek = weeksLeft > 0 ? arrGap / weeksLeft : 0;
 
-    // Pipeline: Q3 created vs quota, weekly run-rate
-    const pipeGen = data.forecastTab.rows
+    // Pipeline: Q3 created vs quota, weekly run-rate. Created = the Pipeline tab's canonical
+    // "Created This Quarter (ARR)" (all sources) so Command gap & the header agree; fall back to
+    // the AE-only rep sum if the metric is absent.
+    const pipeGenAe = data.forecastTab.rows
       .filter((r) => !r.am && !r.lead)
       .reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
+    const pipeGen =
+      data.pipeline.metricSections["4. PIPELINE CREATED (NEW)"]?.find((m) => m.metric === "Created This Quarter (ARR)")?.value ?? pipeGenAe;
     const pipeQuota = data.pipeline.aeBreakdown
       .filter((r) => r.name !== "TOTAL")
       .reduce((s, r) => s + (r.quota ?? 0), 0);
