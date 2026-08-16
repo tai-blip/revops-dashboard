@@ -79,19 +79,35 @@ async function main() {
   const months = [...Array(12)].map((_, i) => i + 1);
   const B = ["", "", "", "", ""]; // blank spacer row
 
+  // Full monthly trend (EVERY ARR_MoM_Rebuild month) as machine-readable rows. The Command ARR
+  // chart reads THIS block, so the Headline tab is the chart's source of truth — edit a cell here
+  // and the chart moves. Each cell is a formula pulling that month's row from ARR_MoM_Rebuild
+  // (B=month-end→ym, C=Active ARR, Q=New ARR, J=Churn, I=MoM), so it also auto-refreshes.
+  const lastRow = (await api.spreadsheets.values.get({ spreadsheetId: ID, range: `'${A}'!A:A` })).data.values?.length ?? 1;
+  const trendRows = [];
+  for (let r = 2; r <= lastRow; r++) {
+    trendRows.push([
+      `=TEXT('${A}'!$B${r},"yyyy-mm")`,
+      `='${A}'!$C${r}`,
+      `='${A}'!$Q${r}`,
+      `='${A}'!$J${r}`,
+      `='${A}'!$I${r}`,
+    ]);
+  }
+
   const values = [
     ["HEADLINE — live mirror of the Command tab (excl. Executive Summary)"],
     ["Every actual is a formula reading ARR_MoM_Rebuild / ARR_WoW_Rebuild (auto-refreshed) → this tab updates itself. Only the fixed finance plan is a literal. Recomputed on open; as of =TODAY()."],
     ["Snapshot date:", "=TEXT(TODAY(),\"yyyy-mm-dd\")"],
     B,
-    ["① ARR TREND — Path to $10M"],
-    ["Source: ARR_MoM_Rebuild — Active ARR (col C) · Live ARR (cell W1) · target = fixed finance plan (endARR path)"],
+    ["① ARR TREND — Path to $10M  ·  THE COMMAND ARR CHART READS THIS TABLE"],
+    ["Source: ARR_MoM_Rebuild (Active ARR col C, New col Q, Churn col J, MoM col I). Each cell is a live formula. The dashboard's ARR-trend chart is drawn from the 'active' column below — edit an 'active' cell and the chart moves."],
     ["Live ARR (as of today)", `=${A}!$W$1`],
     ["$10M milestone", 10000000],
     ["Gap to $10M", `=10000000-${A}!$W$1`],
     B,
-    ["Month", "Active ARR", "Target (plan path)", "MoM Δ"],
-    ...months.map((n) => [`${MON[n - 1]} 2026`, active(n), Math.round(endARR[n - 1]), momD(n)]),
+    ["ym", "active", "new_arr", "churn", "mom"],
+    ...trendRows,
     B,
     ["② DAYS LEFT IN Q3 · GAP TO TARGET (New ARR = Net New + Expansion)"],
     ["Source: ARR_MoM_Rebuild — New ARR Added (col Q), summed over Q3 · target = fixed finance plan"],

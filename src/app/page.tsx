@@ -39,6 +39,7 @@ type DashboardData = {
   arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
   liveArrToday?: number | null;
   headlineSource?: Record<string, number>; // key→value block from the Headline tab (single source)
+  headlineTrend?: { ym: string; active: number; newARR: number; churn: number; mom: number }[]; // ARR-trend table (drives the Command chart)
   targetsSource?: Record<string, number>; // key→value block from the Targets tab (plan + rollups)
   bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
@@ -607,9 +608,11 @@ export default function Dashboard() {
   // back to the ARR tab's monthly points when the new tab is absent (demo mode).
   const arrMomPoints = useMemo<ArrPoint[]>(() => {
     if (!data) return [];
-    if (!data.arrMom || !data.arrMom.length) return data.arr.monthly;
     const byLabel = new Map(data.arr.monthly.map((m) => [m.label, m]));
-    const pts = data.arrMom.map((p) => {
+    const pts: ArrPoint[] =
+      !data.arrMom || !data.arrMom.length
+        ? data.arr.monthly.map((m) => ({ ...m }))
+        : data.arrMom.map((p) => {
       const m = byLabel.get(p.label);
       return {
         label: p.label,
@@ -628,6 +631,15 @@ export default function Dashboard() {
         msTarget: m?.msTarget ?? 0,
       };
     });
+    // The Command ARR chart's source of truth is the Headline tab's ARR-trend table: overlay its
+    // active / new / churn / mom onto each month so editing a Headline 'active' cell moves the chart.
+    if (data.headlineTrend && data.headlineTrend.length) {
+      const ht = new Map(data.headlineTrend.map((t) => [t.ym, t]));
+      for (let i = 0; i < pts.length; i++) {
+        const t = ht.get(pts[i].label);
+        if (t) pts[i] = { ...pts[i], activeARR: t.active, newARR: t.newARR, churnedARR: t.churn, changePct: t.mom };
+      }
+    }
     // The current calendar month's Rule A value is a month-END projection (subtracts the
     // month's upcoming term-ends, so it reads as a drop). Anchor the current-month point on
     // the true as-of-today Live ARR so the chart endpoint matches the headline ($5.79M).
