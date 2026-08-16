@@ -224,6 +224,22 @@ async function main() {
     if (idx === totalRowIdx) return [thisWeekTotal];
     return [""];
   })];
+  // Grow the Summary grid if this week's new column runs past the sheet's current width.
+  // The tab appends one column per week; it reached the 24-column default (col Y) and the
+  // out-of-bounds write 500'd the ENTIRE daily refresh. Auto-widen with headroom so this
+  // never blocks the pipeline again.
+  {
+    const sp = await api.spreadsheets.get({
+      spreadsheetId: TEAM_ID, fields: "sheets(properties(title,sheetId,gridProperties.columnCount))",
+    }).then((r) => r.data.sheets.find((s) => s.properties.title === "Summary")?.properties);
+    const haveCols = sp?.gridProperties?.columnCount ?? 0;
+    if (sp && col + 1 > haveCols) {
+      await api.spreadsheets.batchUpdate({
+        spreadsheetId: TEAM_ID,
+        requestBody: { requests: [{ appendDimension: { sheetId: sp.sheetId, dimension: "COLUMNS", length: (col + 1 - haveCols) + 6 } }] },
+      });
+    }
+  }
   await api.spreadsheets.values.update({
     spreadsheetId: TEAM_ID, range: `'Summary'!${a1col(col)}1`, valueInputOption: "RAW",
     requestBody: { values: colValues },
