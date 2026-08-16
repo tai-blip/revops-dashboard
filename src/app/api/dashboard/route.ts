@@ -86,7 +86,7 @@ async function buildPayload(): Promise<Payload> {
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
     // NOTE: order here MUST match the destructured variables below.
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, pipelinePulseRows] =
       await getSheetValuesBatch([
         { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
@@ -115,6 +115,9 @@ async function buildPayload(): Promise<Payload> {
         // Targets tab = the single source powering the Targets & Progress tab (fixed finance plan +
         // YTD/Q3 rollups as a machine-readable key→value block). Same read-by-key pattern.
         { tab: "Targets", range: "A1:C120" },
+        // Pipeline Pulse tab = live audit mirror of the Pipeline pulse strip (formula-sourced from
+        // the Pipeline / Pipeline - WoW tabs). Machine-readable key→value block, same read pattern.
+        { tab: "Pipeline Pulse", range: "A1:C60" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -132,6 +135,8 @@ async function buildPayload(): Promise<Payload> {
     const hs = (key: string, fallback: number | null): number | null => (hasHeadline && key in headlineSource ? headlineSource[key] : fallback);
     // Targets source — powers the Targets & Progress tab (plan literals live here as the audit source).
     const targetsSource = parseKeyValue(targetsRows);
+    // Pipeline pulse source — live audit mirror of the Pipeline pulse strip (already sheet-native data).
+    const pipelineSource = parseKeyValue(pipelinePulseRows);
 
     // ARR (monthly + weekly) is now built entirely from the full-book Rule A rebuild —
     // ARR_MoM_Rebuild (monthly) + ARR_WoW_Rebuild (weekly). The survivor-biased
@@ -286,6 +291,7 @@ async function buildPayload(): Promise<Payload> {
       liveArrToday: hs("live_arr", liveArrToday),
       headlineSource,
       targetsSource,
+      pipelineSource,
       bookingReport,
       signedLive,
       cashForecast,

@@ -40,6 +40,7 @@ type DashboardData = {
   liveArrToday?: number | null;
   headlineSource?: Record<string, number>; // key→value block from the Headline tab (single source)
   targetsSource?: Record<string, number>; // key→value block from the Targets tab (plan + rollups)
+  pipelineSource?: Record<string, number>; // key→value block from the Pipeline Pulse tab (pulse scalars)
   bookingReport?: { total: number; nb: number; exp: number; count: number; deals: { name: string; owner: string; stage: string; arr: number; signedDate: string; liveDate: string; type: "NB" | "Exp" }[] };
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
@@ -770,7 +771,9 @@ export default function Dashboard() {
         ? { label: "Low", tone: "good" as const }
         : { label: "Watch", tone: "warn" as const };
 
+    // Prefer the Pipeline Pulse source tab (single audit source); fall back to the Pipeline tab.
     const coverage =
+      data.pipelineSource?.pipe_coverage ??
       data.pipeline.metricSections["3. PIPELINE COVERAGE"]?.find(
         (m) => m.metric === "Pipeline Coverage Ratio"
       )?.value ?? 0;
@@ -821,8 +824,10 @@ export default function Dashboard() {
     const below10 = reps.filter((r) => r.pctOfQuota < 0.1).length;
 
     const totalOpps =
+      data.pipelineSource?.pipe_opps ??
       data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Opportunities")?.value ?? 0;
     const totalPipe =
+      data.pipelineSource?.pipe_open ??
       data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Pipeline (ARR)")?.value ?? 0;
 
     const arrRow = wowMetrics.find((m) => m.raw.includes("New ARR pipeline Created"));
