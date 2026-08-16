@@ -26,13 +26,8 @@ const D1 = (n) => `DATE(2026,${n},1)`;
 const ME = (n) => `EOMONTH(${D1(n)},0)`;                                   // that month's end
 const idx = (n, col) => `INDEX(${A}!$${col}:$${col},MATCH(${ME(n)},${A}!$B:$B,0))`;
 const fut = (n, inner) => `=IF(${D1(n)}>TODAY(),"",${inner})`;            // blank future months
-// Active ARR: current month uses W1 (Live ARR as-of-today, the headline basis); past months read
-// the month's Active ARR (col C). Ties the trend to the dashboard's current point.
-const activeInner = (n) => `IF(${ME(n)}=EOMONTH(TODAY(),0),${A}!$W$1,IFERROR(${idx(n, "C")},""))`;
-const active = (n) => fut(n, activeInner(n));
-// MoM Δ computed from the Active values actually shown (so the current month, on the W1 basis,
-// is consistent) rather than reading the source's month-end MoM column.
-const momD = (n) => n === 1 ? "" : fut(n, `IFERROR(N(${activeInner(n)})-N(${activeInner(n - 1)}),"")`);
+// (Section ① no longer builds per-month Active/MoM formulas here — it mirrors every
+// ARR_MoM_Rebuild row straight through, see trendRows in main().)
 const nbMo = (n) => fut(n, `IFERROR(${idx(n, "N")},0)`);
 const expMo = (n) => fut(n, `IFERROR(${idx(n, "O")},0)`);
 const newMo = (n) => fut(n, `IFERROR(${idx(n, "Q")},0)`);
