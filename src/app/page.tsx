@@ -45,7 +45,8 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
+  predictedCashflow?: { months: { ym: string; label: string; contracted: number; live: number }[]; baseline: { contracted: number; live: number }; booked: number; deals: { tier: "contracted" | "live"; opp: string; account: string; owner: string; arr: number; arriveYm: string; arriveDate: string; basis: string }[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -526,6 +527,7 @@ export default function Dashboard() {
   const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
   const [inclSql, setInclSql] = useState<boolean>(true); // Forecast Potential: include SQL-stage deals?
   const [cashAE, setCashAE] = useState<string>("all");
+  const [cashTier, setCashTier] = useState<"booked" | "contracted" | "live">("contracted"); // Predicted Cashflow tier toggle
   const [dealAE, setDealAE] = useState<string>("all");
   const [dealConf, setDealConf] = useState<string>("all");
   const [dealSearch, setDealSearch] = useState<string>("");
@@ -2405,35 +2407,43 @@ export default function Dashboard() {
               : `Per AE. YTD (by Contract Live Date) + Potential (Early SQL+SAL Amount×%, Late SQO+Trial ARR×%) using AE/AM % YEAR → full-year projection vs goal. ${inclSql ? "SQL included" : "SQL excluded"}.`}
           >
             {fcastView === "yearly" ? (
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>AE</Th><Th>Annual Goal</Th><Th>YTD</Th><Th>Potential (Yr)</Th><Th>Projection</Th><Th>% of Goal</Th><Th>Yr% missing</Th>
-                  </tr></thead>
-                  <tbody>
-                    {annYReps.map((r, i) => (
-                      <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                        <Td l bold>{r.name.split(" ")[0]}</Td>
-                        <Td mono color={C.t2}>{r.goal > 0 ? kMY(r.goal) : "—"}</Td>
-                        <Td mono color={r.ytdTotal > 0 ? C.coralDk : C.t1}>{kMY(r.ytdTotal)}</Td>
-                        <Td mono color={C.purp}>{kMY(r.potTotal)}</Td>
-                        <Td mono bold>{kMY(r.projection)}</Td>
-                        <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(r.goal > 0 ? r.pctProj : null, null)}</td>
-                        <Td mono color={r.yrMissing > 0 ? C.ylw : C.t3}>{r.yrMissing || "—"}</Td>
-                      </tr>
-                    ))}
-                    <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
-                      <Td l bold>Team</Td>
-                      <Td mono>{kMY(annYTot.goal)}</Td>
-                      <Td mono color={C.coralDk}>{kMY(annYTot.ytd)}</Td>
-                      <Td mono color={C.purp}>{kMY(annYTot.pot)}</Td>
-                      <Td mono bold>{kMY(annYTot.proj)}</Td>
-                      <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(annYTot.goal > 0 ? annYTot.proj / annYTot.goal : null, null)}</td>
-                      <Td mono>{annYTot.miss || "—"}</Td>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Annual Goal</Th><Th>YTD (Closed)</Th><Th>Pot. Early (SQL+SAL)</Th><Th>Pot. Late (SQO+Trial)</Th><Th>Projection</Th><Th>vs Goal</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {annYReps.map((r) => {
+                    const fr = fByName[r.name];
+                    const early = fr ? earlyPot(fr, true) : 0, late = fr ? latePot(fr, true) : 0;
+                    return (
+                    <tr key={r.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                      <Td l bold>{r.name.split(" ")[0]}</Td>
+                      <Td mono color={C.blue}>{fr ? fmt(fr.openPipe) : "—"}</Td>
+                      <Td mono color={C.t2}>{r.goal > 0 ? fmt(r.goal) : "—"}</Td>
+                      <Td mono color={r.ytdTotal > 0 ? C.coralDk : C.t1}>{fmt(r.ytdTotal)}</Td>
+                      <Td mono color={C.coralDk}>{fmt(early)}</Td>
+                      <Td mono color={C.purp}>{fmt(late)}</Td>
+                      <Td mono bold>{fmt(r.projection)}</Td>
+                      <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(r.goal > 0 ? r.pctProj : null, r.goal > 0 ? r.projection - r.goal : null)}</td>
                     </tr>
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                  <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
+                    <Td l bold>Team</Td>
+                    <Td mono>{fmt(annYReps.reduce((s, r) => s + (fByName[r.name]?.openPipe ?? 0), 0))}</Td>
+                    <Td mono>{fmt(annYTot.goal)}</Td>
+                    <Td mono color={C.coralDk}>{fmt(annYTot.ytd)}</Td>
+                    <Td mono color={C.coralDk}>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? earlyPot(fr, true) : 0); }, 0))}</Td>
+                    <Td mono color={C.purp}>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? latePot(fr, true) : 0); }, 0))}</Td>
+                    <Td mono bold>{fmt(annYTot.proj)}</Td>
+                    <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(annYTot.goal > 0 ? annYTot.proj / annYTot.goal : null, annYTot.goal > 0 ? annYTot.proj - annYTot.goal : null)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -2816,7 +2826,7 @@ export default function Dashboard() {
                   <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>$ B→C</Th><Th>Contracted</Th><Th>$ C→L</Th><Th>Live ARR</Th><Th>Churn</Th><Th>MoM</Th>
+                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>$ B→Lost</Th><Th>$ B→C</Th><Th>Contracted</Th><Th>· Renewal</Th><Th>· Exp/New Biz</Th><Th>$ C→L</Th><Th>Live ARR</Th><Th>Churn</Th><Th>MoM</Th>
                       </tr></thead>
                       <tbody>
                         {series.map((p, i) => {
@@ -2826,8 +2836,11 @@ export default function Dashboard() {
                             <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === series.length - 1 ? C.s2 : undefined }}>
                               <Td l bold>{p.label}</Td>
                               <Td mono color={C.gold}>{p.booked > 0 ? fmt(p.booked) : "—"}</Td>
+                              <Td mono color={p.bToLost > 0 ? C.red : C.t3}>{p.bToLost > 0 ? "−" + fmt(p.bToLost) : "—"}</Td>
                               <Td mono color={p.bToC > 0 ? C.blue : C.t3}>{p.bToC > 0 ? "+" + fmt(p.bToC) : "—"}</Td>
-                              <Td mono color={C.blue}>{p.contracted > 0 ? fmt(p.contracted) : "—"}</Td>
+                              <Td mono bold color={C.blue}>{p.contracted > 0 ? fmt(p.contracted) : "—"}</Td>
+                              <Td mono color={C.t2}>{p.contractedRenewal > 0 ? fmt(p.contractedRenewal) : "—"}</Td>
+                              <Td mono color={C.t2}>{p.contractedNewExp > 0 ? fmt(p.contractedNewExp) : "—"}</Td>
                               <Td mono color={p.cToL > 0 ? C.grn : C.t3}>{p.cToL > 0 ? "+" + fmt(p.cToL) : "—"}</Td>
                               <Td mono bold color={C.grn}>{p.live > 0 ? fmt(p.live) : "—"}</Td>
                               <Td mono color={p.churn > 0 ? C.red : C.t3}>{p.churn > 0 ? "−" + fmt(p.churn) : "—"}</Td>
@@ -2883,122 +2896,167 @@ export default function Dashboard() {
               );
             })()}
             <div style={{ height: 16 }} />
-            {/* ARR Composition — Live vs Booked (item 1) + Churn + MoM breakdown + top-5 booked (item 2) */}
-            {data.arr && (() => {
-              const cf = data.cashForecast;
-              const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
-              const MABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-              const mLabel = (l: string) => { const [y, mm] = l.split("-"); return `${MABBR[+mm - 1]}-${y.slice(2)}`; };
-              // Fixed window Jan-26 → Jan-27. Actuals: Jan-26 → last complete month
-              // (Live line). Forward: current month → Jan-27, Booked = last live +
-              // cumulative scheduled go-lives (no end-date subtraction), Live line stops.
-              const hist = data.arr.monthly.filter((m) => m.label >= "2026-01" && m.label < nowKey);
-              const lastComplete = hist.slice(-1)[0];
-              const churnMo = lastComplete?.churnedARR ?? 0;
-              const liveArr = data.liveArrToday ?? 0;
-              const booked = liveArr + (cf?.total ?? 0);
-              // Anchor the current book + forward projection on the churned-excluded,
-              // as-of-today Live ARR (the "most relevant" number that ties to finance and
-              // matches the headline) rather than the date-based month-end. History stays
-              // date-based; only the latest actual point is swapped to the live-paying book.
-              const anchor = liveArr || (lastComplete?.activeARR ?? 0);
-              type MPt = { label: string; newBusiness: number; expansion: number; churn: number; liveARR: number | null; bookedARR: number; forecast: boolean };
-              const histPts: MPt[] = hist.map((m, i) => {
-                const isLast = i === hist.length - 1;
-                const live = isLast ? anchor : m.activeARR;
-                return {
-                  label: mLabel(m.label), newBusiness: m.newBusiness, expansion: m.expansion,
-                  churn: m.churnedARR, liveARR: live, bookedARR: live, forecast: false,
-                };
-              });
-              // Forward Booked = anchor Live ARR + cumulative forecast cash (Closed Won /
-              // Billing / Trial, not yet paying) landing at contract live date + 45 days.
-              // Overdue (past-dated) and beyond-window events are clamped into the window
-              // so the line's endpoint equals Booked ARR (liveArr + total forecast).
-              const byYm: Record<string, number> = {};
-              for (const e of cf?.events ?? []) {
-                let ym = e.ym; if (ym < nowKey) ym = nowKey; if (ym > "2027-01") ym = "2027-01";
-                byYm[ym] = (byYm[ym] ?? 0) + e.arr;
-              }
-              const fwdGrid: string[] = [];
-              { let gy = +nowKey.slice(0, 4), gm = +nowKey.slice(5, 7);
-                while (`${gy}-${String(gm).padStart(2, "0")}` <= "2027-01") { fwdGrid.push(`${gy}-${String(gm).padStart(2, "0")}`); gm++; if (gm > 12) { gm = 1; gy++; } } }
-              let cum = anchor;
-              const fwdPts: MPt[] = fwdGrid.map((ym) => { const inc = byYm[ym] ?? 0; cum += inc; return {
-                label: mLabel(ym), newBusiness: inc, expansion: 0,
-                churn: 0, liveARR: null, bookedARR: cum, forecast: true,
-              }; });
-              const pts = [...histPts, ...fwdPts];
-              const box = (label: string, val: string, sub: string, color: string) => (
-                <div style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "16px 18px" }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3 }}>{label}</div>
-                  <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color, marginTop: 5 }}>{val}</div>
-                  <div style={{ fontSize: 12, color: C.t2, marginTop: 4 }}>{sub}</div>
-                </div>
-              );
-              const top = data.topBooked ?? [];
+            {/* Funnel Movement — MoM reconciliation: every tier level = last month + ins − outs */}
+            {data.arrFunnel && data.arrFunnel.stock.length > 1 && (() => {
+              const s = data.arrFunnel.stock;
+              const rows = s.slice(1); // each row reconciles this month vs the prior
+              const flowD = (n: number, sign: string) => (n > 0 ? sign + fmt(n) : "—");
               return (
-                <Card title="ARR Composition — Live vs Booked (Jan-26 → Jan-27)" sub="Actuals through the last complete month — the latest Live ARR point is the as-of-today live-paying book (churn excluded, ties to the headline). Forward Booked ARR = that Live ARR + expected ARR of signed-not-yet-paying deals (Closed Won / Billing / Trial), placed at contract live date + 45 days — i.e. the ARR as cash actually comes in. Live ARR line stops at today; Booked ARR projects forward.">
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, padding: "18px 20px" }}>
-                    {box("Booked ARR", fmt(booked), `Live ${fmt(liveArr)} + ${fmt(cf?.total ?? 0)} forecast`, C.navy)}
-                    {box("Live ARR (as of today)", fmt(liveArr), "live-paying · churn excluded", C.grn)}
-                    {box("Booked — not yet paying", fmt(cf?.total ?? 0), `${cf?.events.length ?? 0} deals · Std ${fmt(cf?.stdTotal ?? 0)} / R&R ${fmt(cf?.rrTotal ?? 0)}`, C.navy)}
-                    {box("Churn — last complete mo", fmt(churnMo), lastComplete ? mLabel(lastComplete.label) : "", C.red)}
+                <Card
+                  title="Funnel Movement — how each tier's level reconciles (MoM)"
+                  sub="Each tier's level = last month + what came in − what went out; every row ties out exactly. Booked: 'Rolled back' = a pilot reverted from Trial to SQO/SAL/SQL (fell out of pilot without converting). Contracted can fall even while deals convert to Live because newly-signed deals enter Contracted directly (never a tracked pilot)."
+                >
+                  <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.gold }}>Booked (in pilot)</div>
+                  <div style={{ overflowX: "auto", padding: "2px 20px 10px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ New pilots</Th><Th>− To Contracted</Th><Th>→ Live (direct)</Th><Th>− Lost</Th><Th>− Rolled back</Th><Th>Close</Th>
+                      </tr></thead>
+                      <tbody>
+                        {rows.map((p, i) => (
+                          <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === rows.length - 1 ? C.s2 : undefined }}>
+                            <Td l bold>{p.label}</Td>
+                            <Td mono color={C.t2}>{fmt(s[i].booked)}</Td>
+                            <Td mono color={p.bNew > 0 ? C.grn : C.t3}>{flowD(p.bNew, "+")}</Td>
+                            <Td mono color={p.bToC > 0 ? C.blue : C.t3}>{flowD(p.bToC, "−")}</Td>
+                            <Td mono color={p.bToLive > 0 ? C.grn : C.t3}>{flowD(p.bToLive, "−")}</Td>
+                            <Td mono color={p.bToLost > 0 ? C.red : C.t3}>{flowD(p.bToLost, "−")}</Td>
+                            <Td mono color={p.bDrop > 0 ? C.red : C.t3}>{flowD(p.bDrop, "−")}</Td>
+                            <Td mono bold color={C.gold}>{fmt(p.booked)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <div style={{ padding: "0 20px 8px" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "2px 0 6px" }}>
-                      ARR trajectory — Live ARR (actuals) continuing into Booked ARR (forecast)
+                  <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.blue }}>Contracted (signed, not yet paying)</div>
+                  <div style={{ overflowX: "auto", padding: "2px 20px 10px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ New signed</Th><Th>+ From Booked</Th><Th>− To Live</Th><Th>− Lost/Churn</Th><Th>Close</Th>
+                      </tr></thead>
+                      <tbody>
+                        {rows.map((p, i) => (
+                          <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === rows.length - 1 ? C.s2 : undefined }}>
+                            <Td l bold>{p.label}</Td>
+                            <Td mono color={C.t2}>{fmt(s[i].contracted)}</Td>
+                            <Td mono color={p.cNewSigned > 0 ? C.grn : C.t3}>{flowD(p.cNewSigned, "+")}</Td>
+                            <Td mono color={p.bToC > 0 ? C.grn : C.t3}>{flowD(p.bToC, "+")}</Td>
+                            <Td mono color={p.cToL > 0 ? C.red : C.t3}>{flowD(p.cToL, "−")}</Td>
+                            <Td mono color={p.cLeak > 0 ? C.red : C.t3}>{flowD(p.cLeak, "−")}</Td>
+                            <Td mono bold color={C.blue}>{fmt(p.contracted)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ padding: "6px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.grn }}>Live (paying)</div>
+                  <div style={{ overflowX: "auto", padding: "2px 20px 16px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ From Contracted</Th><Th>+ New direct</Th><Th>− Churn / ended</Th><Th>Close</Th>
+                      </tr></thead>
+                      <tbody>
+                        {rows.map((p, i) => (
+                          <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === rows.length - 1 ? C.s2 : undefined }}>
+                            <Td l bold>{p.label}</Td>
+                            <Td mono color={C.t2}>{fmt(s[i].live)}</Td>
+                            <Td mono color={p.cToL > 0 ? C.grn : C.t3}>{flowD(p.cToL, "+")}</Td>
+                            <Td mono color={p.lNewDirect > 0 ? C.grn : C.t3}>{flowD(p.lNewDirect, "+")}</Td>
+                            <Td mono color={p.lChurn > 0 ? C.red : C.t3}>{flowD(p.lChurn, "−")}</Td>
+                            <Td mono bold color={C.grn}>{fmt(p.live)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              );
+            })()}
+            <div style={{ height: 16 }} />
+            {/* Predicted Cashflow — when each ARR tier turns into collected cash (live/R&R date + 45d net term) */}
+            {data.predictedCashflow && data.predictedCashflow.months.length > 0 && (() => {
+              const pc = data.predictedCashflow;
+              const curYm = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+              const tier: "contracted" | "live" = cashTier === "live" ? "live" : "contracted";
+              const meta = {
+                contracted: { label: "Contracted", color: C.blue, base: pc.baseline.contracted, sub: "+ pilots converting in (Trial End + 15d)" },
+                live: { label: "Live", color: C.grn, base: pc.baseline.live, sub: "+ contracted going live-paying (Contract-Live + 45d)" },
+              } as const;
+              const active = meta[tier];
+              const endpoint = pc.months.length ? pc.months[pc.months.length - 1][tier] : active.base;
+              const cumPts = pc.months.map((m) => ({ label: m.label, value: m[tier], forecast: m.ym > curYm }));
+              const tierDeals = pc.deals.filter((d) => d.tier === tier);
+              return (
+                <Card
+                  title="Predicted Cashflow — forward ARR by tier"
+                  sub="Forward projection of each tier's ARR from today. Contracted grows as pilots convert (Trial End + 15d nego); Live grows as contracted deals start paying (Contract-Live date + 45d billing). Booked is context only — too early to forecast."
+                >
+                  {/* IN PROGRESS banner — methodology (CLD+45, pilot-end dates) still being validated */}
+                  <div style={{ margin: "10px 20px 0", padding: "8px 12px", background: C.ylwBg, border: `1px solid ${C.ylw}`, borderRadius: 8, fontSize: 12, color: C.t2, fontWeight: 600 }}>
+                    ⚠️ IN PROGRESS — methodology still being validated (CLD + 45d cash assumption is under review with finance; pilot-end dates populate on the nightly refresh). Numbers here are provisional.
+                  </div>
+                  {/* Snapshot — the three tiers standing right now */}
+                  <div style={{ padding: "12px 20px 4px" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3, marginBottom: 6 }}>
+                      Snapshot — as of {new Date().toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })}
                     </div>
-                    <ArrMovementChart points={pts.map((p) => ({ label: p.label, value: p.liveARR != null ? p.liveARR : p.bookedARR, forecast: p.forecast }))} />
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+                      <div style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: "12px 14px", opacity: 0.75 }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.gold }}>Booked ARR <span style={{ color: C.t3, fontWeight: 400 }}>· context</span></div>
+                        <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(pc.booked)}</div>
+                      </div>
+                      {(["contracted", "live"] as const).map((k) => (
+                        <div key={k} onClick={() => setCashTier(k)} style={{ cursor: "pointer", background: C.s2, border: `1px solid ${tier === k ? meta[k].color : C.bd}`, borderRadius: 10, padding: "12px 14px" }}>
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: meta[k].color }}>{meta[k].label} ARR</div>
+                          <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(meta[k].base)}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  {/* MoM breakdown table — all components with numbers */}
-                  <div style={{ padding: "6px 20px 14px" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Month-over-month breakdown (Jan-26 → Jan-27)</div>
-                    <div style={{ overflowX: "auto" }}>
+                  {/* Toggle — Contracted vs Live forecast */}
+                  <div style={{ padding: "8px 20px 4px", display: "flex", gap: 8 }}>
+                    {(["contracted", "live"] as const).map((k) => (
+                      <button key={k} onClick={() => setCashTier(k)}
+                        style={{ cursor: "pointer", border: `1px solid ${tier === k ? meta[k].color : C.bd}`, background: tier === k ? meta[k].color : "transparent", color: tier === k ? "#fff" : C.t2, borderRadius: 10, padding: "7px 14px", fontSize: 12.5, fontWeight: 700 }}>
+                        {meta[k].label} forecast
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ padding: "6px 20px 4px", fontSize: 12.5, fontWeight: 700, color: active.color }}>
+                    {active.label} ARR — {fmt(active.base)} now → <span style={{ fontFamily: "var(--font-dm-mono)" }}>{fmt(endpoint)}</span> projected · {active.sub}
+                  </div>
+                  <div style={{ padding: "0 12px 8px" }}>
+                    <ArrMovementChart points={cumPts} actualLabel={`${active.label} ARR now`} forecastLabel="Forecast" />
+                  </div>
+                  {/* Deal-level detail — the deals converting into the selected tier */}
+                  <div style={{ padding: "2px 20px 18px" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>
+                      {tier === "contracted" ? "Pilots converting to Contracted" : "Contracted deals going Live-paying"} — {tierDeals.length} deals · <span style={{ color: active.color, fontFamily: "var(--font-dm-mono)" }}>{fmt(tierDeals.reduce((s, d) => s + d.arr, 0))}</span>
+                    </div>
+                    <div style={{ overflowX: "auto", border: `1px solid ${C.s1}`, borderRadius: 10, maxHeight: 320, overflowY: "auto" }}>
                       <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                        <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                          <Th l>Month</Th><Th>New Biz</Th><Th>Expansion</Th><Th>Churn</Th><Th>Booked ARR</Th><Th>Live ARR</Th>
+                        <thead><tr style={{ borderBottom: `1px solid ${C.bd}`, position: "sticky", top: 0, background: C.s2 }}>
+                          <Th l>Deal</Th><Th l>Account</Th><Th l>AE</Th><Th>ARR</Th><Th l>Arrives</Th><Th l>Basis</Th>
                         </tr></thead>
                         <tbody>
-                          {pts.map((m, i) => (
-                            <tr key={i} style={{ borderBottom: `1px solid ${C.s1}`, background: m.forecast ? C.s1 : undefined }}>
-                              <Td l bold>{m.label}{m.forecast ? " ·f" : ""}</Td>
-                              <Td mono color={C.grn}>{m.newBusiness ? fmt(m.newBusiness) : "—"}</Td>
-                              <Td mono color={C.blue}>{m.expansion ? fmt(m.expansion) : "—"}</Td>
-                              <Td mono color={C.red}>{m.churn ? "−" + fmt(m.churn) : "—"}</Td>
-                              <Td mono bold color={C.gold}>{fmt(m.bookedARR)}</Td>
-                              <Td mono bold color={C.navy}>{m.liveARR != null ? fmt(m.liveARR) : "—"}</Td>
+                          {tierDeals.map((d, i) => (
+                            <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                              <Td l bold>{d.opp || d.account || "—"}</Td>
+                              <Td l>{d.account || "—"}</Td>
+                              <Td l>{d.owner || "—"}</Td>
+                              <Td mono bold color={active.color}>{fmt(d.arr)}</Td>
+                              <Td l mono>{d.arriveYm || "—"}</Td>
+                              <Td l>{d.basis}</Td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                    <div style={{ fontSize: 11, color: C.t3, marginTop: 6 }}>·f = forecast month (Booked ARR projected; Live ARR not yet actual)</div>
                   </div>
-                  {/* Top 5 currently-booked contracts (sheet-computed: Top_Booked_ARR) */}
-                  {top.length > 0 && (
-                    <div style={{ padding: "0 20px 18px" }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Top {top.length} booked contracts — currently in the book</div>
-                      <div style={{ overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Account</Th><Th l>AE</Th><Th l>Status</Th><Th l>Live date</Th><Th>ARR</Th></tr></thead>
-                          <tbody>
-                            {top.map((d, i) => (
-                              <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                                <Td l bold>{d.account || d.opp}</Td><Td l>{d.owner.split(" ")[0]}</Td>
-                                <Td l><Pill tone={d.status === "Live" ? "good" : "warn"}>{d.status}</Pill></Td>
-                                <Td l>{d.liveDate}</Td>
-                                <Td mono bold color={C.navy}>{fmt(d.arr)}</Td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
                 </Card>
               );
             })()}
+            <div style={{ height: 16 }} />
           {/* Cash timing — forecast cash-in (Contract Live Date + 45 days), Standard vs Rip&Replace */}
           {data.cashForecast && data.cashForecast.events.length > 0 && (() => {
             const CF = data.cashForecast;
@@ -3017,7 +3075,7 @@ export default function Dashboard() {
             const totStd = cfMonths.reduce((s, m) => s + std[m.ym], 0), totRR = cfMonths.reduce((s, m) => s + rr[m.ym], 0);
             const cashAEs = ["all", ...CF.owners];
             return (
-              <Card title="Cash timing — forecast cash-in (Contract Live Date + 45 days)" sub="Signed / committed but not-yet-paying deals (Stage Closed Won / Billing / Trial, no Live Paying Date) forecast to turn into cash 45 days after their contract live date. Rip & Replace/LOC deals use the R&R date + 45. Already-paying deals sit in Live ARR, not here." accent={C.navy}>
+              <Card title="Cash timing — forecast cash-in (Contract Live Date + 45 days)" sub="Signed / committed but not-yet-paying deals (Stage Closed Won / Billing / Trial, no Live Paying Date). First payment 45 days after contract live date (R&R date + 45 for Rip & Replace), then split into installments by billing term — Monthly = ARR/12 monthly, Quarterly = ARR/4 quarterly, Annual = one payment. Already-paying deals sit in Live ARR, not here." accent={C.navy}>
                 <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 4px" }}>
                   <select value={cashAE} onChange={(e) => setCashAE(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid " + C.bd, fontSize: 13, fontFamily: "inherit" }}>
                     {cashAEs.map((a) => <option key={a} value={a}>{a === "all" ? "All AEs" : short(a)}</option>)}

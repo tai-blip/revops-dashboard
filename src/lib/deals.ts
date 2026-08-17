@@ -107,10 +107,14 @@ export function computeCashForecast(rows: Row[]): CashForecast {
   const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
   const cStage = ci("Stage"), cStatus = ci("Status"), cArr = ci("ARR (USD)"),
     cLive = ci("ContractLiveDate"), cRR = ci("RR LOC Date"), cLPD = ci("Live Paying Date"),
-    cOwner = ci("Owner"), cOpp = ci("Opportunity");
+    cOwner = ci("Owner"), cOpp = ci("Opportunity"), cTerm = ci("PaymentTerms");
   if (cStage < 0 || cArr < 0 || cLive < 0 || cLPD < 0) return empty;
   const ymOf = (d: Date) => d.toISOString().slice(0, 7);
   const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86400000);
+  const addMonths = (d: Date, n: number) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, d.getUTCDate()));
+  // Billing cadence → cycles/yr: Monthly 12, Quarterly 4, Annual/Bi-Annual/blank 1. Each deal's
+  // annual ARR is billed in `cycles` equal installments (ARR/cycles), one per cycle from first pay.
+  const cyclesOf = (t: string) => { const s = t.toLowerCase(); return s.includes("month") ? 12 : s.includes("quarter") ? 4 : 1; };
 
   const events: CashForecastEvent[] = [];
   const owners = new Set<string>();
@@ -126,11 +130,91 @@ export function computeCashForecast(rows: Row[]): CashForecast {
     if (!anchor) continue;
     const kind: "rr" | "std" = rr ? "rr" : "std";
     const owner = String(r[cOwner] ?? ""), name = cOpp >= 0 ? String(r[cOpp] ?? "") : "";
-    events.push({ owner, name, ym: ymOf(addDays(anchor, 45)), arr, kind });
+    // Split the ARR into billing installments per payment term, first payment at go-live + 45 days.
+    const cycles = cyclesOf(cTerm >= 0 ? String(r[cTerm] ?? "") : "");
+    const perCycle = arr / cycles, monthsPerCycle = 12 / cycles;
+    const firstPay = addDays(anchor, 45);
+    for (let c = 0; c < cycles; c++) {
+      events.push({ owner, name, ym: ymOf(addMonths(firstPay, Math.round(c * monthsPerCycle))), arr: perCycle, kind });
+    }
     owners.add(owner);
     if (kind === "rr") rrTotal += arr; else stdTotal += arr;
   }
   return { events, owners: [...owners].filter(Boolean).sort(), total: rrTotal + stdTotal, rrTotal, stdTotal };
+}
+
+// Predicted CASHFLOW by ARR tier — when each tier's ARR is forecast to be COLLECTED as cash.
+// Rules (Tai, 2026-08-18) — forward GROWTH of each tier's ARR from its current level:
+//   • Contracted = current Contracted ARR + each Booked pilot converting in at Trial-End + 15d (nego).
+//   • Live       = current Live-paying ARR + each Contracted deal going live-paying at
+//                  (R&R ?? Contract-Live) + 45d (billing). Overdue arrivals land in the current month.
+//   • Booked is NOT forecast (too speculative) — its total is returned only as snapshot context.
+// Reads the ARR_Funnel tab's own "Tier (today)" (col P) so tiers match the funnel exactly.
+const NET_TERM_DAYS = 45; // billing: Contracted → Live-paying
+const NEGO_DAYS = 15;     // negotiation: Booked (pilot ended) → Contracted
+export type CashTierPoint = { ym: string; label: string; contracted: number; live: number };
+export type CashDeal = { tier: "contracted" | "live"; opp: string; account: string; owner: string; arr: number; arriveYm: string; arriveDate: string; basis: string };
+export type PredictedCashflow = { months: CashTierPoint[]; baseline: { contracted: number; live: number }; booked: number; deals: CashDeal[] };
+export function computePredictedCashflow(rows: Row[]): PredictedCashflow {
+  const empty: PredictedCashflow = { months: [], baseline: { contracted: 0, live: 0 }, booked: 0, deals: [] };
+  if (!rows || rows.length < 2) return empty;
+  const h = rows[0].map((x) => String(x ?? "").toLowerCase());
+  const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
+  const cArr = ci("ARR (USD)"), cTier = ci("Tier (today)"), cLive = ci("LiveDate"),
+    cRR = ci("RRDate"), cPilotEnd = ci("PilotEndDate"),
+    cOpp = ci("Opportunity"), cAcct = ci("Account"), cOwner = ci("Owner");
+  if (cArr < 0 || cTier < 0) return empty;
+  const iso = (v: unknown) => { const d = sheetsSerialToDate(v); return d ? d : null; };
+  const isoStr = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
+  const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86400000);
+  const ymOf = (d: Date) => d.toISOString().slice(0, 7);
+  const curYm = new Date().toISOString().slice(0, 7);
+
+  let baseContracted = 0, baseLive = 0, booked = 0;
+  const contractedIn: Record<string, number> = {}; // ym -> ARR (Booked → Contracted)
+  const liveIn: Record<string, number> = {};       // ym -> ARR (Contracted → Live)
+  const deals: CashDeal[] = [];
+  for (const r of rows.slice(1)) {
+    const arr = Number(r[cArr] ?? 0);
+    if (!(arr > 0)) continue;
+    const tier = String(r[cTier] ?? "");
+    const base = { opp: cOpp >= 0 ? String(r[cOpp] ?? "") : "", account: cAcct >= 0 ? String(r[cAcct] ?? "") : "", owner: (cOwner >= 0 ? String(r[cOwner] ?? "") : "").split(" ")[0], arr };
+    const rr = cRR >= 0 ? iso(r[cRR]) : null;
+    const live = cLive >= 0 ? iso(r[cLive]) : null;
+    const pilotEnd = cPilotEnd >= 0 ? iso(r[cPilotEnd]) : null;
+    if (tier === "Live") baseLive += arr;
+    else if (tier === "Contracted") {
+      baseContracted += arr;
+      const anchor = rr ?? live;
+      if (anchor) {
+        const a = addDays(anchor, NET_TERM_DAYS);
+        let ym = ymOf(a); if (ym < curYm) ym = curYm;               // overdue → lands this month
+        liveIn[ym] = (liveIn[ym] ?? 0) + arr;
+        deals.push({ tier: "live", ...base, arriveYm: ym, arriveDate: isoStr(a), basis: (rr ? "R&R" : "Contract Live") + " + 45d" });
+      }
+    } else if (tier === "Booked") {
+      booked += arr;
+      if (pilotEnd) {
+        const a = addDays(pilotEnd, NEGO_DAYS);
+        let ym = ymOf(a); if (ym < curYm) ym = curYm;
+        contractedIn[ym] = (contractedIn[ym] ?? 0) + arr;
+        deals.push({ tier: "contracted", ...base, arriveYm: ym, arriveDate: isoStr(a), basis: "Trial End + 15d" });
+      }
+    }
+  }
+  // Cumulative forward from the current month (baseline-anchored), ~18 months out.
+  const grid: string[] = [];
+  { let y = +curYm.slice(0, 4), m = +curYm.slice(5, 7); for (let i = 0; i < 19; i++) { grid.push(`${y}-${String(m).padStart(2, "0")}`); m++; if (m > 12) { m = 1; y++; } } }
+  let cumC = baseContracted, cumL = baseLive;
+  const months = grid.map((ym) => {
+    cumC += contractedIn[ym] ?? 0;
+    cumL += liveIn[ym] ?? 0;
+    const [y, m] = ym.split("-");
+    const label = new Date(Date.UTC(+y, +m - 1, 1)).toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
+    return { ym, label, contracted: cumC, live: cumL };
+  });
+  deals.sort((a, b) => b.arr - a.arr);
+  return { months, baseline: { contracted: baseContracted, live: baseLive }, booked, deals };
 }
 
 // Three-tier ARR funnel MoM (from the ARR_Funnel tab), point-in-time stock — ARR sitting
@@ -143,7 +227,21 @@ export function computeCashForecast(rows: Row[]): CashForecast {
 // by whether payment has started. Window is fixed Jan-2026 → current month. Also returns
 // the current-snapshot list of deals sitting in the Contracted state.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
-export type FunnelPoint = { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number };
+export type FunnelPoint = {
+  ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number;
+  bToC: number; cToL: number; bToLost: number;
+  // Full reconciliation flows so each tier's level ties out exactly month-to-month:
+  //   Booked[M]     = Booked[M-1] + bNew − bToC − bToLive − bToLost − bDrop
+  //   Contracted[M] = Contracted[M-1] + bToC + cNewSigned − cToL − cLeak
+  //   Live[M]       = Live[M-1] + cToL + lNewDirect − lChurn
+  bNew: number;       // entered Booked (new pilot) this month
+  bToLive: number;    // Booked → Live in one month (signed + started paying same month; a good exit)
+  bDrop: number;      // left Booked to "" WITHOUT a lost date this month (rolled back to SQO/SAL, etc.)
+  cNewSigned: number; // signed deals that entered Contracted directly (never a tracked pilot)
+  cLeak: number;      // left Contracted to lost/churn/dropped (not to Live)
+  lNewDirect: number; // entered Live directly (from Booked or brand-new), not via Contracted
+  lChurn: number;     // left Live (churn / contract ended)
+};
 export type ContractedDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string };
 export type ArrFunnel = { stock: FunnelPoint[]; contractedDeals: ContractedDeal[] };
 export function computeArrFunnel(rows: Row[]): ArrFunnel {
@@ -207,19 +305,34 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
                                : (d.pilotStart !== "" && before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost));
       return booked ? "Booked" : "";
     };
-    let sB = 0, sC = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0;
+    let sB = 0, sC = 0, sCRenew = 0, sCNew = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0, bNew = 0, bToLive = 0, bDrop = 0, cNewSigned = 0, cLeak = 0, lNewDirect = 0, lChurn = 0;
     deals.forEach((d, di) => {
       const t = tierOf(d);
-      if (t === "Booked") sB += d.arr; else if (t === "Contracted") sC += d.arr; else if (t === "Live") sL += d.arr;
+      const p = prevTier[di];
+      if (t === "Booked") sB += d.arr;
+      else if (t === "Contracted") { sC += d.arr; if (/renew/i.test(d.type)) sCRenew += d.arr; else sCNew += d.arr; } // split by deal Type
+      else if (t === "Live") sL += d.arr;
       if (d.churn && d.end >= first && d.end <= me) sChurn += d.arr;                                                   // churned/paused, contract ended this month
       if (!firstMonth) {                                                                                               // $ that moved tier vs the prior month
-        if (prevTier[di] === "Booked" && t === "Contracted") bToC += d.arr;
-        if (prevTier[di] === "Contracted" && t === "Live") cToL += d.arr;
+        // Booked reconciliation — the four ways a pilot can leave the tier, tracked separately.
+        const bookedLostThisMo = d.lost !== "" && d.lost >= first && d.lost <= me;
+        if (t === "Booked" && p !== "Booked") bNew += d.arr;                                                          // entered Booked (new pilot)
+        if (p === "Booked" && t === "Contracted") bToC += d.arr;                                                      // → Contracted (signed, not paying)
+        if (p === "Booked" && t === "Live") bToLive += d.arr;                                                         // → Live in one month (good exit)
+        if (p === "Booked" && bookedLostThisMo) bToLost += d.arr;                                                     // → Closed Lost this month
+        if (p === "Booked" && t === "" && !bookedLostThisMo) bDrop += d.arr;                                          // dropped (rolled back to SQO/SAL, etc.)
+        if (p === "Contracted" && t === "Live") cToL += d.arr;
+        // Contracted reconciliation: everything else that moved its level.
+        if (t === "Contracted" && p !== "Contracted" && p !== "Booked") cNewSigned += d.arr;                          // entered Contracted directly (new sign)
+        if (p === "Contracted" && t !== "Contracted" && t !== "Live") cLeak += d.arr;                                 // left Contracted to lost/churn/dropped
+        // Live reconciliation.
+        if (t === "Live" && p !== "Live" && p !== "Contracted") lNewDirect += d.arr;                                  // entered Live directly (from Booked / brand-new)
+        if (p === "Live" && t !== "Live") lChurn += d.arr;                                                            // left Live (churn / ended)
       }
       prevTier[di] = t;
     });
     firstMonth = false;
-    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn, bToC, cToL });
+    stock.push({ ym, label, booked: sB, contracted: sC, contractedRenewal: sCRenew, contractedNewExp: sCNew, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn });
   }
 
   // Current snapshot: deals sitting in the Contracted state right now (contract-live, not paying).
