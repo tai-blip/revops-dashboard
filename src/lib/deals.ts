@@ -212,11 +212,12 @@ export type FunnelPoint = {
   ym: string; label: string; booked: number; contracted: number; live: number; churn: number;
   bToC: number; cToL: number; bToLost: number;
   // Full reconciliation flows so each tier's level ties out exactly month-to-month:
-  //   Booked[M]     = Booked[M-1] + bNew − bToC − bLeak
+  //   Booked[M]     = Booked[M-1] + bNew − bToC − bToLive − bToLost − bDrop
   //   Contracted[M] = Contracted[M-1] + bToC + cNewSigned − cToL − cLeak
   //   Live[M]       = Live[M-1] + cToL + lNewDirect − lChurn
   bNew: number;       // entered Booked (new pilot) this month
-  bLeak: number;      // left Booked to lost/dropped (NOT to Contracted); bToLost is the lost subset
+  bToLive: number;    // Booked → Live in one month (signed + started paying same month; a good exit)
+  bDrop: number;      // left Booked to "" WITHOUT a lost date this month (rolled back to SQO/SAL, etc.)
   cNewSigned: number; // signed deals that entered Contracted directly (never a tracked pilot)
   cLeak: number;      // left Contracted to lost/churn/dropped (not to Live)
   lNewDirect: number; // entered Live directly (from Booked or brand-new), not via Contracted
@@ -285,20 +286,21 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
                                : (d.pilotStart !== "" && before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost));
       return booked ? "Booked" : "";
     };
-    let sB = 0, sC = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0, bNew = 0, bLeak = 0, cNewSigned = 0, cLeak = 0, lNewDirect = 0, lChurn = 0;
+    let sB = 0, sC = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0, bNew = 0, bToLive = 0, bDrop = 0, cNewSigned = 0, cLeak = 0, lNewDirect = 0, lChurn = 0;
     deals.forEach((d, di) => {
       const t = tierOf(d);
       const p = prevTier[di];
       if (t === "Booked") sB += d.arr; else if (t === "Contracted") sC += d.arr; else if (t === "Live") sL += d.arr;
       if (d.churn && d.end >= first && d.end <= me) sChurn += d.arr;                                                   // churned/paused, contract ended this month
       if (!firstMonth) {                                                                                               // $ that moved tier vs the prior month
-        // Booked reconciliation.
+        // Booked reconciliation — the four ways a pilot can leave the tier, tracked separately.
+        const bookedLostThisMo = d.lost !== "" && d.lost >= first && d.lost <= me;
         if (t === "Booked" && p !== "Booked") bNew += d.arr;                                                          // entered Booked (new pilot)
-        if (p === "Booked" && t !== "Booked" && t !== "Contracted") bLeak += d.arr;                                   // left Booked to lost/dropped (not converted)
-        if (p === "Booked" && t === "Contracted") bToC += d.arr;
+        if (p === "Booked" && t === "Contracted") bToC += d.arr;                                                      // → Contracted (signed, not paying)
+        if (p === "Booked" && t === "Live") bToLive += d.arr;                                                         // → Live in one month (good exit)
+        if (p === "Booked" && bookedLostThisMo) bToLost += d.arr;                                                     // → Closed Lost this month
+        if (p === "Booked" && t === "" && !bookedLostThisMo) bDrop += d.arr;                                          // dropped (rolled back to SQO/SAL, etc.)
         if (p === "Contracted" && t === "Live") cToL += d.arr;
-        // Booked leakage: sat in Booked last month, its Closed-Lost date lands this month → it fell out.
-        if (p === "Booked" && d.lost !== "" && d.lost >= first && d.lost <= me) bToLost += d.arr;
         // Contracted reconciliation: everything else that moved its level.
         if (t === "Contracted" && p !== "Contracted" && p !== "Booked") cNewSigned += d.arr;                          // entered Contracted directly (new sign)
         if (p === "Contracted" && t !== "Contracted" && t !== "Live") cLeak += d.arr;                                 // left Contracted to lost/churn/dropped
@@ -309,7 +311,7 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
       prevTier[di] = t;
     });
     firstMonth = false;
-    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bLeak, cNewSigned, cLeak, lNewDirect, lChurn });
+    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn });
   }
 
   // Current snapshot: deals sitting in the Contracted state right now (contract-live, not paying).
