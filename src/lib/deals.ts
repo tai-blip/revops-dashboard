@@ -143,7 +143,7 @@ export function computeCashForecast(rows: Row[]): CashForecast {
 // by whether payment has started. Window is fixed Jan-2026 → current month. Also returns
 // the current-snapshot list of deals sitting in the Contracted state.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
-export type FunnelPoint = { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number };
+export type FunnelPoint = { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number };
 export type ContractedDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string };
 export type ArrFunnel = { stock: FunnelPoint[]; contractedDeals: ContractedDeal[] };
 export function computeArrFunnel(rows: Row[]): ArrFunnel {
@@ -207,7 +207,7 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
                                : (d.pilotStart !== "" && before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost));
       return booked ? "Booked" : "";
     };
-    let sB = 0, sC = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0;
+    let sB = 0, sC = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0;
     deals.forEach((d, di) => {
       const t = tierOf(d);
       if (t === "Booked") sB += d.arr; else if (t === "Contracted") sC += d.arr; else if (t === "Live") sL += d.arr;
@@ -215,11 +215,13 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
       if (!firstMonth) {                                                                                               // $ that moved tier vs the prior month
         if (prevTier[di] === "Booked" && t === "Contracted") bToC += d.arr;
         if (prevTier[di] === "Contracted" && t === "Live") cToL += d.arr;
+        // Booked leakage: sat in Booked last month, its Closed-Lost date lands this month → it fell out.
+        if (prevTier[di] === "Booked" && d.lost !== "" && d.lost >= first && d.lost <= me) bToLost += d.arr;
       }
       prevTier[di] = t;
     });
     firstMonth = false;
-    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn, bToC, cToL });
+    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn, bToC, cToL, bToLost });
   }
 
   // Current snapshot: deals sitting in the Contracted state right now (contract-live, not paying).
