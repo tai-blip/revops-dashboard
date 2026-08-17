@@ -45,7 +45,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
   predictedCashflow?: { months: { ym: string; label: string; booked: number; contracted: number; live: number }[]; unscheduled: { booked: number; contracted: number; live: number }; deals: { tier: "booked" | "contracted" | "live"; opp: string; account: string; owner: string; arr: number; cashYm: string; anchor: string; basis: string }[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
@@ -2407,35 +2407,43 @@ export default function Dashboard() {
               : `Per AE. YTD (by Contract Live Date) + Potential (Early SQL+SAL Amount×%, Late SQO+Trial ARR×%) using AE/AM % YEAR → full-year projection vs goal. ${inclSql ? "SQL included" : "SQL excluded"}.`}
           >
             {fcastView === "yearly" ? (
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>AE</Th><Th>Annual Goal</Th><Th>YTD</Th><Th>Potential (Yr)</Th><Th>Projection</Th><Th>% of Goal</Th><Th>Yr% missing</Th>
-                  </tr></thead>
-                  <tbody>
-                    {annYReps.map((r, i) => (
-                      <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                        <Td l bold>{r.name.split(" ")[0]}</Td>
-                        <Td mono color={C.t2}>{r.goal > 0 ? kMY(r.goal) : "—"}</Td>
-                        <Td mono color={r.ytdTotal > 0 ? C.coralDk : C.t1}>{kMY(r.ytdTotal)}</Td>
-                        <Td mono color={C.purp}>{kMY(r.potTotal)}</Td>
-                        <Td mono bold>{kMY(r.projection)}</Td>
-                        <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(r.goal > 0 ? r.pctProj : null, null)}</td>
-                        <Td mono color={r.yrMissing > 0 ? C.ylw : C.t3}>{r.yrMissing || "—"}</Td>
-                      </tr>
-                    ))}
-                    <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
-                      <Td l bold>Team</Td>
-                      <Td mono>{kMY(annYTot.goal)}</Td>
-                      <Td mono color={C.coralDk}>{kMY(annYTot.ytd)}</Td>
-                      <Td mono color={C.purp}>{kMY(annYTot.pot)}</Td>
-                      <Td mono bold>{kMY(annYTot.proj)}</Td>
-                      <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(annYTot.goal > 0 ? annYTot.proj / annYTot.goal : null, null)}</td>
-                      <Td mono>{annYTot.miss || "—"}</Td>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Annual Goal</Th><Th>YTD (Closed)</Th><Th>Pot. Early (SQL+SAL)</Th><Th>Pot. Late (SQO+Trial)</Th><Th>Projection</Th><Th>vs Goal</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {annYReps.map((r) => {
+                    const fr = fByName[r.name];
+                    const early = fr ? earlyPot(fr, true) : 0, late = fr ? latePot(fr, true) : 0;
+                    return (
+                    <tr key={r.name} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                      <Td l bold>{r.name.split(" ")[0]}</Td>
+                      <Td mono color={C.blue}>{fr ? fmt(fr.openPipe) : "—"}</Td>
+                      <Td mono color={C.t2}>{r.goal > 0 ? fmt(r.goal) : "—"}</Td>
+                      <Td mono color={r.ytdTotal > 0 ? C.coralDk : C.t1}>{fmt(r.ytdTotal)}</Td>
+                      <Td mono color={C.coralDk}>{fmt(early)}</Td>
+                      <Td mono color={C.purp}>{fmt(late)}</Td>
+                      <Td mono bold>{fmt(r.projection)}</Td>
+                      <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(r.goal > 0 ? r.pctProj : null, r.goal > 0 ? r.projection - r.goal : null)}</td>
                     </tr>
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                  <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
+                    <Td l bold>Team</Td>
+                    <Td mono>{fmt(annYReps.reduce((s, r) => s + (fByName[r.name]?.openPipe ?? 0), 0))}</Td>
+                    <Td mono>{fmt(annYTot.goal)}</Td>
+                    <Td mono color={C.coralDk}>{fmt(annYTot.ytd)}</Td>
+                    <Td mono color={C.coralDk}>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? earlyPot(fr, true) : 0); }, 0))}</Td>
+                    <Td mono color={C.purp}>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? latePot(fr, true) : 0); }, 0))}</Td>
+                    <Td mono bold>{fmt(annYTot.proj)}</Td>
+                    <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(annYTot.goal > 0 ? annYTot.proj / annYTot.goal : null, annYTot.goal > 0 ? annYTot.proj - annYTot.goal : null)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -2818,7 +2826,7 @@ export default function Dashboard() {
                   <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>$ B→Lost</Th><Th>$ B→C</Th><Th>Contracted</Th><Th>$ C→L</Th><Th>Live ARR</Th><Th>Churn</Th><Th>MoM</Th>
+                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>$ B→Lost</Th><Th>$ B→C</Th><Th>Contracted</Th><Th>· Renewal</Th><Th>· Exp/New Biz</Th><Th>$ C→L</Th><Th>Live ARR</Th><Th>Churn</Th><Th>MoM</Th>
                       </tr></thead>
                       <tbody>
                         {series.map((p, i) => {
@@ -2830,7 +2838,9 @@ export default function Dashboard() {
                               <Td mono color={C.gold}>{p.booked > 0 ? fmt(p.booked) : "—"}</Td>
                               <Td mono color={p.bToLost > 0 ? C.red : C.t3}>{p.bToLost > 0 ? "−" + fmt(p.bToLost) : "—"}</Td>
                               <Td mono color={p.bToC > 0 ? C.blue : C.t3}>{p.bToC > 0 ? "+" + fmt(p.bToC) : "—"}</Td>
-                              <Td mono color={C.blue}>{p.contracted > 0 ? fmt(p.contracted) : "—"}</Td>
+                              <Td mono bold color={C.blue}>{p.contracted > 0 ? fmt(p.contracted) : "—"}</Td>
+                              <Td mono color={C.t2}>{p.contractedRenewal > 0 ? fmt(p.contractedRenewal) : "—"}</Td>
+                              <Td mono color={C.t2}>{p.contractedNewExp > 0 ? fmt(p.contractedNewExp) : "—"}</Td>
                               <Td mono color={p.cToL > 0 ? C.grn : C.t3}>{p.cToL > 0 ? "+" + fmt(p.cToL) : "—"}</Td>
                               <Td mono bold color={C.grn}>{p.live > 0 ? fmt(p.live) : "—"}</Td>
                               <Td mono color={p.churn > 0 ? C.red : C.t3}>{p.churn > 0 ? "−" + fmt(p.churn) : "—"}</Td>
@@ -2894,13 +2904,13 @@ export default function Dashboard() {
               return (
                 <Card
                   title="Funnel Movement — how each tier's level reconciles (MoM)"
-                  sub="Each tier's level = last month + what came in − what went out. This is why Contracted can fall even while deals convert to Live: newly-signed deals enter Contracted directly (never a tracked pilot) while others move on to Live. Every row ties out exactly."
+                  sub="Each tier's level = last month + what came in − what went out; every row ties out exactly. Booked: 'Rolled back' = a pilot reverted from Trial to SQO/SAL/SQL (fell out of pilot without converting). Contracted can fall even while deals convert to Live because newly-signed deals enter Contracted directly (never a tracked pilot)."
                 >
                   <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.gold }}>Booked (in pilot)</div>
                   <div style={{ overflowX: "auto", padding: "2px 20px 10px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Open</Th><Th>+ New pilots</Th><Th>− To Contracted</Th><Th>→ Live (direct)</Th><Th>− Lost</Th><Th>− Dropped</Th><Th>Close</Th>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ New pilots</Th><Th>− To Contracted</Th><Th>→ Live (direct)</Th><Th>− Lost</Th><Th>− Rolled back</Th><Th>Close</Th>
                       </tr></thead>
                       <tbody>
                         {rows.map((p, i) => (
@@ -2991,6 +3001,10 @@ export default function Dashboard() {
                 return { label, value: carry, forecast: ym >= nowKey };
               });
               const unsched = pc.unscheduled[cashTier];
+              // Undated ARR (no live/pilot-end date yet) is still part of the tier's standing total —
+              // carry it into the forecast tail so the cumulative line reaches the full current ARR
+              // (e.g. Booked reaches its ~$545k stock), not just the dated portion.
+              if (unsched > 0 && cumPts.length) { const li = cumPts.length - 1; cumPts[li] = { ...cumPts[li], value: cumPts[li].value + unsched }; }
               return (
                 <Card
                   title="Predicted Cashflow — when ARR turns into collected cash"
@@ -3007,7 +3021,21 @@ export default function Dashboard() {
                   <div style={{ padding: "2px 20px 0", fontSize: 12, color: C.t3 }}>
                     Contract-live (Contracted + Live) = <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 700, color: C.t2 }}>{fmt(tC + tL)}</span> · ties to finance. Booked is upside above it.
                   </div>
-                  <div style={{ padding: "8px 20px 4px", fontSize: 12.5, fontWeight: 700, color: active.color }}>
+                  {/* Current-month snapshot — the 3 ARR tiers standing right now (as-of-today) */}
+                  <div style={{ padding: "12px 20px 4px" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3, marginBottom: 6 }}>
+                      Snapshot — as of {new Date().toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+                      {tiers.map((t) => (
+                        <div key={t.key} onClick={() => setCashTier(t.key)} style={{ cursor: "pointer", background: C.s2, border: `1px solid ${cashTier === t.key ? t.color : C.bd}`, borderRadius: 10, padding: "12px 14px" }}>
+                          <div style={{ fontSize: 11.5, fontWeight: 700, color: t.color }}>{t.label} ARR</div>
+                          <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(t.total)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ padding: "12px 20px 4px", fontSize: 12.5, fontWeight: 700, color: active.color }}>
                     {active.label} cashflow (cumulative) — {active.sub}
                   </div>
                   <div style={{ padding: "0 12px 8px" }}>

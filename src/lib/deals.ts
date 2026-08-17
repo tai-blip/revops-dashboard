@@ -209,7 +209,7 @@ export function computePredictedCashflow(rows: Row[]): PredictedCashflow {
 // the current-snapshot list of deals sitting in the Contracted state.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
 export type FunnelPoint = {
-  ym: string; label: string; booked: number; contracted: number; live: number; churn: number;
+  ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number;
   bToC: number; cToL: number; bToLost: number;
   // Full reconciliation flows so each tier's level ties out exactly month-to-month:
   //   Booked[M]     = Booked[M-1] + bNew − bToC − bToLive − bToLost − bDrop
@@ -286,11 +286,13 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
                                : (d.pilotStart !== "" && before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost));
       return booked ? "Booked" : "";
     };
-    let sB = 0, sC = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0, bNew = 0, bToLive = 0, bDrop = 0, cNewSigned = 0, cLeak = 0, lNewDirect = 0, lChurn = 0;
+    let sB = 0, sC = 0, sCRenew = 0, sCNew = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0, bNew = 0, bToLive = 0, bDrop = 0, cNewSigned = 0, cLeak = 0, lNewDirect = 0, lChurn = 0;
     deals.forEach((d, di) => {
       const t = tierOf(d);
       const p = prevTier[di];
-      if (t === "Booked") sB += d.arr; else if (t === "Contracted") sC += d.arr; else if (t === "Live") sL += d.arr;
+      if (t === "Booked") sB += d.arr;
+      else if (t === "Contracted") { sC += d.arr; if (/renew/i.test(d.type)) sCRenew += d.arr; else sCNew += d.arr; } // split by deal Type
+      else if (t === "Live") sL += d.arr;
       if (d.churn && d.end >= first && d.end <= me) sChurn += d.arr;                                                   // churned/paused, contract ended this month
       if (!firstMonth) {                                                                                               // $ that moved tier vs the prior month
         // Booked reconciliation — the four ways a pilot can leave the tier, tracked separately.
@@ -311,7 +313,7 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
       prevTier[di] = t;
     });
     firstMonth = false;
-    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn });
+    stock.push({ ym, label, booked: sB, contracted: sC, contractedRenewal: sCRenew, contractedNewExp: sCNew, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn });
   }
 
   // Current snapshot: deals sitting in the Contracted state right now (contract-live, not paying).
