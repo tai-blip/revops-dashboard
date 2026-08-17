@@ -8,7 +8,7 @@ import { CSSProperties } from "react";
 
 type Pt = { label: string; value: number; forecast: boolean };
 
-export function ArrMovementChart({ points }: { points: Pt[] }) {
+export function ArrMovementChart({ points, actualLabel = "Live ARR (actual)", forecastLabel = "Booked ARR (forecast)" }: { points: Pt[]; actualLabel?: string; forecastLabel?: string }) {
   const W = 760, H = 210, padL = 46, padR = 14, padT = 22, padB = 24;
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const n = points.length || 1;
@@ -28,7 +28,7 @@ export function ArrMovementChart({ points }: { points: Pt[] }) {
   const fcastPath = toPath(points.map((p, i) => ({ i, v: p.value })).filter((_, i) => firstFwd > 0 && i >= firstFwd - 1));
   const bandX = firstFwd > 0 ? (x(firstFwd - 1) + x(firstFwd)) / 2 : null;
 
-  const legend: [string, string][] = [["Live ARR (actual)", NAVY], ["Booked ARR (forecast)", GOLD]];
+  const legend: [string, string][] = [[actualLabel, NAVY], [forecastLabel, GOLD]];
   const chip: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#5a6478", marginRight: 16 };
   const gridVals = [lo + (hi - lo) * 0.15, (lo + hi) / 2, hi - (hi - lo) * 0.1];
 
@@ -62,7 +62,7 @@ export function ArrMovementChart({ points }: { points: Pt[] }) {
           {/* dots + x labels */}
           {points.map((p, i) => (
             <g key={i}>
-              <title>{`${p.label}\n${p.forecast ? "Booked ARR (forecast)" : "Live ARR"} ${fmtK(p.value)}`}</title>
+              <title>{`${p.label}\n${p.forecast ? forecastLabel : actualLabel} ${fmtK(p.value)}`}</title>
               {p.value > 0 && <circle cx={x(i)} cy={y(p.value)} r={2.8} fill={p.forecast ? GOLD : NAVY} />}
               {p.value > 0 && (
                 <text x={x(i)} y={y(p.value) - 9} textAnchor="middle" fontSize={9} fontWeight={700} fill={p.forecast ? "#a07d2e" : NAVY}>{fmtK(p.value)}</text>

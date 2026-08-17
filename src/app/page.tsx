@@ -46,7 +46,7 @@ type DashboardData = {
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
   arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
-  predictedCashflow?: { months: { ym: string; label: string; booked: number; contracted: number; live: number }[]; unscheduled: { booked: number; contracted: number; live: number } };
+  predictedCashflow?: { months: { ym: string; label: string; booked: number; contracted: number; live: number }[]; unscheduled: { booked: number; contracted: number; live: number }; deals: { tier: "booked" | "contracted" | "live"; opp: string; account: string; owner: string; arr: number; cashYm: string; anchor: string; basis: string }[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -2953,9 +2953,21 @@ export default function Dashboard() {
                 { key: "live" as const, label: "Live", color: C.grn, total: tL, sub: "actual Live-Paying date (cash collected)" },
               ];
               const active = tiers.find((t) => t.key === cashTier)!;
-              // Show a readable window: this year through +12 months out.
-              const win = pc.months.filter((m) => m.ym >= "2026-01" && m.ym <= "2027-06");
-              const pts = win.map((m) => ({ label: m.label, value: m[cashTier], forecast: m.ym >= nowKey }));
+              // Cumulative cash collected for the selected tier (running total), shown over a
+              // readable window (2026 → +18mo). Cash before the window rolls into the starting level.
+              const sorted = [...pc.months].sort((a, b) => a.ym.localeCompare(b.ym));
+              const cumByYm: Record<string, number> = {};
+              { let run = 0; for (const m of sorted) { run += m[cashTier]; cumByYm[m.ym] = run; } }
+              const grid: string[] = [];
+              { let gy = 2026, gm = 1; while (`${gy}-${String(gm).padStart(2, "0")}` <= "2027-06") { grid.push(`${gy}-${String(gm).padStart(2, "0")}`); gm++; if (gm > 12) { gm = 1; gy++; } } }
+              let carry = 0;
+              for (const m of sorted) { if (m.ym < "2026-01") carry = cumByYm[m.ym]; }
+              const cumPts = grid.map((ym) => {
+                if (ym in cumByYm) carry = cumByYm[ym];
+                const [y, mm] = ym.split("-");
+                const label = new Date(Date.UTC(+y, +mm - 1, 1)).toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
+                return { label, value: carry, forecast: ym >= nowKey };
+              });
               const unsched = pc.unscheduled[cashTier];
               return (
                 <Card
@@ -2974,136 +2986,50 @@ export default function Dashboard() {
                     Contract-live (Contracted + Live) = <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 700, color: C.t2 }}>{fmt(tC + tL)}</span> · ties to finance. Booked is upside above it.
                   </div>
                   <div style={{ padding: "8px 20px 4px", fontSize: 12.5, fontWeight: 700, color: active.color }}>
-                    {active.label} cashflow — {active.sub}
+                    {active.label} cashflow (cumulative) — {active.sub}
                   </div>
                   <div style={{ padding: "0 12px 8px" }}>
-                    <ArrMovementChart points={pts} />
+                    <ArrMovementChart points={cumPts} actualLabel={`${active.label} ARR`} forecastLabel="Forecast" />
                   </div>
                   {unsched > 0 && (
-                    <div style={{ padding: "0 20px 16px", fontSize: 12, color: C.t3 }}>
+                    <div style={{ padding: "0 20px 12px", fontSize: 12, color: C.t3 }}>
                       + <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 700, color: active.color }}>{fmt(unsched)}</span> {active.label} ARR unscheduled — no live/pilot-end date yet to predict a cash month.
                     </div>
                   )}
+                  {/* Deal-level detail for the selected tier — so a viewer can check any number */}
+                  {(() => {
+                    const tierDeals = pc.deals.filter((d) => d.tier === cashTier);
+                    return (
+                      <div style={{ padding: "2px 20px 18px" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>
+                          {active.label} deals — {tierDeals.length} · <span style={{ color: active.color, fontFamily: "var(--font-dm-mono)" }}>{fmt(active.total)}</span>
+                        </div>
+                        <div style={{ overflowX: "auto", border: `1px solid ${C.s1}`, borderRadius: 10, maxHeight: 320, overflowY: "auto" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                            <thead><tr style={{ borderBottom: `1px solid ${C.bd}`, position: "sticky", top: 0, background: C.s2 }}>
+                              <Th l>Deal</Th><Th l>Account</Th><Th l>AE</Th><Th>ARR</Th><Th l>Cash month</Th><Th l>Basis</Th>
+                            </tr></thead>
+                            <tbody>
+                              {tierDeals.map((d, i) => (
+                                <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                                  <Td l bold>{d.opp || d.account || "—"}</Td>
+                                  <Td l>{d.account || "—"}</Td>
+                                  <Td l>{d.owner || "—"}</Td>
+                                  <Td mono bold color={active.color}>{fmt(d.arr)}</Td>
+                                  <Td l mono>{d.cashYm || "—"}</Td>
+                                  <Td l>{d.basis}</Td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </Card>
               );
             })()}
             <div style={{ height: 16 }} />
-            {/* ARR Composition — Live vs Booked (item 1) + Churn + MoM breakdown + top-5 booked (item 2) */}
-            {data.arr && (() => {
-              const cf = data.cashForecast;
-              const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
-              const MABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-              const mLabel = (l: string) => { const [y, mm] = l.split("-"); return `${MABBR[+mm - 1]}-${y.slice(2)}`; };
-              // Fixed window Jan-26 → Jan-27. Actuals: Jan-26 → last complete month
-              // (Live line). Forward: current month → Jan-27, Booked = last live +
-              // cumulative scheduled go-lives (no end-date subtraction), Live line stops.
-              const hist = data.arr.monthly.filter((m) => m.label >= "2026-01" && m.label < nowKey);
-              const lastComplete = hist.slice(-1)[0];
-              const churnMo = lastComplete?.churnedARR ?? 0;
-              const liveArr = data.liveArrToday ?? 0;
-              const booked = liveArr + (cf?.total ?? 0);
-              // Anchor the current book + forward projection on the churned-excluded,
-              // as-of-today Live ARR (the "most relevant" number that ties to finance and
-              // matches the headline) rather than the date-based month-end. History stays
-              // date-based; only the latest actual point is swapped to the live-paying book.
-              const anchor = liveArr || (lastComplete?.activeARR ?? 0);
-              type MPt = { label: string; newBusiness: number; expansion: number; churn: number; liveARR: number | null; bookedARR: number; forecast: boolean };
-              const histPts: MPt[] = hist.map((m, i) => {
-                const isLast = i === hist.length - 1;
-                const live = isLast ? anchor : m.activeARR;
-                return {
-                  label: mLabel(m.label), newBusiness: m.newBusiness, expansion: m.expansion,
-                  churn: m.churnedARR, liveARR: live, bookedARR: live, forecast: false,
-                };
-              });
-              // Forward Booked = anchor Live ARR + cumulative forecast cash (Closed Won /
-              // Billing / Trial, not yet paying) landing at contract live date + 45 days.
-              // Overdue (past-dated) and beyond-window events are clamped into the window
-              // so the line's endpoint equals Booked ARR (liveArr + total forecast).
-              const byYm: Record<string, number> = {};
-              for (const e of cf?.events ?? []) {
-                let ym = e.ym; if (ym < nowKey) ym = nowKey; if (ym > "2027-01") ym = "2027-01";
-                byYm[ym] = (byYm[ym] ?? 0) + e.arr;
-              }
-              const fwdGrid: string[] = [];
-              { let gy = +nowKey.slice(0, 4), gm = +nowKey.slice(5, 7);
-                while (`${gy}-${String(gm).padStart(2, "0")}` <= "2027-01") { fwdGrid.push(`${gy}-${String(gm).padStart(2, "0")}`); gm++; if (gm > 12) { gm = 1; gy++; } } }
-              let cum = anchor;
-              const fwdPts: MPt[] = fwdGrid.map((ym) => { const inc = byYm[ym] ?? 0; cum += inc; return {
-                label: mLabel(ym), newBusiness: inc, expansion: 0,
-                churn: 0, liveARR: null, bookedARR: cum, forecast: true,
-              }; });
-              const pts = [...histPts, ...fwdPts];
-              const box = (label: string, val: string, sub: string, color: string) => (
-                <div style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 12, padding: "16px 18px" }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3 }}>{label}</div>
-                  <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color, marginTop: 5 }}>{val}</div>
-                  <div style={{ fontSize: 12, color: C.t2, marginTop: 4 }}>{sub}</div>
-                </div>
-              );
-              const top = data.topBooked ?? [];
-              return (
-                <Card title="ARR Composition — Live vs Booked (Jan-26 → Jan-27)" sub="Actuals through the last complete month — the latest Live ARR point is the as-of-today live-paying book (churn excluded, ties to the headline). Forward Booked ARR = that Live ARR + expected ARR of signed-not-yet-paying deals (Closed Won / Billing / Trial), placed at contract live date + 45 days — i.e. the ARR as cash actually comes in. Live ARR line stops at today; Booked ARR projects forward.">
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, padding: "18px 20px" }}>
-                    {box("Booked ARR", fmt(booked), `Live ${fmt(liveArr)} + ${fmt(cf?.total ?? 0)} forecast`, C.navy)}
-                    {box("Live ARR (as of today)", fmt(liveArr), "live-paying · churn excluded", C.grn)}
-                    {box("Booked — not yet paying", fmt(cf?.total ?? 0), `${cf?.events.length ?? 0} deals · Std ${fmt(cf?.stdTotal ?? 0)} / R&R ${fmt(cf?.rrTotal ?? 0)}`, C.navy)}
-                    {box("Churn — last complete mo", fmt(churnMo), lastComplete ? mLabel(lastComplete.label) : "", C.red)}
-                  </div>
-                  <div style={{ padding: "0 20px 8px" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "2px 0 6px" }}>
-                      ARR trajectory — Live ARR (actuals) continuing into Booked ARR (forecast)
-                    </div>
-                    <ArrMovementChart points={pts.map((p) => ({ label: p.label, value: p.liveARR != null ? p.liveARR : p.bookedARR, forecast: p.forecast }))} />
-                  </div>
-                  {/* MoM breakdown table — all components with numbers */}
-                  <div style={{ padding: "6px 20px 14px" }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Month-over-month breakdown (Jan-26 → Jan-27)</div>
-                    <div style={{ overflowX: "auto" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                        <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                          <Th l>Month</Th><Th>New Biz</Th><Th>Expansion</Th><Th>Churn</Th><Th>Booked ARR</Th><Th>Live ARR</Th>
-                        </tr></thead>
-                        <tbody>
-                          {pts.map((m, i) => (
-                            <tr key={i} style={{ borderBottom: `1px solid ${C.s1}`, background: m.forecast ? C.s1 : undefined }}>
-                              <Td l bold>{m.label}{m.forecast ? " ·f" : ""}</Td>
-                              <Td mono color={C.grn}>{m.newBusiness ? fmt(m.newBusiness) : "—"}</Td>
-                              <Td mono color={C.blue}>{m.expansion ? fmt(m.expansion) : "—"}</Td>
-                              <Td mono color={C.red}>{m.churn ? "−" + fmt(m.churn) : "—"}</Td>
-                              <Td mono bold color={C.gold}>{fmt(m.bookedARR)}</Td>
-                              <Td mono bold color={C.navy}>{m.liveARR != null ? fmt(m.liveARR) : "—"}</Td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div style={{ fontSize: 11, color: C.t3, marginTop: 6 }}>·f = forecast month (Booked ARR projected; Live ARR not yet actual)</div>
-                  </div>
-                  {/* Top 5 currently-booked contracts (sheet-computed: Top_Booked_ARR) */}
-                  {top.length > 0 && (
-                    <div style={{ padding: "0 20px 18px" }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>Top {top.length} booked contracts — currently in the book</div>
-                      <div style={{ overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}><Th l>Account</Th><Th l>AE</Th><Th l>Status</Th><Th l>Live date</Th><Th>ARR</Th></tr></thead>
-                          <tbody>
-                            {top.map((d, i) => (
-                              <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                                <Td l bold>{d.account || d.opp}</Td><Td l>{d.owner.split(" ")[0]}</Td>
-                                <Td l><Pill tone={d.status === "Live" ? "good" : "warn"}>{d.status}</Pill></Td>
-                                <Td l>{d.liveDate}</Td>
-                                <Td mono bold color={C.navy}>{fmt(d.arr)}</Td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </Card>
-              );
-            })()}
           {/* Cash timing — forecast cash-in (Contract Live Date + 45 days), Standard vs Rip&Replace */}
           {data.cashForecast && data.cashForecast.events.length > 0 && (() => {
             const CF = data.cashForecast;
