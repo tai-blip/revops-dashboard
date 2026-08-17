@@ -45,7 +45,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bLeak: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
   predictedCashflow?: { months: { ym: string; label: string; booked: number; contracted: number; live: number }[]; unscheduled: { booked: number; contracted: number; live: number }; deals: { tier: "booked" | "contracted" | "live"; opp: string; account: string; owner: string; arr: number; cashYm: string; anchor: string; basis: string }[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
@@ -2896,6 +2896,27 @@ export default function Dashboard() {
                   title="Funnel Movement — how each tier's level reconciles (MoM)"
                   sub="Each tier's level = last month + what came in − what went out. This is why Contracted can fall even while deals convert to Live: newly-signed deals enter Contracted directly (never a tracked pilot) while others move on to Live. Every row ties out exactly."
                 >
+                  <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.gold }}>Booked (in pilot)</div>
+                  <div style={{ overflowX: "auto", padding: "2px 20px 10px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ New pilots</Th><Th>− To Contracted</Th><Th>− Lost</Th><Th>− Other out</Th><Th>Close</Th>
+                      </tr></thead>
+                      <tbody>
+                        {rows.map((p, i) => (
+                          <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === rows.length - 1 ? C.s2 : undefined }}>
+                            <Td l bold>{p.label}</Td>
+                            <Td mono color={C.t2}>{fmt(s[i].booked)}</Td>
+                            <Td mono color={p.bNew > 0 ? C.grn : C.t3}>{flowD(p.bNew, "+")}</Td>
+                            <Td mono color={p.bToC > 0 ? C.blue : C.t3}>{flowD(p.bToC, "−")}</Td>
+                            <Td mono color={p.bToLost > 0 ? C.red : C.t3}>{flowD(p.bToLost, "−")}</Td>
+                            <Td mono color={p.bLeak - p.bToLost > 0.5 ? C.red : C.t3}>{flowD(p.bLeak - p.bToLost, "−")}</Td>
+                            <Td mono bold color={C.gold}>{fmt(p.booked)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                   <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.blue }}>Contracted (signed, not yet paying)</div>
                   <div style={{ overflowX: "auto", padding: "2px 20px 10px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
