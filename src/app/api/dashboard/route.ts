@@ -108,7 +108,7 @@ async function buildPayload(): Promise<Payload> {
         { tab: "Top_Booked_ARR", range: "A1:F12" },
         { tab: "ARR_Forward", range: "A1:E24" },
         { tab: "Deal Tracker (DRAFT)", range: "A1:K200" },
-        { tab: "Cash_Forecast", range: "A1:H4000" },
+        { tab: "Cash_Forecast", range: "A1:I4000" },
         { tab: "ARR_Funnel", range: "A1:Y4000" },
         // Headline tab = the single source powering the Command tab: the ARR-trend table (section ①,
         // ym/active/new/churn/mom rows) drives the chart, and the machine-readable key→value block

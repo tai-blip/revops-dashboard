@@ -3071,7 +3071,7 @@ export default function Dashboard() {
             const totStd = cfMonths.reduce((s, m) => s + std[m.ym], 0), totRR = cfMonths.reduce((s, m) => s + rr[m.ym], 0);
             const cashAEs = ["all", ...CF.owners];
             return (
-              <Card title="Cash timing — forecast cash-in (Contract Live Date + 45 days)" sub="Signed / committed but not-yet-paying deals (Stage Closed Won / Billing / Trial, no Live Paying Date) forecast to turn into cash 45 days after their contract live date. Rip & Replace/LOC deals use the R&R date + 45. Already-paying deals sit in Live ARR, not here." accent={C.navy}>
+              <Card title="Cash timing — forecast cash-in (Contract Live Date + 45 days)" sub="Signed / committed but not-yet-paying deals (Stage Closed Won / Billing / Trial, no Live Paying Date). First payment 45 days after contract live date (R&R date + 45 for Rip & Replace), then split into installments by billing term — Monthly = ARR/12 monthly, Quarterly = ARR/4 quarterly, Annual = one payment. Already-paying deals sit in Live ARR, not here." accent={C.navy}>
                 <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 4px" }}>
                   <select value={cashAE} onChange={(e) => setCashAE(e.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid " + C.bd, fontSize: 13, fontFamily: "inherit" }}>
                     {cashAEs.map((a) => <option key={a} value={a}>{a === "all" ? "All AEs" : short(a)}</option>)}

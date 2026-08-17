@@ -202,14 +202,14 @@ async function main() {
   //     three pre-Live-Paying stages (Closed Won, Billing, Trial). computeCashForecast
   //     filters to those with no Live Paying Date and a live/RR date, at anchor + 45 days.
   const cashFcRecs = await sfQueryAll(instance, token,
-    `SELECT Owner.Name, Name, StageName, Status__c, convertCurrency(AnnualContractValueARR__c) arrUsd, ContractLiveDate__c, Contract_Live_Date_Rip_Replace_LOC__c, Live_Paying_Date__c FROM Opportunity WHERE StageName IN ('Closed Won','Billing','Trial')`);
+    `SELECT Owner.Name, Name, StageName, Status__c, convertCurrency(AnnualContractValueARR__c) arrUsd, ContractLiveDate__c, Contract_Live_Date_Rip_Replace_LOC__c, Live_Paying_Date__c, PaymentTerms__c FROM Opportunity WHERE StageName IN ('Closed Won','Billing','Trial')`);
   const cashFc = [[
-    "Owner","Opportunity","Stage","Status","ARR (USD)","ContractLiveDate","RR LOC Date","Live Paying Date",
+    "Owner","Opportunity","Stage","Status","ARR (USD)","ContractLiveDate","RR LOC Date","Live Paying Date","PaymentTerms",
   ]];
   for (const x of cashFcRecs) {
     cashFc.push([
       x.Owner?.Name ?? "", x.Name ?? "", x.StageName ?? "", x.Status__c ?? "",
-      x.arrUsd ?? 0, x.ContractLiveDate__c ?? "", x.Contract_Live_Date_Rip_Replace_LOC__c ?? "", x.Live_Paying_Date__c ?? "",
+      x.arrUsd ?? 0, x.ContractLiveDate__c ?? "", x.Contract_Live_Date_Rip_Replace_LOC__c ?? "", x.Live_Paying_Date__c ?? "", x.PaymentTerms__c ?? "",
     ]);
   }
 
@@ -583,7 +583,7 @@ async function main() {
     { addSheet: { properties: { title: "ARR_per_Location_MoM", gridProperties: { rowCount: 20, columnCount: 12 } } } },
     { addSheet: { properties: { title: "SOQL_PaymentMix", gridProperties: { rowCount: pmix.length + 10, columnCount: 14 } } } },
     { addSheet: { properties: { title: "Top_Booked_ARR", gridProperties: { rowCount: 20, columnCount: 6 } } } },
-    { addSheet: { properties: { title: "Cash_Forecast", gridProperties: { rowCount: cashFc.length + 10, columnCount: 8 } } } },
+    { addSheet: { properties: { title: "Cash_Forecast", gridProperties: { rowCount: cashFc.length + 10, columnCount: 9 } } } },
     { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 30 } } } },
   );
   // Keep-in-place tabs: create on first run, else resize the grid (preserving sheetId + refs).

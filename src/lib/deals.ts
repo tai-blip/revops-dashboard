@@ -107,10 +107,14 @@ export function computeCashForecast(rows: Row[]): CashForecast {
   const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
   const cStage = ci("Stage"), cStatus = ci("Status"), cArr = ci("ARR (USD)"),
     cLive = ci("ContractLiveDate"), cRR = ci("RR LOC Date"), cLPD = ci("Live Paying Date"),
-    cOwner = ci("Owner"), cOpp = ci("Opportunity");
+    cOwner = ci("Owner"), cOpp = ci("Opportunity"), cTerm = ci("PaymentTerms");
   if (cStage < 0 || cArr < 0 || cLive < 0 || cLPD < 0) return empty;
   const ymOf = (d: Date) => d.toISOString().slice(0, 7);
   const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86400000);
+  const addMonths = (d: Date, n: number) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, d.getUTCDate()));
+  // Billing cadence → cycles/yr: Monthly 12, Quarterly 4, Annual/Bi-Annual/blank 1. Each deal's
+  // annual ARR is billed in `cycles` equal installments (ARR/cycles), one per cycle from first pay.
+  const cyclesOf = (t: string) => { const s = t.toLowerCase(); return s.includes("month") ? 12 : s.includes("quarter") ? 4 : 1; };
 
   const events: CashForecastEvent[] = [];
   const owners = new Set<string>();
@@ -126,7 +130,13 @@ export function computeCashForecast(rows: Row[]): CashForecast {
     if (!anchor) continue;
     const kind: "rr" | "std" = rr ? "rr" : "std";
     const owner = String(r[cOwner] ?? ""), name = cOpp >= 0 ? String(r[cOpp] ?? "") : "";
-    events.push({ owner, name, ym: ymOf(addDays(anchor, 45)), arr, kind });
+    // Split the ARR into billing installments per payment term, first payment at go-live + 45 days.
+    const cycles = cyclesOf(cTerm >= 0 ? String(r[cTerm] ?? "") : "");
+    const perCycle = arr / cycles, monthsPerCycle = 12 / cycles;
+    const firstPay = addDays(anchor, 45);
+    for (let c = 0; c < cycles; c++) {
+      events.push({ owner, name, ym: ymOf(addMonths(firstPay, Math.round(c * monthsPerCycle))), arr: perCycle, kind });
+    }
     owners.add(owner);
     if (kind === "rr") rrTotal += arr; else stdTotal += arr;
   }
