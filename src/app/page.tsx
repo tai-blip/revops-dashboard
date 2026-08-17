@@ -2991,6 +2991,10 @@ export default function Dashboard() {
                   title="Predicted Cashflow — forward ARR by tier"
                   sub="Forward projection of each tier's ARR from today. Contracted grows as pilots convert (Trial End + 15d nego); Live grows as contracted deals start paying (Contract-Live date + 45d billing). Booked is context only — too early to forecast."
                 >
+                  {/* IN PROGRESS banner — methodology (CLD+45, pilot-end dates) still being validated */}
+                  <div style={{ margin: "10px 20px 0", padding: "8px 12px", background: C.ylwBg, border: `1px solid ${C.ylw}`, borderRadius: 8, fontSize: 12, color: C.t2, fontWeight: 600 }}>
+                    ⚠️ IN PROGRESS — methodology still being validated (CLD + 45d cash assumption is under review with finance; pilot-end dates populate on the nightly refresh). Numbers here are provisional.
+                  </div>
                   {/* Snapshot — the three tiers standing right now */}
                   <div style={{ padding: "12px 20px 4px" }}>
                     <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color: C.t3, marginBottom: 6 }}>
