@@ -109,9 +109,10 @@ async function buildPayload(): Promise<Payload> {
         { tab: "Deal Tracker (DRAFT)", range: "A1:K200" },
         { tab: "Cash_Forecast", range: "A1:H4000" },
         { tab: "ARR_Funnel", range: "A1:U4000" },
-        // Headline tab = the single source powering the Command tab (machine-readable key→value
-        // block at the bottom). Read by key so layout changes above it don't break the dashboard.
-        { tab: "Headline", range: "A1:C160" },
+        // Headline tab = the single source powering the Command tab: the ARR-trend table (section ①,
+        // ym/active/new/churn/mom rows) drives the chart, and the machine-readable key→value block
+        // (lower) drives the tiles. Read by key/label so layout shifts don't break the dashboard.
+        { tab: "Headline", range: "A1:E240" },
         // Targets tab = the single source powering the Targets & Progress tab (fixed finance plan +
         // YTD/Q3 rollups as a machine-readable key→value block). Same read-by-key pattern.
         { tab: "Targets", range: "A1:C120" },
@@ -126,6 +127,21 @@ async function buildPayload(): Promise<Payload> {
       return out;
     };
     const headlineSource = parseKeyValue(headlineRows);
+    // Headline ARR-trend table (section ①: ym | active | new_arr | churn | mom) — the source the
+    // Command ARR chart is drawn from. Parsed as rows so editing an 'active' cell moves the chart.
+    const headlineTrend: { ym: string; active: number; newARR: number; churn: number; mom: number }[] = [];
+    {
+      const rows = headlineRows ?? [];
+      const hdr = rows.findIndex((r) => String(r?.[0] ?? "").trim() === "ym" && String(r?.[1] ?? "").trim() === "active");
+      if (hdr >= 0) {
+        const num = (v: unknown) => (typeof v === "number" ? v : 0);
+        for (let i = hdr + 1; i < rows.length; i++) {
+          const ym = String(rows[i]?.[0] ?? "").trim();
+          if (!/^\d{4}-\d{2}$/.test(ym)) { if (headlineTrend.length) break; else continue; }
+          headlineTrend.push({ ym, active: num(rows[i]?.[1]), newARR: num(rows[i]?.[2]), churn: num(rows[i]?.[3]), mom: num(rows[i]?.[4]) });
+        }
+      }
+    }
     const hasHeadline = Object.keys(headlineSource).length > 0;
     // Prefer the Headline source when present; fall back to the in-code computation otherwise, so a
     // missing/edited Headline tab degrades gracefully instead of breaking the Command tab.
@@ -285,6 +301,7 @@ async function buildPayload(): Promise<Payload> {
       arrMom,
       liveArrToday: hs("live_arr", liveArrToday),
       headlineSource,
+      headlineTrend,
       targetsSource,
       bookingReport,
       signedLive,

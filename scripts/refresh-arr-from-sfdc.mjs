@@ -566,7 +566,7 @@ async function main() {
   // bind to the sheetId, not the name — a same-named replacement does NOT restore them). So we
   // clear & rewrite these IN PLACE: the sheetId, and therefore every downstream formula, survives.
   // Their layouts are fixed (col A/B dates, C+ numbers) so the preserved cell formats stay correct.
-  const KEEP_IN_PLACE = { ARR_MoM_Rebuild: { rowCount: mom.length + 20, columnCount: 26, lastCol: "Z" }, ARR_WoW_Rebuild: { rowCount: wow.length + 20, columnCount: 10, lastCol: "J" } };
+  const KEEP_IN_PLACE = { ARR_MoM_Rebuild: { rowCount: mom.length + 20, columnCount: 26, lastCol: "Z" }, ARR_WoW_Rebuild: { rowCount: wow.length + 20, columnCount: 10, lastCol: "J" }, ARR_Forward: { rowCount: 44, columnCount: 6, lastCol: "F" } };
   const reqs = [];
   for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR","ARR_Forward","Cash_Forecast","ARR_Funnel"])
     if (byTitle[t] != null && !(t in KEEP_IN_PLACE)) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
@@ -578,7 +578,6 @@ async function main() {
     { addSheet: { properties: { title: "ARR_per_Location_MoM", gridProperties: { rowCount: 20, columnCount: 12 } } } },
     { addSheet: { properties: { title: "SOQL_PaymentMix", gridProperties: { rowCount: pmix.length + 10, columnCount: 14 } } } },
     { addSheet: { properties: { title: "Top_Booked_ARR", gridProperties: { rowCount: 20, columnCount: 6 } } } },
-    { addSheet: { properties: { title: "ARR_Forward", gridProperties: { rowCount: 24, columnCount: 6 } } } },
     { addSheet: { properties: { title: "Cash_Forecast", gridProperties: { rowCount: cashFc.length + 10, columnCount: 8 } } } },
     { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 28 } } } },
   );
