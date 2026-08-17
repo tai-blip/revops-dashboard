@@ -100,7 +100,7 @@ async function buildPayload(): Promise<Payload> {
         { tab: "Query 1", range: "A1:Z1000" },
         { tab: "Query 2", range: "A1:Z2000" },
         { tab: "Forecasting", range: "A1:T45" },
-        { tab: "SOQL_ClosedDeals", range: "A1:V4000" },
+        { tab: "SOQL_ClosedDeals", range: "A1:W4000" },
         { tab: "ARR_MoM_Rebuild", range: "A1:W400" },
         { tab: "ACV_MoM", range: "A1:AZ20" },
         { tab: "ARR_per_Location_MoM", range: "A1:K20" },
@@ -265,7 +265,7 @@ async function buildPayload(): Promise<Payload> {
     const _qYear = new Date().getUTCFullYear();
     const _qStart = `${_qYear}-${String(_qMonths[0] + 1).padStart(2, "0")}-01`;
     const _qEnd = new Date(Date.UTC(_qYear, _qMonths[_qMonths.length - 1] + 1, 0)).toISOString().slice(0, 10);
-    const pipelineGen = computePipelineGenByAE(query1Rows, query2Rows, _qStart, _qEnd);
+    const pipelineGen = computePipelineGenByAE(query1Rows, closedDealsRows, _qStart, _qEnd);
     const paymentMix = computePaymentMix(paymentMixRows);
 
     // Who Does What — open deals grouped by owner, flagged if stale (>60d since last stage change)

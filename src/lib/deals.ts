@@ -108,26 +108,36 @@ export type CashForecast = { events: CashForecastEvent[]; owners: string[]; tota
 export type PipelineGen = { byOwner: Record<string, { arr: number; count: number }>; total: number; totalCount: number };
 export function computePipelineGenByAE(openRows: Row[], closedRows: Row[], qStart: string, qEnd: string): PipelineGen {
   const byOwner: Record<string, { arr: number; count: number }> = {};
-  const add = (owner: string, arr: number) => { const o = (byOwner[owner] ??= { arr: 0, count: 0 }); o.arr += arr; o.count += 1; };
+  const add = (owner: string, arr: number) => { if (!owner) return; const o = (byOwner[owner] ??= { arr: 0, count: 0 }); o.arr += arr; o.count += 1; };
   const inQ = (v: unknown) => { const d = sheetsSerialToDate(v); if (!d) return false; const iso = d.toISOString().slice(0, 10); return iso >= qStart && iso <= qEnd; };
-  const scan = (rows: Row[], excludeWon: boolean) => {
-    if (!rows || rows.length < 2) return;
-    // These tabs have a banner in row 0; the real header row is the one carrying "Owner.Name".
-    const hdrIdx = rows.findIndex((r) => r.some((c) => String(c ?? "").toLowerCase() === "owner.name"));
-    if (hdrIdx < 0) return;
-    const h = rows[hdrIdx].map((x) => String(x ?? "").toLowerCase());
-    const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
-    const cSql = ci("Date_Reached_SQL__c"), cVal = ci("Annual_Contract_Value_ARR_Formula__c"), cOwner = ci("Owner.Name"), cWon = ci("IsWon");
-    if (cSql < 0 || cVal < 0 || cOwner < 0) return;
-    for (const r of rows.slice(hdrIdx + 1)) {
-      if (excludeWon && cWon >= 0 && (r[cWon] === true || String(r[cWon]).toLowerCase() === "true")) continue; // drop Closed Won
-      if (!inQ(r[cSql])) continue;
-      const owner = String(r[cOwner] ?? "").trim();
-      if (owner) add(owner, Number(r[cVal]) || 0);
-    }
+  // Tabs may carry a banner in row 0; locate the header row by its Owner column.
+  const header = (rows: Row[]) => {
+    if (!rows || rows.length < 2) return null;
+    const i = rows.findIndex((r) => r.some((c) => /^owner(\.name)?$/i.test(String(c ?? "").trim())));
+    if (i < 0) return null;
+    const h = rows[i].map((x) => String(x ?? "").toLowerCase());
+    return { i, ci: (n: string) => h.indexOf(n.toLowerCase()) };
   };
-  scan(openRows, false);    // Query 1 — open opps
-  scan(closedRows, true);   // Query 2 — closed opps, keep only Closed Lost
+  // OPEN pipeline (Query 1): Date_Reached_SQL in the quarter, valued by the ARR-formula (= Amount/TCV).
+  const H1 = header(openRows);
+  if (H1) {
+    const cSql = H1.ci("Date_Reached_SQL__c"), cVal = H1.ci("Annual_Contract_Value_ARR_Formula__c"), cOwner = H1.ci("Owner.Name");
+    if (cSql >= 0 && cVal >= 0 && cOwner >= 0) for (const r of openRows.slice(H1.i + 1)) {
+      if (inQ(r[cSql])) add(String(r[cOwner] ?? "").trim(), Number(r[cVal]) || 0);
+    }
+  }
+  // CLOSED-LOST (SOQL_ClosedDeals — fresh, all closed): Outcome = Lost, SQL in the quarter, by Amount
+  // (falls back to the raw "ARR (USD)" until the Amount column is populated by the nightly refresh).
+  const H2 = header(closedRows);
+  if (H2) {
+    const cSql = H2.ci("Date Reached SQL"), cAmt = H2.ci("Amount"), cArr = H2.ci("ARR (USD)"), cOwner = H2.ci("Owner"), cOut = H2.ci("Outcome");
+    if (cSql >= 0 && cOwner >= 0 && cOut >= 0) for (const r of closedRows.slice(H2.i + 1)) {
+      if (!/lost/i.test(String(r[cOut] ?? ""))) continue;
+      if (!inQ(r[cSql])) continue;
+      const val = (cAmt >= 0 ? Number(r[cAmt]) || 0 : 0) || (cArr >= 0 ? Number(r[cArr]) || 0 : 0);
+      add(String(r[cOwner] ?? "").trim(), val);
+    }
+  }
   const total = Object.values(byOwner).reduce((s, o) => s + o.arr, 0);
   const totalCount = Object.values(byOwner).reduce((s, o) => s + o.count, 0);
   return { byOwner, total, totalCount };
