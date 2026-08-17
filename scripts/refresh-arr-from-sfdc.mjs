@@ -217,11 +217,11 @@ async function main() {
   //     order signed, Live = live-paying) with each deal's tier-transition dates, so the
   //     dashboard can plot both a cumulative funnel and a point-in-time stock MoM series.
   const funnelRecs = await sfQueryAll(instance, token,
-    `SELECT Owner.Name, AccountManager__r.Name, Name, Account.Name, StageName, RecordType.Name, Status__c, PaymentTerms__c, convertCurrency(AnnualContractValueARR__c) arrUsd, Date_Reached_Trial__c, TrialStartDate__c, ContractSignedDate__c, ContractLiveDate__c, Contract_Live_Date_Rip_Replace_LOC__c, Live_Paying_Date__c, Date_Reached_Closed_Lost__c, ContractEndDate__c FROM Opportunity WHERE Date_Reached_Trial__c != null OR ContractSignedDate__c != null OR ContractLiveDate__c != null OR Live_Paying_Date__c != null`);
+    `SELECT Owner.Name, AccountManager__r.Name, Name, Account.Name, StageName, RecordType.Name, Status__c, PaymentTerms__c, convertCurrency(AnnualContractValueARR__c) arrUsd, Date_Reached_Trial__c, TrialStartDate__c, ContractSignedDate__c, ContractLiveDate__c, Contract_Live_Date_Rip_Replace_LOC__c, Live_Paying_Date__c, Date_Reached_Closed_Lost__c, ContractEndDate__c, TrialEndDate__c, TrialExtensionEndDate__c FROM Opportunity WHERE Date_Reached_Trial__c != null OR ContractSignedDate__c != null OR ContractLiveDate__c != null OR Live_Paying_Date__c != null`);
   const funnel = [[
     "Owner","AM","Opportunity","Account","Stage","Type","Status","ARR (USD)","TrialDate","SignedDate","LiveDate","RRDate","LivePayingDate","LostDate","EndDate",
   ]];
-  const funnelTerms = [], funnelPilot = []; // parallel to funnel data rows: PaymentTerms__c, TrialStartDate__c (Pilot Start) per opp
+  const funnelTerms = [], funnelPilot = [], funnelPilotEnd = []; // parallel to funnel data rows: PaymentTerms__c, TrialStartDate__c (Pilot Start), pilot END per opp
   for (const x of funnelRecs) {
     funnel.push([
       x.Owner?.Name ?? "", x.AccountManager__r?.Name ?? "", x.Name ?? "", x.Account?.Name ?? "", x.StageName ?? "", x.RecordType?.Name ?? "", x.Status__c ?? "",
@@ -230,6 +230,8 @@ async function main() {
     ]);
     funnelTerms.push(x.PaymentTerms__c ?? "");
     funnelPilot.push(x.TrialStartDate__c ?? "");
+    // Pilot END date = when a pilot converts to Contracted. Extension end wins if the trial was extended.
+    funnelPilotEnd.push(x.TrialExtensionEndDate__c ?? x.TrialEndDate__c ?? "");
   }
   // Payment-term → billing cycles/yr + cadence label (order: quarter, then annual/bi-annual, then month).
   const cyclesOf = (term) => { const t = String(term || "").toLowerCase();
@@ -269,18 +271,21 @@ async function main() {
   // W = Tier (Q3-end): same rules snapshotted at Sep-30 (the snapshot tabs read this). All sit AFTER
   // the dashboard's A:P read range, so nothing the dashboard consumes shifts.
   const signedFlagF = (r) => `=IF(ISNUMBER($J${r}),"Yes","No — Live/RR fallback")`;
-  funnel[0].push("Tier (today)", "PaymentTerms", "Cadence", "Invoice per cycle", "Monthly-equiv", "Pilot Start Date", "Signed on file?", "Tier (Q3-end)", "Contracted anchor");
+  // "PilotEndDate" (col Y) appended last so it sits inside the dashboard's A:Y read range and no
+  // existing column (or the tier formulas' hardcoded $U/$X refs) shifts.
+  funnel[0].push("Tier (today)", "PaymentTerms", "Cadence", "Invoice per cycle", "Monthly-equiv", "Pilot Start Date", "Signed on file?", "Tier (Q3-end)", "Contracted anchor", "PilotEndDate");
   for (let i = 1; i < funnel.length; i++) {
     const term = funnelTerms[i - 1], arr = Number(funnel[i][7] || 0), c = cyclesOf(term);
-    funnel[i].push(tierF(i + 1), term || "(blank)", c.cad, c.py ? Math.round(arr / c.py) : "", Math.round(arr / 12), funnelPilot[i - 1] || "", signedFlagF(i + 1), tierFAt(i + 1, QEND, "TODAY()"), anchorF(i + 1));
+    funnel[i].push(tierF(i + 1), term || "(blank)", c.cad, c.py ? Math.round(arr / c.py) : "", Math.round(arr / 12), funnelPilot[i - 1] || "", signedFlagF(i + 1), tierFAt(i + 1, QEND, "TODAY()"), anchorF(i + 1), funnelPilotEnd[i - 1] || "");
   }
-  // Verifiable tier totals, SUMIF over the Tier column (P). Written to Y:Z (clear of the Q–V data).
+  // Verifiable tier totals, SUMIF over the Tier column (P). Written to AA:AB (clear of the A:Y data,
+  // now that PilotEndDate occupies col Y). Total uses SUMIF directly so it's position-independent.
   const funnelSummary = [
     ["Tier totals — as of today", ""],
     ["Booked (pilot / Trial)", `=SUMIF($P:$P,"Booked",$H:$H)`],
     ["Contracted (live, not paying)", `=SUMIF($P:$P,"Contracted",$H:$H)`],
     ["Live ARR (paying)", `=SUMIF($P:$P,"Live",$H:$H)`],
-    ["Contracted + Live (ties to finance)", `=S3+S4`],
+    ["Contracted + Live (ties to finance)", `=SUMIF($P:$P,"Contracted",$H:$H)+SUMIF($P:$P,"Live",$H:$H)`],
   ];
 
   // 6) ARR_MoM_Rebuild matrix (boundary = 1st of next month = $B+1)
@@ -579,7 +584,7 @@ async function main() {
     { addSheet: { properties: { title: "SOQL_PaymentMix", gridProperties: { rowCount: pmix.length + 10, columnCount: 14 } } } },
     { addSheet: { properties: { title: "Top_Booked_ARR", gridProperties: { rowCount: 20, columnCount: 6 } } } },
     { addSheet: { properties: { title: "Cash_Forecast", gridProperties: { rowCount: cashFc.length + 10, columnCount: 8 } } } },
-    { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 28 } } } },
+    { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 30 } } } },
   );
   // Keep-in-place tabs: create on first run, else resize the grid (preserving sheetId + refs).
   for (const [t, g] of Object.entries(KEEP_IN_PLACE)) {
@@ -616,7 +621,7 @@ async function main() {
       { range: "Top_Booked_ARR!A1", values: topBooked },
       { range: "Cash_Forecast!A1", values: cashFc },
       { range: "ARR_Funnel!A1", values: funnel },
-      { range: "ARR_Funnel!Y1", values: funnelSummary },
+      { range: "ARR_Funnel!AA1", values: funnelSummary },
     ],
   } });
   // RAW so month labels ("2026-08", "Aug 2026") stay TEXT — USER_ENTERED would coerce them to dates.

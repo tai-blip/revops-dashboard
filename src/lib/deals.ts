@@ -133,6 +133,57 @@ export function computeCashForecast(rows: Row[]): CashForecast {
   return { events, owners: [...owners].filter(Boolean).sort(), total: rrTotal + stdTotal, rrTotal, stdTotal };
 }
 
+// Predicted CASHFLOW by ARR tier — when each tier's ARR is forecast to be COLLECTED as cash.
+// Rules (Tai, 2026-08-18), net term = 45 days:
+//   • Live       → the actual Live Paying Date (money we truly collect).
+//   • Contracted → (R&R date ?? Contract Live Date) + 45.
+//   • Booked     → (R&R date ?? Pilot End Date ?? Contract Live Date) + 45  [pilot end = when it
+//                  converts to Contracted; falls back to Contract Live Date if the pilot-end field
+//                  is null/absent]. Deals with no usable date land in `unscheduled` (can't be dated).
+// Reads the ARR_Funnel tab's own "Tier (today)" (col P) so the split matches the funnel exactly.
+const NET_TERM_DAYS = 45;
+export type CashTierPoint = { ym: string; label: string; booked: number; contracted: number; live: number };
+export type PredictedCashflow = { months: CashTierPoint[]; unscheduled: { booked: number; contracted: number; live: number } };
+export function computePredictedCashflow(rows: Row[]): PredictedCashflow {
+  const empty: PredictedCashflow = { months: [], unscheduled: { booked: 0, contracted: 0, live: 0 } };
+  if (!rows || rows.length < 2) return empty;
+  const h = rows[0].map((x) => String(x ?? "").toLowerCase());
+  const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
+  const cArr = ci("ARR (USD)"), cTier = ci("Tier (today)"), cLive = ci("LiveDate"),
+    cRR = ci("RRDate"), cLPD = ci("LivePayingDate"), cPilotEnd = ci("PilotEndDate");
+  if (cArr < 0 || cTier < 0) return empty;
+  const iso = (v: unknown) => { const d = sheetsSerialToDate(v); return d ? d : null; };
+  const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86400000);
+  const ymOf = (d: Date) => d.toISOString().slice(0, 7);
+
+  const byYm: Record<string, { booked: number; contracted: number; live: number }> = {};
+  const unscheduled = { booked: 0, contracted: 0, live: 0 };
+  for (const r of rows.slice(1)) {
+    const arr = Number(r[cArr] ?? 0);
+    if (!(arr > 0)) continue;
+    const tier = String(r[cTier] ?? "");
+    const key = tier === "Booked" ? "booked" : tier === "Contracted" ? "contracted" : tier === "Live" ? "live" : "";
+    if (!key) continue;
+    const rr = cRR >= 0 ? iso(r[cRR]) : null;
+    const live = cLive >= 0 ? iso(r[cLive]) : null;
+    const livePay = cLPD >= 0 ? iso(r[cLPD]) : null;
+    const pilotEnd = cPilotEnd >= 0 ? iso(r[cPilotEnd]) : null;
+    let cashDate: Date | null = null;
+    if (key === "live") cashDate = livePay ?? (rr ?? live ? addDays((rr ?? live)!, NET_TERM_DAYS) : null);
+    else if (key === "contracted") { const a = rr ?? live; cashDate = a ? addDays(a, NET_TERM_DAYS) : null; }
+    else { const a = rr ?? pilotEnd ?? live; cashDate = a ? addDays(a, NET_TERM_DAYS) : null; } // booked
+    if (!cashDate) { unscheduled[key as "booked" | "contracted" | "live"] += arr; continue; }
+    const ym = ymOf(cashDate);
+    (byYm[ym] ??= { booked: 0, contracted: 0, live: 0 })[key as "booked" | "contracted" | "live"] += arr;
+  }
+  const months = Object.keys(byYm).sort().map((ym) => {
+    const [y, m] = ym.split("-");
+    const label = new Date(Date.UTC(+y, +m - 1, 1)).toLocaleString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
+    return { ym, label, ...byYm[ym] };
+  });
+  return { months, unscheduled };
+}
+
 // Three-tier ARR funnel MoM (from the ARR_Funnel tab), point-in-time stock — ARR sitting
 // IN each tier at month-end (interval logic):
 //   • Booked     = in Trial (pilot): trial date reached, not yet signed / live / lost.

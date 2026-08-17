@@ -46,6 +46,7 @@ type DashboardData = {
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
   arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
+  predictedCashflow?: { months: { ym: string; label: string; booked: number; contracted: number; live: number }[]; unscheduled: { booked: number; contracted: number; live: number } };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -526,6 +527,7 @@ export default function Dashboard() {
   const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
   const [inclSql, setInclSql] = useState<boolean>(true); // Forecast Potential: include SQL-stage deals?
   const [cashAE, setCashAE] = useState<string>("all");
+  const [cashTier, setCashTier] = useState<"booked" | "contracted" | "live">("contracted"); // Predicted Cashflow tier toggle
   const [dealAE, setDealAE] = useState<string>("all");
   const [dealConf, setDealConf] = useState<string>("all");
   const [dealSearch, setDealSearch] = useState<string>("");
@@ -2935,6 +2937,53 @@ export default function Dashboard() {
                       </tbody>
                     </table>
                   </div>
+                </Card>
+              );
+            })()}
+            <div style={{ height: 16 }} />
+            {/* Predicted Cashflow — when each ARR tier turns into collected cash (live/R&R date + 45d net term) */}
+            {data.predictedCashflow && data.predictedCashflow.months.length > 0 && (() => {
+              const pc = data.predictedCashflow;
+              const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+              const tot = (k: "booked" | "contracted" | "live") => pc.months.reduce((s, m) => s + m[k], 0) + pc.unscheduled[k];
+              const tB = tot("booked"), tC = tot("contracted"), tL = tot("live");
+              const tiers = [
+                { key: "booked" as const, label: "Booked", color: C.gold, total: tB, sub: "pilot → cash at pilot-end/live + 45d" },
+                { key: "contracted" as const, label: "Contracted", color: C.blue, total: tC, sub: "contract-live date (R&R if any) + 45d" },
+                { key: "live" as const, label: "Live", color: C.grn, total: tL, sub: "actual Live-Paying date (cash collected)" },
+              ];
+              const active = tiers.find((t) => t.key === cashTier)!;
+              // Show a readable window: this year through +12 months out.
+              const win = pc.months.filter((m) => m.ym >= "2026-01" && m.ym <= "2027-06");
+              const pts = win.map((m) => ({ label: m.label, value: m[cashTier], forecast: m.ym >= nowKey }));
+              const unsched = pc.unscheduled[cashTier];
+              return (
+                <Card
+                  title="Predicted Cashflow — when ARR turns into collected cash"
+                  sub="Each deal's ARR placed in the month cash is forecast to arrive: net 45-day term after the go-live (R&R date wins). Live = actual Live-Paying date. Toggle a tier below. Contract-live ARR ($5.78M) = Contracted + Live; Booked sits above it as upside."
+                >
+                  <div style={{ padding: "10px 20px 4px", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {tiers.map((t) => (
+                      <button key={t.key} onClick={() => setCashTier(t.key)}
+                        style={{ cursor: "pointer", border: `1px solid ${cashTier === t.key ? t.color : C.bd}`, background: cashTier === t.key ? t.color : "transparent", color: cashTier === t.key ? "#fff" : C.t2, borderRadius: 10, padding: "7px 14px", fontSize: 12.5, fontWeight: 700 }}>
+                        {t.label} · {fmt(t.total)}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ padding: "2px 20px 0", fontSize: 12, color: C.t3 }}>
+                    Contract-live (Contracted + Live) = <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 700, color: C.t2 }}>{fmt(tC + tL)}</span> · ties to finance. Booked is upside above it.
+                  </div>
+                  <div style={{ padding: "8px 20px 4px", fontSize: 12.5, fontWeight: 700, color: active.color }}>
+                    {active.label} cashflow — {active.sub}
+                  </div>
+                  <div style={{ padding: "0 12px 8px" }}>
+                    <ArrMovementChart points={pts} />
+                  </div>
+                  {unsched > 0 && (
+                    <div style={{ padding: "0 20px 16px", fontSize: 12, color: C.t3 }}>
+                      + <span style={{ fontFamily: "var(--font-dm-mono)", fontWeight: 700, color: active.color }}>{fmt(unsched)}</span> {active.label} ARR unscheduled — no live/pilot-end date yet to predict a cash month.
+                    </div>
+                  )}
                 </Card>
               );
             })()}
