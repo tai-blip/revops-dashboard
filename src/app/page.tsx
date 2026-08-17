@@ -47,6 +47,7 @@ type DashboardData = {
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
   arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
   predictedCashflow?: { months: { ym: string; label: string; contracted: number; live: number }[]; baseline: { contracted: number; live: number }; booked: number; deals: { tier: "contracted" | "live"; opp: string; account: string; owner: string; arr: number; arriveYm: string; arriveDate: string; basis: string }[] };
+  pipelineGen?: { byOwner: Record<string, { arr: number; count: number }>; total: number; totalCount: number };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -654,32 +655,28 @@ export default function Dashboard() {
     return pts;
   }, [data]);
 
-  // Pipeline created within Q3 FY26, per AE — sourced from the Pipeline-WoW tab's
-  // "New ARR Created ($)" rep-by-rep MoM table (Jul–Sep 2026 columns). This is the
-  // warehouse's own figure, so the headline total and the per-rep table reconcile
-  // exactly (both sum the same rows). The "All (Team)" row is skipped.
+  // Pipeline generated within the quarter, per AE — now computed server-side (data.pipelineGen)
+  // from the open + closed-LOST pulls by Date_Reached_SQL, fixing the Pipeline-WoW month-drift and
+  // including lost pipeline. ARR = Annual_Contract_Value_ARR_Formula__c (Amount/TCV). Falls back to
+  // the old Pipeline-WoW MoM figure if the server field is absent.
   const q3CreatedByOwner = useMemo(() => {
     const out: Record<string, number> = {};
     if (!data) return out;
+    if (data.pipelineGen) { for (const [rep, o] of Object.entries(data.pipelineGen.byOwner)) out[rep] = o.arr; return out; }
     const { months, reps } = data.pipelineWow.newArrMom;
     const q3Idx = months.map((m, i) => (isQ3Fy26(m) ? i : -1)).filter((i) => i >= 0);
-    for (const [rep, vals] of Object.entries(reps)) {
-      if (/^all\b/i.test(rep)) continue;
-      out[rep] = q3Idx.reduce((s, i) => s + (vals[i] ?? 0), 0);
-    }
+    for (const [rep, vals] of Object.entries(reps)) { if (/^all\b/i.test(rep)) continue; out[rep] = q3Idx.reduce((s, i) => s + (vals[i] ?? 0), 0); }
     return out;
   }, [data]);
 
-  // Count of Q3-created opps per AE — from the parallel "New Opps Entered (SQL)" table.
+  // Count of quarter-created opps per AE — same server source (open + closed-lost).
   const q3CreatedCountByOwner = useMemo(() => {
     const out: Record<string, number> = {};
     if (!data) return out;
+    if (data.pipelineGen) { for (const [rep, o] of Object.entries(data.pipelineGen.byOwner)) out[rep] = o.count; return out; }
     const { months, reps } = data.pipelineWow.newOppsMom;
     const q3Idx = months.map((m, i) => (isQ3Fy26(m) ? i : -1)).filter((i) => i >= 0);
-    for (const [rep, vals] of Object.entries(reps)) {
-      if (/^all\b/i.test(rep)) continue;
-      out[rep] = q3Idx.reduce((s, i) => s + (vals[i] ?? 0), 0);
-    }
+    for (const [rep, vals] of Object.entries(reps)) { if (/^all\b/i.test(rep)) continue; out[rep] = q3Idx.reduce((s, i) => s + (vals[i] ?? 0), 0); }
     return out;
   }, [data]);
 
@@ -764,7 +761,9 @@ export default function Dashboard() {
     const quota = H("pipe_quota", aeRows.reduce((s, r) => s + (r.quota ?? 0), 0));
     const genRows = data.forecastTab.rows.filter((r) => !r.am && !r.lead);
     const genAe = genRows.reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
-    const gen = H(
+    // Created in Q3 = code-computed pipeline generated (open + closed-lost, drift-free); the per-AE
+    // table sums the same source, so headline and breakdown reconcile.
+    const gen = data.pipelineGen?.total ?? H(
       "pipe_created_q3",
       data.pipeline.metricSections["4. PIPELINE CREATED (NEW)"]?.find((m) => m.metric === "Created This Quarter (ARR)")?.value ?? genAe
     );
@@ -1031,7 +1030,7 @@ export default function Dashboard() {
     const pipeGenAe = data.forecastTab.rows
       .filter((r) => !r.am && !r.lead)
       .reduce((s, r) => s + (q3CreatedByOwner[r.name] ?? 0), 0);
-    const pipeGen = HS(
+    const pipeGen = data.pipelineGen?.total ?? HS(
       "pipe_created_q3",
       data.pipeline.metricSections["4. PIPELINE CREATED (NEW)"]?.find((m) => m.metric === "Created This Quarter (ARR)")?.value ?? pipeGenAe
     );

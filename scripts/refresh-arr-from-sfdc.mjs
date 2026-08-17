@@ -53,7 +53,7 @@ const SOQL = `SELECT Id, Name, AccountId, Account.Name, Account.Payment_Terms__c
   Merchant_Segment__c, Location_Tiers__c, DealCountry__c, Region__c, ChannelofContact__c,
   Locations_in_Contract__c, CloseDate, Date_Reached_SQL__c, Date_Reached_Closed_Won__c,
   Date_Reached_Closed_Lost__c, ContractLiveDate__c, ContractEndDate__c, CreatedDate,
-  PaymentTerms__c, AccountManager__r.Name, Contract_Live_Date_Rip_Replace_LOC__c
+  PaymentTerms__c, AccountManager__r.Name, Contract_Live_Date_Rip_Replace_LOC__c, Amount
   FROM Opportunity WHERE StageName IN ('Billing','Closed Won','Closed Lost')`.replace(/\s+/g, " ");
 
 // Normalize the messy PaymentTerms__c picklist into Annual / Bi-Annual / Quarterly /
@@ -182,7 +182,7 @@ async function main() {
     "Id","Opportunity","Owner","RecordType","Stage","Outcome","Merchant Segment","Location Tier",
     "Deal Country","Region","Channel of Contact","ARR (USD)","Locations","CloseDate",
     "Date Reached SQL","Date Reached Closed Won","Date Reached Closed Lost","ContractLiveDate","ContractEndDate","CreatedDate",
-    "Status","RR LOC Date",
+    "Status","RR LOC Date","Amount",
   ]];
   for (const x of all) {
     closed.push([
@@ -193,7 +193,7 @@ async function main() {
       x.AnnualContractValueARR__c ?? 0, x.Locations_in_Contract__c ?? "",
       x.CloseDate ?? "", x.Date_Reached_SQL__c ?? "", x.Date_Reached_Closed_Won__c ?? "",
       x.Date_Reached_Closed_Lost__c ?? "", x.ContractLiveDate__c ?? "", x.ContractEndDate__c ?? "", (x.CreatedDate ?? "").slice(0, 10),
-      x.Status__c ?? "", x.Contract_Live_Date_Rip_Replace_LOC__c ?? "",
+      x.Status__c ?? "", x.Contract_Live_Date_Rip_Replace_LOC__c ?? "", x.Amount ?? 0,
     ]);
   }
 
