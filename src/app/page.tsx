@@ -45,7 +45,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
@@ -2880,6 +2880,61 @@ export default function Dashboard() {
                       </div>
                     );
                   })()}
+                </Card>
+              );
+            })()}
+            <div style={{ height: 16 }} />
+            {/* Funnel Movement — MoM reconciliation: every tier level = last month + ins − outs */}
+            {data.arrFunnel && data.arrFunnel.stock.length > 1 && (() => {
+              const s = data.arrFunnel.stock;
+              const rows = s.slice(1); // each row reconciles this month vs the prior
+              const flowD = (n: number, sign: string) => (n > 0 ? sign + fmt(n) : "—");
+              return (
+                <Card
+                  title="Funnel Movement — how each tier's level reconciles (MoM)"
+                  sub="Each tier's level = last month + what came in − what went out. This is why Contracted can fall even while deals convert to Live: newly-signed deals enter Contracted directly (never a tracked pilot) while others move on to Live. Every row ties out exactly."
+                >
+                  <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.blue }}>Contracted (signed, not yet paying)</div>
+                  <div style={{ overflowX: "auto", padding: "2px 20px 10px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ New signed</Th><Th>+ From Booked</Th><Th>− To Live</Th><Th>− Lost/Churn</Th><Th>Close</Th>
+                      </tr></thead>
+                      <tbody>
+                        {rows.map((p, i) => (
+                          <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === rows.length - 1 ? C.s2 : undefined }}>
+                            <Td l bold>{p.label}</Td>
+                            <Td mono color={C.t2}>{fmt(s[i].contracted)}</Td>
+                            <Td mono color={p.cNewSigned > 0 ? C.grn : C.t3}>{flowD(p.cNewSigned, "+")}</Td>
+                            <Td mono color={p.bToC > 0 ? C.grn : C.t3}>{flowD(p.bToC, "+")}</Td>
+                            <Td mono color={p.cToL > 0 ? C.red : C.t3}>{flowD(p.cToL, "−")}</Td>
+                            <Td mono color={p.cLeak > 0 ? C.red : C.t3}>{flowD(p.cLeak, "−")}</Td>
+                            <Td mono bold color={C.blue}>{fmt(p.contracted)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ padding: "6px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.grn }}>Live (paying)</div>
+                  <div style={{ overflowX: "auto", padding: "2px 20px 16px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ From Contracted</Th><Th>+ New direct</Th><Th>− Churn / ended</Th><Th>Close</Th>
+                      </tr></thead>
+                      <tbody>
+                        {rows.map((p, i) => (
+                          <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === rows.length - 1 ? C.s2 : undefined }}>
+                            <Td l bold>{p.label}</Td>
+                            <Td mono color={C.t2}>{fmt(s[i].live)}</Td>
+                            <Td mono color={p.cToL > 0 ? C.grn : C.t3}>{flowD(p.cToL, "+")}</Td>
+                            <Td mono color={p.lNewDirect > 0 ? C.grn : C.t3}>{flowD(p.lNewDirect, "+")}</Td>
+                            <Td mono color={p.lChurn > 0 ? C.red : C.t3}>{flowD(p.lChurn, "−")}</Td>
+                            <Td mono bold color={C.grn}>{fmt(p.live)}</Td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </Card>
               );
             })()}

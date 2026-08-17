@@ -143,7 +143,17 @@ export function computeCashForecast(rows: Row[]): CashForecast {
 // by whether payment has started. Window is fixed Jan-2026 → current month. Also returns
 // the current-snapshot list of deals sitting in the Contracted state.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
-export type FunnelPoint = { ym: string; label: string; booked: number; contracted: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number };
+export type FunnelPoint = {
+  ym: string; label: string; booked: number; contracted: number; live: number; churn: number;
+  bToC: number; cToL: number; bToLost: number;
+  // Full reconciliation flows so each tier's level ties out exactly month-to-month:
+  //   Contracted[M] = Contracted[M-1] + bToC + cNewSigned − cToL − cLeak
+  //   Live[M]       = Live[M-1] + cToL + lNewDirect − lChurn
+  cNewSigned: number; // signed deals that entered Contracted directly (never a tracked pilot)
+  cLeak: number;      // left Contracted to lost/churn/dropped (not to Live)
+  lNewDirect: number; // entered Live directly (from Booked or brand-new), not via Contracted
+  lChurn: number;     // left Live (churn / contract ended)
+};
 export type ContractedDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string };
 export type ArrFunnel = { stock: FunnelPoint[]; contractedDeals: ContractedDeal[] };
 export function computeArrFunnel(rows: Row[]): ArrFunnel {
@@ -207,21 +217,28 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
                                : (d.pilotStart !== "" && before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost));
       return booked ? "Booked" : "";
     };
-    let sB = 0, sC = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0;
+    let sB = 0, sC = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0, cNewSigned = 0, cLeak = 0, lNewDirect = 0, lChurn = 0;
     deals.forEach((d, di) => {
       const t = tierOf(d);
+      const p = prevTier[di];
       if (t === "Booked") sB += d.arr; else if (t === "Contracted") sC += d.arr; else if (t === "Live") sL += d.arr;
       if (d.churn && d.end >= first && d.end <= me) sChurn += d.arr;                                                   // churned/paused, contract ended this month
       if (!firstMonth) {                                                                                               // $ that moved tier vs the prior month
-        if (prevTier[di] === "Booked" && t === "Contracted") bToC += d.arr;
-        if (prevTier[di] === "Contracted" && t === "Live") cToL += d.arr;
+        if (p === "Booked" && t === "Contracted") bToC += d.arr;
+        if (p === "Contracted" && t === "Live") cToL += d.arr;
         // Booked leakage: sat in Booked last month, its Closed-Lost date lands this month → it fell out.
-        if (prevTier[di] === "Booked" && d.lost !== "" && d.lost >= first && d.lost <= me) bToLost += d.arr;
+        if (p === "Booked" && d.lost !== "" && d.lost >= first && d.lost <= me) bToLost += d.arr;
+        // Contracted reconciliation: everything else that moved its level.
+        if (t === "Contracted" && p !== "Contracted" && p !== "Booked") cNewSigned += d.arr;                          // entered Contracted directly (new sign)
+        if (p === "Contracted" && t !== "Contracted" && t !== "Live") cLeak += d.arr;                                 // left Contracted to lost/churn/dropped
+        // Live reconciliation.
+        if (t === "Live" && p !== "Live" && p !== "Contracted") lNewDirect += d.arr;                                  // entered Live directly (from Booked / brand-new)
+        if (p === "Live" && t !== "Live") lChurn += d.arr;                                                            // left Live (churn / ended)
       }
       prevTier[di] = t;
     });
     firstMonth = false;
-    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn, bToC, cToL, bToLost });
+    stock.push({ ym, label, booked: sB, contracted: sC, live: sL, churn: sChurn, bToC, cToL, bToLost, cNewSigned, cLeak, lNewDirect, lChurn });
   }
 
   // Current snapshot: deals sitting in the Contracted state right now (contract-live, not paying).
