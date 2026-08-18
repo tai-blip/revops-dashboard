@@ -14,10 +14,45 @@
 // Run: node --env-file=.env scripts/refresh-sf-imports.mjs
 import { google } from "googleapis";
 
+// ── Resilience: retry transient SFDC / Sheets / network failures with exponential
+// backoff so a single blip (429 rate-limit, 5xx, socket reset, timeout) doesn't fail
+// the whole daily run. Non-transient errors (bad SOQL, auth config) still throw fast. ──
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function isTransient(e) {
+  const code = e?.code ?? e?.status ?? e?.response?.status;
+  if ([408, 429, 500, 502, 503, 504].includes(Number(code))) return true;
+  if (["ECONNRESET", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "EPIPE", "UND_ERR_CONNECT_TIMEOUT"].includes(code)) return true;
+  const msg = String(e?.message ?? e ?? "").toLowerCase();
+  return /\b(408|429|500|502|503|504)\b|rate.?limit|quota exceeded|user rate|backend error|timeout|timed out|aborted|econnreset|socket hang|network|fetch failed|temporarily|try again/.test(msg);
+}
+async function retry(label, fn, tries = 5, baseMs = 1000) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); }
+    catch (e) {
+      if (i >= tries - 1 || !isTransient(e)) throw e;
+      const wait = baseMs * 2 ** i + Math.floor(Math.random() * 300);
+      console.warn(`  ↻ retry ${label} (${i + 1}/${tries - 1}) in ${wait}ms — ${e.message || e}`);
+      await sleep(wait);
+    }
+  }
+}
+// fetch with a hard timeout (turns a hung connection into a retryable error).
+async function fetchJSON(url, opts, label) {
+  return retry(label, async () => {
+    const r = await fetch(url, { ...opts, signal: AbortSignal.timeout(45000) });
+    if (!r.ok) {
+      const body = await r.text().catch(() => "");
+      const err = new Error(`${label} HTTP ${r.status} ${body.slice(0, 140)}`);
+      err.status = r.status;
+      throw err;
+    }
+    return r.json();
+  });
+}
+
 async function sfAuth() {
   const body = new URLSearchParams({ grant_type: "client_credentials", client_id: process.env.SF_CLIENT_ID, client_secret: process.env.SF_CLIENT_SECRET });
-  const r = await fetch(`${process.env.SF_LOGIN_URL}/services/oauth2/token`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
-  const j = await r.json();
+  const j = await fetchJSON(`${process.env.SF_LOGIN_URL}/services/oauth2/token`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body }, "sf-auth");
   if (!j.access_token) throw new Error("SF auth failed: " + JSON.stringify(j));
   return { token: j.access_token, instance: j.instance_url };
 }
@@ -26,8 +61,7 @@ async function sfQueryAll(instance, token, soql) {
   let url = `${instance}/services/data/v${v}/query?q=${encodeURIComponent(soql)}`;
   const out = [];
   while (url) {
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    const j = await r.json();
+    const j = await fetchJSON(url, { headers: { Authorization: `Bearer ${token}` } }, "sf-query");
     if (j.records == null) throw new Error("SF query failed: " + JSON.stringify(j));
     out.push(...j.records);
     url = j.done ? null : `${instance}${j.nextRecordsUrl}`;
@@ -47,18 +81,19 @@ const banner = () =>
   `              Salesforce Import\n              Last updated ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC (auto — revops daily pull)`;
 
 async function writeTab(api, tab, header, rows, extraCols = null) {
-  // Clear everything below the header, then write banner + header + data.
-  await api.spreadsheets.values.clear({ spreadsheetId: SHEET_ID, range: `'${tab}'!A3:Z10000` });
+  // Clear everything below the header, then write banner + header + data. Each Sheets
+  // call is retried on transient errors (429 quota, 5xx) so a blip doesn't fail the run.
+  await retry(`clear ${tab}`, () => api.spreadsheets.values.clear({ spreadsheetId: SHEET_ID, range: `'${tab}'!A3:Z10000` }));
   const matrix = [[banner()], header, ...rows];
-  await api.spreadsheets.values.update({
+  await retry(`write ${tab}`, () => api.spreadsheets.values.update({
     spreadsheetId: SHEET_ID, range: `'${tab}'!A1`, valueInputOption: "USER_ENTERED",
     requestBody: { values: matrix },
-  });
+  }));
   if (extraCols) {
-    await api.spreadsheets.values.update({
+    await retry(`write ${tab} extra`, () => api.spreadsheets.values.update({
       spreadsheetId: SHEET_ID, range: `'${tab}'!${extraCols.range}`, valueInputOption: "USER_ENTERED",
       requestBody: { values: extraCols.values },
-    });
+    }));
   }
   console.log(`wrote ${tab}: ${rows.length} data rows`);
 }
