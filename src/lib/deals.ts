@@ -881,7 +881,13 @@ export function computeForecastTab(
   // Per-AE canonical Q3 New Business (official attainment actual). When present for an
   // owner, it overrides the sheet/close-date "Closed Won" so the Forecast tab matches
   // the AE Attainment tab. AMs/leads (absent here) keep their sheet-derived value.
-  attByOwner?: Record<string, number>
+  attByOwner?: Record<string, number>,
+  // Sheet-calculated per-AE Potential components from the "Forecast Potential" tab. When
+  // present for an owner, these SHEET formulas (live over the Query 1 pull) drive the
+  // Potential columns instead of the in-code aggregation, so the math is auditable in the
+  // sheet and a deal a rep has moved to 0% quarterly drops out at the source. Absent for
+  // an owner → falls back to the in-code stage aggregation (unchanged behaviour).
+  potSource?: Record<string, { earlyQ: number; lateQ: number; sqlQ: number; earlyY: number; lateY: number; sqlY: number }>
 ) {
   const rosterNames = new Set(roster.map((r) => r.name));
 
@@ -929,8 +935,11 @@ export function computeForecastTab(
     // Open pipeline stays sheet-derived when available (unchanged); potential is now
     // computed directly from open deals by stage, never from the sheet/expectedRevQ.
     const openPipe = s ? s.openPipe : o?.pipe ?? 0;
-    const potEarlyQ = o?.earlyQ ?? 0, potLateQ = o?.lateQ ?? 0, potSqlQ = o?.sqlQ ?? 0;
-    const potEarlyY = o?.earlyY ?? 0, potLateY = o?.lateY ?? 0, potSqlY = o?.sqlY ?? 0;
+    // Prefer the sheet-calculated Potential (Forecast Potential tab) when present for this
+    // owner; otherwise fall back to the in-code stage aggregation.
+    const ps = potSource?.[a.name];
+    const potEarlyQ = ps ? ps.earlyQ : o?.earlyQ ?? 0, potLateQ = ps ? ps.lateQ : o?.lateQ ?? 0, potSqlQ = ps ? ps.sqlQ : o?.sqlQ ?? 0;
+    const potEarlyY = ps ? ps.earlyY : o?.earlyY ?? 0, potLateY = ps ? ps.lateY : o?.lateY ?? 0, potSqlY = ps ? ps.sqlY : o?.sqlY ?? 0;
     const potential = cw + potEarlyQ + potLateQ; // default: quarter, SQL included
     return {
       name: a.name,

@@ -88,7 +88,7 @@ async function buildPayload(): Promise<Payload> {
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
     // NOTE: order here MUST match the destructured variables below.
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows] =
       await getSheetValuesBatch([
         { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
@@ -118,6 +118,10 @@ async function buildPayload(): Promise<Payload> {
         // Targets tab = the single source powering the Targets & Progress tab (fixed finance plan +
         // YTD/Q3 rollups as a machine-readable key→value block). Same read-by-key pattern.
         { tab: "Targets", range: "A1:C120" },
+        // Forecast Potential tab = the single sheet-calculated source for per-AE Potential ARR
+        // (Quarter/Yearly Expected Rev computed by formula over the live Query 1 pull + Closed
+        // Won). Dashboard reads its machine-readable key→value block so the math lives in the sheet.
+        { tab: "Forecast Potential", range: "A1:M60" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -235,6 +239,20 @@ async function buildPayload(): Promise<Payload> {
     // forecast and the AE Attainment tab tell the same story (potential/variance recompute).
     const attByOwner: Record<string, number> = {};
     for (const r of aeAttainment.reps) attByOwner[r.name] = r.actual;
+    // Sheet-calculated per-AE Potential (Forecast Potential tab). Keyed by fp_<field>_<slug>
+    // where slug = the roster short name (lowercased, alnum). When present, these formula
+    // values drive the Forecast tab's Potential columns instead of the in-code aggregation.
+    const fpSource = parseKeyValue(forecastPotentialRows);
+    const potSource: Record<string, { earlyQ: number; lateQ: number; sqlQ: number; earlyY: number; lateY: number; sqlY: number }> = {};
+    for (const a of roster) {
+      const s = a.short.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (`fp_earlyq_${s}` in fpSource) {
+        potSource[a.name] = {
+          earlyQ: fpSource[`fp_earlyq_${s}`], lateQ: fpSource[`fp_lateq_${s}`], sqlQ: fpSource[`fp_sqlq_${s}`] ?? 0,
+          earlyY: fpSource[`fp_earlyy_${s}`], lateY: fpSource[`fp_latey_${s}`], sqlY: fpSource[`fp_sqly_${s}`] ?? 0,
+        };
+      }
+    }
     const forecastTab = computeForecastTab(
       openDeals,
       closedDeals,
@@ -247,7 +265,8 @@ async function buildPayload(): Promise<Payload> {
       nextQ,
       forecastSheetRows,
       forecastStageRows,
-      attByOwner
+      attByOwner,
+      potSource
     );
     const currentYear = new Date().getUTCFullYear();
     const winRateYtd = computeWinRateAndCycle(closedDeals, currentYear);
