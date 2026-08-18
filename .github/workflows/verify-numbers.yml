@@ -1,0 +1,88 @@
+name: Numbers gate (PR + daily)
+
+# Two independent guards on every pull request:
+#
+#   build   — does the dashboard still compile and lint? (catches the bug class that
+#             currently only surfaces when Tai opens the Vercel preview)
+#   numbers — does every headline number still match an independent Salesforce
+#             recompute, its own algebra, and the committed baseline?
+#
+# Also runs daily at 13:00 UTC — one hour after the SFDC → Sheet refresh (12:00 UTC in
+# refresh-arr.yml) — so a bad overnight pull is caught before anyone reads the dashboard.
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    name: Build & lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      # Report-only for now: the repo has 5 PRE-EXISTING lint errors (3 prefer-const, plus
+      # two React-compiler findings in page.tsx — a Date.now() call during render at ~:774
+      # and a closure mutation at ~:230). Blocking on lint today would make every PR red for
+      # reasons unrelated to that PR, which trains people to ignore the gate. Fix those five,
+      # then delete this continue-on-error line to make lint blocking.
+      - name: Lint (report-only)
+        run: npm run lint
+        continue-on-error: true
+      # DEMO_MODE build: no Google/SF credentials needed, so this step also proves the
+      # bundled demo snapshot path still renders (that's what a credential-less deploy uses).
+      - name: Build
+        run: npm run build
+
+  numbers:
+    name: Numbers regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY_B64: ${{ secrets.GOOGLE_PRIVATE_KEY_B64 }}
+      SF_LOGIN_URL: ${{ secrets.SF_LOGIN_URL }}
+      SF_API_VERSION: ${{ secrets.SF_API_VERSION }}
+      SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
+      SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      # Fork PRs get no secrets. Skip loudly rather than fail with a confusing auth error.
+      - name: Check credentials are available
+        id: creds
+        run: |
+          if [ -z "$GOOGLE_SHEET_ID" ] || [ -z "$SF_CLIENT_ID" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Sheet/Salesforce secrets unavailable (fork PR?) — numbers gate skipped."
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Verify headline numbers against Salesforce
+        if: steps.creds.outputs.available == 'true'
+        run: node scripts/verify-numbers.mjs | tee gate.txt
+      # Surface the result in the PR's Summary tab so Tai reads it without opening logs.
+      - name: Publish result to job summary
+        if: always() && steps.creds.outputs.available == 'true'
+        run: |
+          {
+            echo "## Numbers regression gate"
+            echo ""
+            echo '```'
+            cat gate.txt 2>/dev/null || echo "(gate produced no output — see the step log)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
