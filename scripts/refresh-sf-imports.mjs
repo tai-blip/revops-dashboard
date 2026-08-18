@@ -81,9 +81,10 @@ const banner = () =>
   `              Salesforce Import\n              Last updated ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC (auto — revops daily pull)`;
 
 async function writeTab(api, tab, header, rows, extraCols = null) {
-  // Clear everything below the header, then write banner + header + data. Each Sheets
-  // call is retried on transient errors (429 quota, 5xx) so a blip doesn't fail the run.
-  await retry(`clear ${tab}`, () => api.spreadsheets.values.clear({ spreadsheetId: SHEET_ID, range: `'${tab}'!A3:Z10000` }));
+  // Write banner + header + data FIRST (in place), THEN clear only stale rows *below* the
+  // new data. This ordering matters: if the write exhausts its retries, yesterday's data
+  // is left fully intact instead of an emptied tab. Each Sheets call retries on transient
+  // errors (429 quota, 5xx) so a blip doesn't fail the run.
   const matrix = [[banner()], header, ...rows];
   await retry(`write ${tab}`, () => api.spreadsheets.values.update({
     spreadsheetId: SHEET_ID, range: `'${tab}'!A1`, valueInputOption: "USER_ENTERED",
@@ -94,6 +95,15 @@ async function writeTab(api, tab, header, rows, extraCols = null) {
       spreadsheetId: SHEET_ID, range: `'${tab}'!${extraCols.range}`, valueInputOption: "USER_ENTERED",
       requestBody: { values: extraCols.values },
     }));
+  }
+  // Remove stale trailing rows left over when today's pull is shorter than yesterday's.
+  // (banner=row 1, header=row 2, data=rows 3..rows.length+2.) If the new data filled the
+  // grid to its last row, the start row is past the grid edge — a clean no-op, not an error.
+  const firstStale = rows.length + 3;
+  try {
+    await retry(`clear ${tab} tail`, () => api.spreadsheets.values.clear({ spreadsheetId: SHEET_ID, range: `'${tab}'!A${firstStale}:Z10000` }));
+  } catch (e) {
+    if (!/exceeds grid limits/i.test(String(e.message ?? e))) throw e;
   }
   console.log(`wrote ${tab}: ${rows.length} data rows`);
 }
