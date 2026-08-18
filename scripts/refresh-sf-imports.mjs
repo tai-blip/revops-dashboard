@@ -112,29 +112,26 @@ async function main() {
   const api = google.sheets({ version: "v4", auth: gAuth });
   const { token, instance } = await sfAuth();
 
-  // ---- Query 1: open opportunities ----
-  // Amount, AE_AM_Probability__c (quarter %) and AE_AM_Probability_Year__c (year %) power
-  // the Forecast tab's stage-based Potential (SQL/SAL use Amount×%, SQO/Trial use ARR×%).
-  const q1 = await sfQueryAll(instance, token,
-    `SELECT Id, Name, StageName, Annual_Contract_Value_ARR_Formula__c, Expected_Revenue_Quarter_AE__c, CloseDate, CreatedDate, Date_Reached_SQL__c, ChannelofContact__c, Owner.Name, RecordType.Name, LastStageChangeDate, Amount, AE_AM_Probability__c, AE_AM_Probability_Year__c FROM Opportunity WHERE IsClosed = false`);
+  // ---- Open opportunities (IsClosed = false) — ONE pull feeds two tabs ----
+  // "Query 1" and "Open pipeline - SOQL pull" are the SAME open opps; they used to be two
+  // identical SFDC round-trips with different column layouts. Fetch once with the UNION of
+  // fields both need, then write each tab in its exact layout. Parity-verified: byte-for-
+  // byte identical to the old two-query output (0 set/value/order diffs), so every
+  // downstream consumer (dashboard code; Forecasting/Forecast Potential; Pipeline,
+  // Pipeline - WoW, AE Attainment formulas) is unaffected.
+  //   Query 1 (15 cols): Amount + AE_AM_Probability__c/_Year__c power the Forecast tab's
+  //     stage-based Potential (SQL/SAL use Amount×%, SQO/Trial use ARR×%).
+  //   Open pipeline (18 cols): load-bearing column order — the funnel formulas key off
+  //     I=SQL, J=SAL, K=SQO date columns by position. Money fields raw (no convertCurrency)
+  //     to match the basis those tab formulas were built on.
+  const openOpps = await sfQueryAll(instance, token,
+    `SELECT Id, Name, StageName, Annual_Contract_Value_ARR_Formula__c, Expected_Revenue_Quarter_AE__c, CloseDate, CreatedDate, Date_Reached_SQL__c, ChannelofContact__c, Owner.Name, RecordType.Name, LastStageChangeDate, Amount, AE_AM_Probability__c, AE_AM_Probability_Year__c, Date_Reached_SAL__c, Date_Reached_SQO__c, AnnualContractValueARR__c, Date_Reached_Trial__c, Managed_Services_Tier__c, Chat_Agent_Tier__c FROM Opportunity WHERE IsClosed = false`);
   await writeTab(api, "Query 1",
     ["Id","Name","StageName","Annual_Contract_Value_ARR_Formula__c","Expected_Revenue_Quarter_AE__c","CloseDate","CreatedDate","Date_Reached_SQL__c","ChannelofContact__c","Owner.Name","RecordType.Name","LastStageChangeDate","Amount","AE_AM_Probability__c","AE_AM_Probability_Year__c"],
-    q1.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.CreatedDate), val(x.Date_Reached_SQL__c), val(x.ChannelofContact__c), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.LastStageChangeDate), val(x.Amount), val(x.AE_AM_Probability__c), val(x.AE_AM_Probability_Year__c)]));
-
-  // ---- Open pipeline - SOQL pull: open opps in the exact 18-col layout the
-  //      "Pipeline" and "Pipeline - WoW" tab formulas expect. This tab used to be
-  //      a Coefficient import (went stale when the trial expired — the Pipeline
-  //      tabs were left pointing at it while everything else migrated to Query 1).
-  //      Refreshing it here makes Pipeline, Pipeline - WoW, coverage, and the
-  //      Slack digest's pipeline section all live again, with zero formula edits.
-  //      Column order is load-bearing: the funnel formulas key off I=SQL, J=SAL,
-  //      K=SQO date columns by position. Money fields pulled raw (no convertCurrency)
-  //      to match the basis the tab's formulas were built on.
-  const op = await sfQueryAll(instance, token,
-    `SELECT Id, Name, StageName, Annual_Contract_Value_ARR_Formula__c, Expected_Revenue_Quarter_AE__c, CloseDate, LastStageChangeDate, ChannelofContact__c, Date_Reached_SQL__c, Date_Reached_SAL__c, Date_Reached_SQO__c, Amount, Owner.Name, RecordType.Name, AnnualContractValueARR__c, Date_Reached_Trial__c, Managed_Services_Tier__c, Chat_Agent_Tier__c FROM Opportunity WHERE IsClosed = false`);
+    openOpps.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.CreatedDate), val(x.Date_Reached_SQL__c), val(x.ChannelofContact__c), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.LastStageChangeDate), val(x.Amount), val(x.AE_AM_Probability__c), val(x.AE_AM_Probability_Year__c)]));
   await writeTab(api, "Open pipeline - SOQL pull",
     ["Id","Name","StageName","Annual_Contract_Value_ARR_Formula__c","Expected_Revenue_Quarter_AE__c","CloseDate","LastStageChangeDate","ChannelofContact__c","Date_Reached_SQL__c","Date_Reached_SAL__c","Date_Reached_SQO__c","Amount","Owner.Name","RecordType.Name","AnnualContractValueARR__c","Date_Reached_Trial__c","Managed_Services_Tier__c","Chat_Agent_Tier__c"],
-    op.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.LastStageChangeDate), val(x.ChannelofContact__c), val(x.Date_Reached_SQL__c), val(x.Date_Reached_SAL__c), val(x.Date_Reached_SQO__c), val(x.Amount), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.AnnualContractValueARR__c), val(x.Date_Reached_Trial__c), val(x.Managed_Services_Tier__c), val(x.Chat_Agent_Tier__c)]));
+    openOpps.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.LastStageChangeDate), val(x.ChannelofContact__c), val(x.Date_Reached_SQL__c), val(x.Date_Reached_SAL__c), val(x.Date_Reached_SQO__c), val(x.Amount), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.AnnualContractValueARR__c), val(x.Date_Reached_Trial__c), val(x.Managed_Services_Tier__c), val(x.Chat_Agent_Tier__c)]));
 
   // ---- Query 2: closed opportunities, last 18 months ----
   const q2 = await sfQueryAll(instance, token,
@@ -162,6 +159,6 @@ async function main() {
     lv.map((x) => [x.Id, x.Name, x.StageName, val(x.Status__c), val(x.arrUsd), val(x.ContractLiveDate__c), val(x.ChannelofContact__c), val(x.ContractEndDate__c), val(x.Date_Reached_Billing__c), val(x.Date_Reached_Closed_Won__c), x.ChatAgent_Enabled__c === true, x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.Managed_Services_Tier__c), val(x.msUsd)]),
     { range: `P3:S${lv.length + 2}`, values: helper });
 
-  console.log(`done: Query 1 ${q1.length} open | Query 2 ${q2.length} closed-18mo | LiveARR ${lv.length} won/billing`);
+  console.log(`done: open opps ${openOpps.length} (Query 1 + Open pipeline) | Query 2 ${q2.length} closed-18mo | LiveARR ${lv.length} won/billing`);
 }
 main().catch((e) => { console.error("REFRESH FAILED:", e.message); process.exit(1); });
