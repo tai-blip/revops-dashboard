@@ -1,0 +1,22 @@
+{
+  "_README": [
+    "Known-open findings from scripts/verify-numbers.mjs, downgraded FAIL -> ACK so the",
+    "gate stays green on 'no NEW regressions' while the known issue keeps printing in",
+    "every run. Acknowledging is deliberate and reviewable: it appears in the PR diff.",
+    "",
+    "Each key must match a check name exactly. Fields:",
+    "  reason  - why this is not being fixed right now (required; be specific)",
+    "  owner   - who decides",
+    "  until   - YYYY-MM-DD; after this date the entry stops suppressing and the gate",
+    "            goes red again. Always set one. An ack with no expiry is a silent bug.",
+    "",
+    "Delete an entry the moment the underlying issue is fixed."
+  ],
+  "acknowledged": {
+    "Open pipeline ARR": {
+      "reason": "Pipeline!B5 ('Total Pipeline (ARR)') sums col D of 'Open pipeline - SOQL pull', which is Annual_Contract_Value_ARR_Formula__c. That field is empirically identical to Amount (multi-year TCV), not the annual value in AnnualContractValueARR__c: across all 766 open opps it sums to $24,756,651 vs $9,895,685 on the true-ARR basis, and per-deal it tracks Amount exactly (e.g. PMI Chat Agent Phase 2 = $384,840 TCV vs $74,040 ARR). So the Exec tile labelled 'open pipeline (ARR)' and the coverage ratio built on it are on a TCV basis, inflating coverage to 7.72x against a New-ARR quota where the true-ARR basis gives ~3.0x. Whether the tile SHOULD be ARR or TCV is a definitional call for Tai + finance, so the gate records it rather than silently switching the basis.",
+      "owner": "Tai",
+      "until": "2026-09-30"
+    }
+  }
+}

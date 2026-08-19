@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "verify:numbers": "node --env-file=.env scripts/verify-numbers.mjs",
+    "verify:numbers:rebase": "node --env-file=.env scripts/verify-numbers.mjs --update-baseline"
   },
   "dependencies": {
     "googleapis": "^173.0.0",
