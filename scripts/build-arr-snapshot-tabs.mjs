@@ -14,6 +14,17 @@ const gAuth = new google.auth.JWT({ email: process.env.GOOGLE_SERVICE_ACCOUNT_EM
 const TEAL = { red: 0.4, green: 0.8, blue: 0.78 }, GREEN = { red: 0.62, green: 0.85, blue: 0.62 }, PINK = { red: 0.96, green: 0.55, blue: 0.75 };
 const F = "'ARR_Funnel'";
 const TC = "W"; // tier column read by these tabs = "Tier (Q3-end)" (projected to Sep-30). "P" = today.
+// Booked is now QUARTER-SCOPED (team rule 2026-08-19): a pilot counts in the quarter its trial/
+// pilot falls in — anchor = Date Reached Trial (col I), falling back to Pilot Start Date (col U)
+// when the trial date is blank. Q3 FY26 = Jul 1–Sep 30, 2026. (Contracted/Live stay standing-book.)
+const BR = "3000"; // bounded row for the Booked array formulas (ARR_Funnel is < 3000 rows)
+const fcol = (c) => `${F}!$${c}$2:$${c}${BR}`;
+const ANCHOR = `IF(ISNUMBER(${fcol("I")}),${fcol("I")},${fcol("U")})`;
+// CURRENT quarter, computed live from TODAY() so it rolls forward every quarter (never hardcoded):
+// qStart = first day of this calendar quarter; qEnd = last day of it.
+const QS = `DATE(YEAR(TODAY()),FLOOR((MONTH(TODAY())-1)/3)*3+1,1)`;
+const QE = `EOMONTH(${QS},2)`;
+const bCond = `(${fcol("W")}="Booked")*(${ANCHOR}>=${QS})*(${ANCHOR}<=${QE})`;
 const cntOps = (tier) => `=COUNTIF(${F}!$${TC}:$${TC},"${tier}")&" ops"`;
 const arrTot = (tier) => `=SUMIF(${F}!$${TC}:$${TC},"${tier}",${F}!$H:$H)`;
 const moTot = (tier) => `=SUMIF(${F}!$${TC}:$${TC},"${tier}",${F}!$T:$T)`;
@@ -74,14 +85,30 @@ async function main() {
     "Live",
     ["Account", "Opportunity", "Stage", "Status", "Payment Term", "Cadence", "ARR (annual)", "Invoice/cycle", "Monthly-equiv", "Live-Paying Date"],
     "D, C, E, G, Q, R, H, S, T, M");
-  const booked = tab(
-    "BOOKED ARR v2 — as of Q3-end (Sep 30, 2026) · auto-refreshes with ARR_Funnel",
-    "v2 (concluded): currently in an active pilot — Stage = Trial AND a Pilot Start Date is set (ARR >= 0, so $0 pilots count). Graduates out once signed (→ Contracted) or paying (→ Live); a bare Contract Live Date on an unsigned Trial does NOT eject it. Cash today = $0.",
-    [["Booked ARR (pilot pipeline, annualized deal size)", cntOps("Booked"), arrTot("Booked")],
-     ["Cash collected from these so far", "", "$0 — in Trial, not billing"]],
-    "Booked",
-    ["Account", "Opportunity", "Stage", "Status", "AE (Owner)", "Payment Term", "ARR (annual)", "Pilot Start Date", "Trial Date", ""],
-    "D, C, E, G, A, Q, H, U, I");
+  // Booked tab — QUARTER-SCOPED by trial/pilot anchor (not the standing pilot book). Built
+  // manually (not via tab()) so the summary, by-term and detail all carry the Q3 date filter.
+  const bTerm = (cad, label, cyc) => {
+    const base = `${bCond}*(${fcol("R")}="${cad}")`;
+    return [label, `=SUMPRODUCT(${base})`, `=SUMPRODUCT(${base}*${fcol("H")})`,
+      `=IFERROR(SUMPRODUCT(${base}*${fcol("H")})/SUMPRODUCT(${bCond}*${fcol("H")}),"")`, cyc,
+      `=SUMPRODUCT(${base}*${fcol("S")})`];
+  };
+  const bDetail = `=IFERROR(SORT(FILTER({${fcol("D")},${fcol("C")},${fcol("E")},${fcol("G")},${fcol("A")},${fcol("Q")},${fcol("H")},${fcol("U")},${fcol("I")}},${fcol("W")}="Booked",${ANCHOR}>=${QS},${ANCHOR}<=${QE}),7,FALSE),"(none)")`;
+  const qLbl = `"Q"&(FLOOR((MONTH(TODAY())-1)/3)+1)&" FY"&RIGHT(YEAR(TODAY()),2)`;
+  const booked = [
+    ["BOOKED ARR v2 — current quarter · quarter-scoped by trial/pilot date (rolls forward each quarter) · auto-refreshes with ARR_Funnel", "", ""],
+    ["v2 (team rule 2026-08-19): a pilot counts in the quarter its trial/pilot falls in — anchor = Date Reached Trial, else Pilot Start Date. Scoped LIVE to the current calendar quarter. Stage = Trial, not yet signed/live/lost. Cash today = $0.", "", ""],
+    ["", "", ""],
+    [`="BOOKED THIS QUARTER ("&${qLbl}&") — trial/pilot in "&TEXT(${QS},"mmm d")&"–"&TEXT(${QE},"mmm d, yyyy")&" (live — updates every refresh)"`, "", ""],
+    ...pad([[`="Booked ARR ("&${qLbl}&" pilots — annualized deal size)"`, `=SUMPRODUCT(${bCond})&" ops"`, `=SUMPRODUCT(${bCond}*${fcol("H")})`],
+      ["Cash collected from these so far", "", "$0 — in Trial, not billing"]], 5),
+    ["", "", ""], ["BY PAYMENT TERM", "ops", "ARR (annual)", "% of ARR", "Cadence", "Invoice / cycle"],
+    bTerm("Annual", "Annual", "1× / yr (upfront)"), bTerm("Quarterly", "Quarterly", "4× / yr"),
+    bTerm("Monthly", "Monthly", "12× / yr"), bTerm("Unknown", "Unknown / blank", "—"),
+    ["", "", ""], ["DEAL DETAIL (live — sorted by ARR)", "", "", "", "", "", "", "", "", ""],
+    ["Account", "Opportunity", "Stage", "Status", "AE (Owner)", "Payment Term", "ARR (annual)", "Pilot Start Date", "Trial Date"],
+    [bDetail],
+  ];
 
   const meta = await api.spreadsheets.get({ spreadsheetId: ID, fields: "sheets.properties(sheetId,title,index)" });
   const anchor = meta.data.sheets.find((s) => /Contracted ARR Snapshot/.test(s.properties.title));

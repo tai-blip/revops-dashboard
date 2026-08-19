@@ -47,6 +47,7 @@ type DashboardData = {
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
   arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
   predictedCashflow?: { months: { ym: string; label: string; contracted: number; live: number }[]; baseline: { contracted: number; live: number }; booked: number; deals: { tier: "contracted" | "live"; opp: string; account: string; owner: string; arr: number; arriveYm: string; arriveDate: string; basis: string }[] };
+  bookedQtr?: number; // quarter-scoped Booked ARR total (from Booked ARR Snapshot v2 tab)
   pipelineGen?: { byOwner: Record<string, { arr: number; count: number }>; total: number; totalCount: number };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
   arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
@@ -3001,8 +3002,8 @@ export default function Dashboard() {
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
                       <div style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: "12px 14px", opacity: 0.75 }}>
-                        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.gold }}>Booked ARR <span style={{ color: C.t3, fontWeight: 400 }}>· context</span></div>
-                        <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(pc.booked)}</div>
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.gold }}>Booked ARR <span style={{ color: C.t3, fontWeight: 400 }}>· this quarter</span></div>
+                        <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(data.bookedQtr ?? pc.booked)}</div>
                       </div>
                       {(["contracted", "live"] as const).map((k) => (
                         <div key={k} onClick={() => setCashTier(k)} style={{ cursor: "pointer", background: C.s2, border: `1px solid ${tier === k ? meta[k].color : C.bd}`, borderRadius: 10, padding: "12px 14px" }}>
