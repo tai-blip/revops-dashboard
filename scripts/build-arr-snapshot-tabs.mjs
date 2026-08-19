@@ -87,26 +87,35 @@ async function main() {
     "D, C, E, G, Q, R, H, S, T, M");
   // Booked tab — QUARTER-SCOPED by trial/pilot anchor (not the standing pilot book). Built
   // manually (not via tab()) so the summary, by-term and detail all carry the Q3 date filter.
+  // Shows the FULL standing pilot book; a computed "Quarter" column dates each deal by its
+  // trial/pilot anchor so the sheet can be filtered to any quarter. The summary still carries a
+  // "this quarter" total (bCond) that the dashboard reads for its Booked ARR tile.
+  const allCond = `(${fcol("W")}="Booked")`;
   const bTerm = (cad, label, cyc) => {
-    const base = `${bCond}*(${fcol("R")}="${cad}")`;
+    const base = `${allCond}*(${fcol("R")}="${cad}")`;
     return [label, `=SUMPRODUCT(${base})`, `=SUMPRODUCT(${base}*${fcol("H")})`,
-      `=IFERROR(SUMPRODUCT(${base}*${fcol("H")})/SUMPRODUCT(${bCond}*${fcol("H")}),"")`, cyc,
+      `=IFERROR(SUMPRODUCT(${base}*${fcol("H")})/SUMPRODUCT(${allCond}*${fcol("H")}),"")`, cyc,
       `=SUMPRODUCT(${base}*${fcol("S")})`];
   };
-  const bDetail = `=IFERROR(SORT(FILTER({${fcol("D")},${fcol("C")},${fcol("E")},${fcol("G")},${fcol("A")},${fcol("Q")},${fcol("H")},${fcol("U")},${fcol("I")}},${fcol("W")}="Booked",${ANCHOR}>=${QS},${ANCHOR}<=${QE}),7,FALSE),"(none)")`;
+  // Quarter-of-anchor as text (e.g. "2026-Q3") for each row — the filter/group column.
+  const qtrCol = `IF(ISNUMBER(${ANCHOR}),YEAR(${ANCHOR})&"-Q"&ROUNDUP(MONTH(${ANCHOR})/3,0),"")`;
+  const bDetail = `=IFERROR(SORT(FILTER({${fcol("D")},${fcol("C")},${fcol("E")},${fcol("G")},${fcol("A")},${fcol("Q")},${fcol("H")},${fcol("U")},${fcol("I")},${qtrCol}},${fcol("W")}="Booked"),7,FALSE),"(none)")`;
   const qLbl = `"Q"&(FLOOR((MONTH(TODAY())-1)/3)+1)&" FY"&RIGHT(YEAR(TODAY()),2)`;
   const booked = [
-    ["BOOKED ARR v2 — current quarter · quarter-scoped by trial/pilot date (rolls forward each quarter) · auto-refreshes with ARR_Funnel", "", ""],
-    ["v2 (team rule 2026-08-19): a pilot counts in the quarter its trial/pilot falls in — anchor = Date Reached Trial, else Pilot Start Date. Scoped LIVE to the current calendar quarter. Stage = Trial, not yet signed/live/lost. Cash today = $0.", "", ""],
+    ["BOOKED ARR v2 — full standing pilot book · 'Quarter' column dates each deal by trial/pilot (filter it for one quarter) · auto-refreshes with ARR_Funnel", "", ""],
+    ["v2 (team rule 2026-08-19): every active pilot (Stage = Trial, not yet signed/live/lost). Each deal is dated to a quarter by anchor = Date Reached Trial, else Pilot Start Date — see the Quarter column. Cash today = $0.", "", ""],
     ["", "", ""],
-    [`="BOOKED THIS QUARTER ("&${qLbl}&") — trial/pilot in "&TEXT(${QS},"mmm d")&"–"&TEXT(${QE},"mmm d, yyyy")&" (live — updates every refresh)"`, "", ""],
-    ...pad([[`="Booked ARR ("&${qLbl}&" pilots — annualized deal size)"`, `=SUMPRODUCT(${bCond})&" ops"`, `=SUMPRODUCT(${bCond}*${fcol("H")})`],
-      ["Cash collected from these so far", "", "$0 — in Trial, not billing"]], 5),
-    ["", "", ""], ["BY PAYMENT TERM", "ops", "ARR (annual)", "% of ARR", "Cadence", "Invoice / cycle"],
+    ["ALL BOOKED PILOTS — standing book (filter the Quarter column to isolate a single quarter)", "", ""],
+    ...pad([
+      [`="Booked ARR — this quarter ("&${qLbl}&")"`, `=SUMPRODUCT(${bCond})&" ops"`, `=SUMPRODUCT(${bCond}*${fcol("H")})`],
+      ["Booked ARR — all standing pilots (every quarter)", `=SUMPRODUCT(${allCond})&" ops"`, `=SUMPRODUCT(${allCond}*${fcol("H")})`],
+      ["Cash collected from these so far", "", "$0 — in Trial, not billing"],
+    ], 5),
+    ["", "", ""], ["BY PAYMENT TERM (all booked)", "ops", "ARR (annual)", "% of ARR", "Cadence", "Invoice / cycle"],
     bTerm("Annual", "Annual", "1× / yr (upfront)"), bTerm("Quarterly", "Quarterly", "4× / yr"),
     bTerm("Monthly", "Monthly", "12× / yr"), bTerm("Unknown", "Unknown / blank", "—"),
-    ["", "", ""], ["DEAL DETAIL (live — sorted by ARR)", "", "", "", "", "", "", "", "", ""],
-    ["Account", "Opportunity", "Stage", "Status", "AE (Owner)", "Payment Term", "ARR (annual)", "Pilot Start Date", "Trial Date"],
+    ["", "", ""], ["DEAL DETAIL (live — all pilots, sorted by ARR)", "", "", "", "", "", "", "", "", ""],
+    ["Account", "Opportunity", "Stage", "Status", "AE (Owner)", "Payment Term", "ARR (annual)", "Pilot Start Date", "Trial Date", "Quarter (trial/pilot)"],
     [bDetail],
   ];
 

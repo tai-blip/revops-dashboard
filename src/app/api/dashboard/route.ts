@@ -287,7 +287,7 @@ async function buildPayload(): Promise<Payload> {
     // dashboard just shows this total, so the two can never disagree. Null → fall back in the UI.
     const bookedQtr = (() => {
       for (const r of bookedSnapRows ?? []) {
-        if (String(r?.[0] ?? "").startsWith("Booked ARR") && typeof r?.[2] === "number") return r[2] as number;
+        if (String(r?.[0] ?? "").includes("this quarter") && typeof r?.[2] === "number") return r[2] as number;
       }
       return null;
     })();
