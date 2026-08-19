@@ -3,7 +3,10 @@ name: Daily RevOps data refresh (SFDC → Sheet)
 # Runs all Salesforce → Google Sheet pulls daily and on-demand.
 on:
   schedule:
-    - cron: "0 12 * * *"   # every day at 12:00 UTC (8pm Singapore). Adjust as needed.
+    - cron: "0 */4 * * *"  # every 4 hours (00,04,08,12,16,20 UTC) so the dashboard stays fresh.
+                           # The data pulls are idempotent (overwrite tabs / today's dated column,
+                           # never append), so running 6×/day is safe. The Slack digest is guarded
+                           # below to post only once/day at 12:00 UTC (8pm Singapore).
   workflow_dispatch: {}      # lets you run it manually from the Actions tab
 
 jobs:
@@ -51,4 +54,11 @@ jobs:
         run: node scripts/check-sheet.mjs
       - name: Slack daily digest (what changed vs yesterday)
         if: always()
-        run: node scripts/daily-digest.mjs
+        # Data refreshes every 4 hours, but the digest is a once-a-day summary — post it
+        # only on the 12:00 UTC run (8pm Singapore) so Slack isn't spammed 6×/day.
+        run: |
+          if [ "$(date -u +%H)" = "12" ]; then
+            node scripts/daily-digest.mjs
+          else
+            echo "digest skipped — only posts on the 12:00 UTC run (current hour $(date -u +%H) UTC)"
+          fi
