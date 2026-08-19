@@ -281,13 +281,12 @@ async function buildPayload(): Promise<Payload> {
     const cashForecast = computeCashForecast(cashForecastRows);
     const arrFunnel = computeArrFunnel(arrFunnelRows);
     const predictedCashflow = computePredictedCashflow(arrFunnelRows);
-    // Quarter-scoped Booked ARR total — read straight from the Booked ARR Snapshot v2 tab's
-    // summary cell (SUMPRODUCT over ARR_Funnel: Booked-tier pilots whose trial/pilot anchor is
-    // in the current quarter). The tab is the source of truth (deal detail lives there); the
-    // dashboard just shows this total, so the two can never disagree. Null → fall back in the UI.
-    const bookedQtr = (() => {
+    // Full standing Booked pilot book total, read from the Booked ARR Snapshot v2 tab — which
+    // lists every deal behind it plus a Quarter column for per-quarter filtering. The dashboard
+    // shows this total so it ties to the sheet's deals exactly. Null → fall back to the in-code sum.
+    const bookedTotal = (() => {
       for (const r of bookedSnapRows ?? []) {
-        if (String(r?.[0] ?? "").includes("this quarter") && typeof r?.[2] === "number") return r[2] as number;
+        if (String(r?.[0] ?? "").includes("all standing") && typeof r?.[2] === "number") return r[2] as number;
       }
       return null;
     })();
@@ -352,7 +351,7 @@ async function buildPayload(): Promise<Payload> {
       cashForecast,
       arrFunnel,
       predictedCashflow,
-      bookedQtr,
+      bookedTotal,
       pipelineGen,
       dealTracker,
       topBooked,
