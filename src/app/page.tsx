@@ -78,6 +78,7 @@ type DashboardData = {
   };
   dealHealth: { label: string; min: number; max: number; arr: number; count: number }[];
   agingByStage?: { stage: string; deals: number; avgAge: number | null; stale: number | null; staleDollar: number | null; avgAcv: number | null; total: boolean }[];
+  dealBreakdown?: { id: string; url: string; name: string; owner: string; stage: string; arr: number; age: number | null; stale: boolean }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
   forecast: {
@@ -529,6 +530,20 @@ export default function Dashboard() {
   const [attView, setAttView] = useState<"quarterly" | "annual">("quarterly");
   const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
   const [inclSql, setInclSql] = useState<boolean>(true); // Forecast Potential: include SQL-stage deals?
+  // Deal Health drill-down: which number was clicked (stage + stale filter) → panel of backing deals.
+  const [drill, setDrill] = useState<{ title: string; stage: string; staleOnly: boolean } | null>(null);
+  const clk = { cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: "3px" } as const;
+  const downloadCsv = (name: string, deals: NonNullable<DashboardData["dealBreakdown"]>) => {
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const header = ["Opp ID", "Name", "Owner", "Stage", "ARR", "Age (days)", "Stale", "SFDC Link"];
+    const lines = deals.map((d) => [d.id, d.name, d.owner, d.stage, d.arr, d.age ?? "", d.stale ? "Yes" : "No", d.url].map(esc).join(","));
+    const csv = [header.map(esc).join(","), ...lines].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    a.download = `deal-breakdown-${name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
   const [cashAE, setCashAE] = useState<string>("all");
   const [cashTier, setCashTier] = useState<"booked" | "contracted" | "live">("contracted"); // Predicted Cashflow tier toggle
   const [dealAE, setDealAE] = useState<string>("all");
@@ -3247,19 +3262,62 @@ export default function Dashboard() {
                   {data.agingByStage.map((s) => (
                     <tr key={s.stage} style={{ borderBottom: `1px solid ${C.s1}`, background: s.total ? C.s2 : undefined }}>
                       <Td l bold={s.total}>{s.stage}</Td>
-                      <Td mono bold={s.total}>{s.deals}</Td>
+                      <Td mono bold={s.total}>
+                        <span style={clk} onClick={() => setDrill({ title: `${s.stage} · all open (${s.deals})`, stage: s.total ? "" : s.stage, staleOnly: false })}>{s.deals}</span>
+                      </Td>
                       <Td mono bold={s.total} color={(s.avgAge ?? 0) > 90 ? C.red : (s.avgAge ?? 0) > 60 ? C.ylw : C.t1}>
                         {s.avgAge ?? "—"}
                       </Td>
-                      <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}>{s.stale ?? "—"}</Td>
-                      <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}>{s.staleDollar != null ? fmt(s.staleDollar) : "—"}</Td>
+                      <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}>
+                        <span style={clk} onClick={() => setDrill({ title: `${s.stage} · stale ≥90d (${s.stale ?? 0})`, stage: s.total ? "" : s.stage, staleOnly: true })}>{s.stale ?? "—"}</span>
+                      </Td>
+                      <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}>
+                        <span style={clk} onClick={() => setDrill({ title: `${s.stage} · stale $ (${s.staleDollar != null ? fmt(s.staleDollar) : "—"})`, stage: s.total ? "" : s.stage, staleOnly: true })}>{s.staleDollar != null ? fmt(s.staleDollar) : "—"}</span>
+                      </Td>
                       <Td mono bold={s.total}>{s.avgAcv != null ? fmt(s.avgAcv) : "—"}</Td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <div style={{ fontSize: 11.5, color: C.t3, marginTop: 8 }}>Tip: click any # Deals / Stale / Stale $ number to see the exact deals behind it (with Salesforce links + CSV).</div>
             </Card>
           )}
+
+          {/* Drill-down panel — deals backing whatever number was clicked, read from the Deal Breakdown tab */}
+          {drill && data.dealBreakdown && (() => {
+            const rows = data.dealBreakdown
+              .filter((d) => (drill.stage === "" || d.stage === drill.stage) && (!drill.staleOnly || d.stale))
+              .sort((a, b) => b.arr - a.arr);
+            const totalArr = rows.reduce((sum, d) => sum + d.arr, 0);
+            return (
+              <Card title={`Breakdown — ${drill.title}`} sub={`${rows.length} deals · ${fmt(totalArr)} ARR · each row links straight into Salesforce`} accent={C.coral}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <button onClick={() => downloadCsv(drill.title, rows)} style={{ padding: "6px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${C.bd}`, background: C.navy, color: "#fff", cursor: "pointer" }}>⬇ Download CSV</button>
+                  <button onClick={() => setDrill(null)} style={{ padding: "6px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${C.bd}`, background: "#fff", color: C.t2, cursor: "pointer" }}>✕ Close</button>
+                </div>
+                <div style={{ maxHeight: 420, overflowY: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <Th l>Opportunity</Th><Th l>Owner</Th><Th l>Stage</Th><Th>Age (d)</Th><Th>ARR</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((d) => (
+                        <tr key={d.id} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <Td l><a href={d.url} target="_blank" rel="noreferrer" style={{ color: C.navy, textDecoration: "underline", fontWeight: 600 }}>{d.name || d.id}</a></Td>
+                          <Td l>{d.owner}</Td>
+                          <Td l>{d.stage}</Td>
+                          <Td mono color={(d.age ?? 0) >= 90 ? C.red : C.t1}>{d.age ?? "—"}</Td>
+                          <Td mono bold>{fmt(d.arr)}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            );
+          })()}
 
           <Card title="Largest Open Deals" sub="Top 25 open deals, ranked by ARR">
             <table style={{ width: "100%", borderCollapse: "collapse" }}>

@@ -88,7 +88,7 @@ async function buildPayload(): Promise<Payload> {
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
     // NOTE: order here MUST match the destructured variables below.
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows] =
       await getSheetValuesBatch([
         { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
@@ -129,6 +129,10 @@ async function buildPayload(): Promise<Payload> {
         // Deal Health — Aging by Stage: Stage | # of Deals | Avg Age (days) | Avg ACV, all
         // computed by formula over Query 1. Dashboard reads these rows verbatim (no math in code).
         { tab: "Deal Health — Aging by Stage", range: "A4:F25" },
+        // Deal Breakdown = one row per open deal (SFDC link, name, owner, stage, ARR, age, stale),
+        // all formula-driven over Query 1. The dashboard drill-down filters these rows into a panel
+        // (+ CSV) when a Deal Health number is clicked. Read-only; no computation in the app.
+        { tab: "Deal Breakdown", range: "A2:H2000" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -297,6 +301,20 @@ async function buildPayload(): Promise<Payload> {
         avgAcv: typeof r[5] === "number" ? (r[5] as number) : null,
         total: String(r[0]).toUpperCase().startsWith("TOTAL"),
       }));
+    // Deal-level backing for the drill-down — read verbatim from the Deal Breakdown tab. The UI
+    // filters these rows client-side when a number is clicked (presentation, not computation).
+    const dealBreakdown = (dealBreakdownRows ?? [])
+      .filter((r) => typeof r?.[0] === "string" && String(r[0]).trim() !== "" && typeof r?.[5] === "number")
+      .map((r) => ({
+        id: String(r[0]),
+        url: String(r[1] ?? ""),
+        name: String(r[2] ?? ""),
+        owner: String(r[3] ?? ""),
+        stage: String(r[4] ?? ""),
+        arr: r[5] as number,
+        age: typeof r[6] === "number" ? (r[6] as number) : null,
+        stale: String(r[7] ?? "") === "Yes",
+      }));
     // Full standing Booked pilot book total, read from the Booked ARR Snapshot v2 tab — which
     // lists every deal behind it plus a Quarter column for per-quarter filtering. The dashboard
     // shows this total so it ties to the sheet's deals exactly. Null → fall back to the in-code sum.
@@ -369,6 +387,7 @@ async function buildPayload(): Promise<Payload> {
       predictedCashflow,
       bookedTotal,
       agingByStage,
+      dealBreakdown,
       pipelineGen,
       dealTracker,
       topBooked,
