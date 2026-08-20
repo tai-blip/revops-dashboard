@@ -3245,7 +3245,7 @@ export default function Dashboard() {
                         <Td l bold={s.total}>{s.stage}</Td>
                         <Td mono bold={s.total}><span style={clk} onClick={() => setDrill({ title: `${shortAE(agingAE)} · ${s.stage} · all open`, ae: agingAE, stage: s.total ? "" : s.stage, staleOnly: false })}>{s.deals}</span></Td>
                         <Td mono bold={s.total} color={(s.avgAge ?? 0) > 90 ? C.red : (s.avgAge ?? 0) > 60 ? C.ylw : C.t1}>{s.avgAge ?? "—"}</Td>
-                        <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}><span style={clk} onClick={() => setDrill({ title: `${shortAE(agingAE)} · ${s.stage} · stale ≥90d`, ae: agingAE, stage: s.total ? "" : s.stage, staleOnly: true })}>{s.stale ?? "—"}</span></Td>
+                        <Td mono bold={s.total}><span onClick={() => setDrill({ title: `${shortAE(agingAE)} · ${s.stage} · stale ≥90d`, ae: agingAE, stage: s.total ? "" : s.stage, staleOnly: true })} style={(s.stale ?? 0) > 0 ? { cursor: "pointer", display: "inline-block", border: `1.5px solid ${C.red}`, color: C.red, background: "rgba(200,40,40,0.06)", borderRadius: 5, padding: "1px 9px", fontWeight: 700 } : { color: C.t3 }}>{s.stale ?? "—"}</span></Td>
                         <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}><span style={clk} onClick={() => setDrill({ title: `${shortAE(agingAE)} · ${s.stage} · stale $`, ae: agingAE, stage: s.total ? "" : s.stage, staleOnly: true })}>{s.staleDollar != null ? fmt(s.staleDollar) : "—"}</span></Td>
                         <Td mono bold={s.total}>{s.avgAcv != null ? fmt(s.avgAcv) : "—"}</Td>
                       </tr>
@@ -3257,7 +3257,12 @@ export default function Dashboard() {
             );
           })()}
 
-          {/* Drill-down panel — deals backing the clicked number (AE + stage-bucket + stale), from Deal Breakdown */}
+          {/* Breakdown panel — always shown, tied to Aging by Stage above. Placeholder until a number is clicked. */}
+          {data.dealBreakdown && !drill && (
+            <Card title="Breakdown" sub="The deals behind any Aging by Stage number appear here.">
+              <div style={{ padding: "28px 8px", textAlign: "center", color: C.t3, fontSize: 14, fontWeight: 600 }}>Choose a number to show your deal</div>
+            </Card>
+          )}
           {drill && data.dealBreakdown && (() => {
             const matchStage = (dStage: string) => (drill.stage === "" ? true : drill.stage === "Other (renewal/billing)" ? !AGING_EXPLICIT.includes(dStage) : dStage === drill.stage);
             const rows = data.dealBreakdown
