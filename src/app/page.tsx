@@ -77,7 +77,8 @@ type DashboardData = {
     expansionArrMom: { months: string[]; reps: Record<string, number[]> };
   };
   dealHealth: { label: string; min: number; max: number; arr: number; count: number }[];
-  agingByStage?: { stage: string; deals: number; avgAge: number | null; stale: number | null; staleDollar: number | null; avgAcv: number | null; total: boolean }[];
+  agingByStage?: { ae: string; stage: string; deals: number; avgAge: number | null; stale: number | null; staleDollar: number | null; avgAcv: number | null; total: boolean }[];
+  dealBreakdown?: { id: string; url: string; name: string; owner: string; stage: string; arr: number; age: number | null; stale: boolean }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
   forecast: {
@@ -529,6 +530,22 @@ export default function Dashboard() {
   const [attView, setAttView] = useState<"quarterly" | "annual">("quarterly");
   const [fcastView, setFcastView] = useState<"quarterly" | "yearly">("quarterly");
   const [inclSql, setInclSql] = useState<boolean>(true); // Forecast Potential: include SQL-stage deals?
+  // Deal Health: selected AE for the Aging-by-Stage module (toggle), and the drill-down selection.
+  const [agingAE, setAgingAE] = useState<string>("All (everyone)");
+  const [drill, setDrill] = useState<{ title: string; ae: string; stage: string; staleOnly: boolean } | null>(null);
+  const AGING_EXPLICIT = ["SQL", "SAL", "SQO", "Trial", "Proposal", "Pending Signature", "Expansion Lead"];
+  const clk = { cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: "3px" } as const;
+  const downloadCsv = (name: string, deals: NonNullable<DashboardData["dealBreakdown"]>) => {
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const header = ["Opp ID", "Name", "Owner", "Stage", "ARR", "Age (days)", "Stale", "SFDC Link"];
+    const lines = deals.map((d) => [d.id, d.name, d.owner, d.stage, d.arr, d.age ?? "", d.stale ? "Yes" : "No", d.url].map(esc).join(","));
+    const csv = [header.map(esc).join(","), ...lines].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    a.download = `deal-breakdown-${name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
   const [cashAE, setCashAE] = useState<string>("all");
   const [cashTier, setCashTier] = useState<"booked" | "contracted" | "live">("contracted"); // Predicted Cashflow tier toggle
   const [dealAE, setDealAE] = useState<string>("all");
@@ -3201,6 +3218,105 @@ export default function Dashboard() {
           {tabSummaries && (
             <TabHeader label="Deal Health" sentence={tabSummaries.health.sentence} stats={tabSummaries.health.stats} />
           )}
+          {/* Aging by Stage — toggle by AE; click any number to drill into the deals (SFDC links + CSV) */}
+          {data.agingByStage && data.agingByStage.length > 0 && (() => {
+            const aes = Array.from(new Set(data.agingByStage.map((s) => s.ae)));
+            const shortAE = (a: string) => (a === "All (everyone)" ? "All" : a.split(" ")[0]);
+            const rowsForAE = data.agingByStage.filter((s) => s.ae === agingAE);
+            return (
+              <Card
+                title="Aging by Stage"
+                sub="Open deals by stage (Stephen's buckets — 'Other' = renewal/billing/everything else): count, avg age, stale (≥90d in stage) and ARR. Live from the sheet. Toggle AE; click any number for the deals."
+              >
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+                  {aes.map((a) => (
+                    <button key={a} onClick={() => setAgingAE(a)} style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, borderRadius: 20, border: `1px solid ${a === agingAE ? C.coral : C.bd}`, background: a === agingAE ? C.coralSoft : "#fff", color: a === agingAE ? C.coralDk : C.t2, cursor: "pointer" }}>{shortAE(a)}</button>
+                  ))}
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      <Th l>Stage</Th><Th># Deals</Th><Th>Avg Age (days)</Th><Th>Stale (≥90d)</Th><Th>Stale $</Th><Th>Avg ACV</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rowsForAE.map((s) => (
+                      <tr key={s.stage} style={{ borderBottom: `1px solid ${C.s1}`, background: s.total ? C.s2 : undefined }}>
+                        <Td l bold={s.total}>{s.stage}</Td>
+                        <Td mono bold={s.total}><span style={clk} onClick={() => setDrill({ title: `${shortAE(agingAE)} · ${s.stage} · all open`, ae: agingAE, stage: s.total ? "" : s.stage, staleOnly: false })}>{s.deals}</span></Td>
+                        <Td mono bold={s.total} color={(s.avgAge ?? 0) > 90 ? C.red : (s.avgAge ?? 0) > 60 ? C.ylw : C.t1}>{s.avgAge ?? "—"}</Td>
+                        <Td mono bold={s.total}><span onClick={() => setDrill({ title: `${shortAE(agingAE)} · ${s.stage} · stale ≥90d`, ae: agingAE, stage: s.total ? "" : s.stage, staleOnly: true })} style={(s.stale ?? 0) > 0 ? { cursor: "pointer", display: "inline-block", border: `1.5px solid ${C.red}`, color: C.red, background: "rgba(200,40,40,0.06)", borderRadius: 5, padding: "1px 9px", fontWeight: 700 } : { color: C.t3 }}>{s.stale ?? "—"}</span></Td>
+                        <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}><span style={clk} onClick={() => setDrill({ title: `${shortAE(agingAE)} · ${s.stage} · stale $`, ae: agingAE, stage: s.total ? "" : s.stage, staleOnly: true })}>{s.staleDollar != null ? fmt(s.staleDollar) : "—"}</span></Td>
+                        <Td mono bold={s.total}>{s.avgAcv != null ? fmt(s.avgAcv) : "—"}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ fontSize: 11.5, color: C.t3, marginTop: 8 }}>Tip: click any # Deals / Stale / Stale $ number to see the exact deals behind it (Salesforce links + CSV).</div>
+                {/* Breakdown — folded into this same module (no separate card) */}
+                <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${C.bd}` }}>
+                  {(() => {
+                    if (!drill || !data.dealBreakdown) {
+                      return (
+                        <>
+                          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", color: C.t3, marginBottom: 6 }}>Breakdown</div>
+                          <div style={{ padding: "22px 8px", textAlign: "center", color: C.t3, fontSize: 14, fontWeight: 600 }}>Choose a number to show your deals</div>
+                        </>
+                      );
+                    }
+                    const matchStage = (dStage: string) => (drill.stage === "" ? true : drill.stage === "Other (renewal/billing)" ? !AGING_EXPLICIT.includes(dStage) : dStage === drill.stage);
+                    const rows = data.dealBreakdown
+                      .filter((d) => (drill.ae === "All (everyone)" || d.owner === drill.ae) && matchStage(d.stage) && (!drill.staleOnly || d.stale))
+                      .sort((a, b) => b.arr - a.arr);
+                    const totalArr = rows.reduce((sum, d) => sum + d.arr, 0);
+                    return (
+                      <>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+                          <div>
+                            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", color: C.t3, marginBottom: 6 }}>Breakdown</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.navy }}>{rows.length}</span>
+                              <span style={{ fontSize: 13, color: C.t2 }}>deals · {fmt(totalArr)}</span>
+                              {(() => { const chip = { fontSize: 11, fontWeight: 600 as const, color: C.t2, background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 20, padding: "2px 10px" }; return (<>
+                                <span style={chip}>{shortAE(drill.ae)}</span>
+                                {drill.stage && <span style={chip}>{drill.stage}</span>}
+                                {drill.staleOnly && <span style={{ ...chip, color: C.red, fontWeight: 700, background: "rgba(200,40,40,0.06)", border: `1px solid ${C.red}` }}>stale ≥90d</span>}
+                              </>); })()}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button onClick={() => downloadCsv(drill.title, rows)} style={{ padding: "6px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${C.bd}`, background: C.navy, color: "#fff", cursor: "pointer" }}>⬇ Download CSV</button>
+                            <button onClick={() => setDrill(null)} style={{ padding: "6px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${C.bd}`, background: "#fff", color: C.t2, cursor: "pointer" }}>✕ Clear</button>
+                          </div>
+                        </div>
+                        <div style={{ maxHeight: 420, overflowY: "auto" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                            <thead>
+                              <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                                <Th l>Opportunity</Th><Th l>Owner</Th><Th l>Stage</Th><Th>Age (d)</Th><Th>ARR</Th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((d) => (
+                                <tr key={d.id} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                                  <Td l><a href={d.url} target="_blank" rel="noreferrer" style={{ color: C.navy, textDecoration: "underline", fontWeight: 600 }}>{d.name || d.id}</a></Td>
+                                  <Td l>{d.owner}</Td>
+                                  <Td l>{d.stage}</Td>
+                                  <Td mono color={(d.age ?? 0) >= 90 ? C.red : C.t1}>{d.age ?? "—"}</Td>
+                                  <Td mono bold>{fmt(d.arr)}</Td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </Card>
+            );
+          })()}
+
           <Card
             title="Pipeline Aging"
             sub="Open deals bucketed by days since last stage change — stale deals need attention"
@@ -3226,40 +3342,6 @@ export default function Dashboard() {
               </tbody>
             </table>
           </Card>
-
-          {data.agingByStage && data.agingByStage.length > 0 && (
-            <Card
-              title="Aging by Stage"
-              sub="Open deals grouped by stage — count, average age (days since last stage change), and average ACV. Computed live in the sheet (Deal Health — Aging by Stage tab)."
-            >
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>Stage</Th>
-                    <Th># Deals</Th>
-                    <Th>Avg Age (days)</Th>
-                    <Th>Stale (≥90d)</Th>
-                    <Th>Stale $</Th>
-                    <Th>Avg ACV</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.agingByStage.map((s) => (
-                    <tr key={s.stage} style={{ borderBottom: `1px solid ${C.s1}`, background: s.total ? C.s2 : undefined }}>
-                      <Td l bold={s.total}>{s.stage}</Td>
-                      <Td mono bold={s.total}>{s.deals}</Td>
-                      <Td mono bold={s.total} color={(s.avgAge ?? 0) > 90 ? C.red : (s.avgAge ?? 0) > 60 ? C.ylw : C.t1}>
-                        {s.avgAge ?? "—"}
-                      </Td>
-                      <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}>{s.stale ?? "—"}</Td>
-                      <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}>{s.staleDollar != null ? fmt(s.staleDollar) : "—"}</Td>
-                      <Td mono bold={s.total}>{s.avgAcv != null ? fmt(s.avgAcv) : "—"}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Card>
-          )}
 
           <Card title="Largest Open Deals" sub="Top 25 open deals, ranked by ARR">
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
