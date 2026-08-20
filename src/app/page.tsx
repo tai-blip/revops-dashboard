@@ -3259,8 +3259,8 @@ export default function Dashboard() {
                     if (!drill || !data.dealBreakdown) {
                       return (
                         <>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: C.t1, marginBottom: 6 }}>Breakdown</div>
-                          <div style={{ padding: "22px 8px", textAlign: "center", color: C.t3, fontSize: 14, fontWeight: 600 }}>Choose a number to show your deal</div>
+                          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", color: C.t3, marginBottom: 6 }}>Breakdown</div>
+                          <div style={{ padding: "22px 8px", textAlign: "center", color: C.t3, fontSize: 14, fontWeight: 600 }}>Choose a number to show your deals</div>
                         </>
                       );
                     }
@@ -3271,10 +3271,18 @@ export default function Dashboard() {
                     const totalArr = rows.reduce((sum, d) => sum + d.arr, 0);
                     return (
                       <>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
                           <div>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: C.t1 }}>Breakdown — {drill.title}</div>
-                            <div style={{ fontSize: 11.5, color: C.t3 }}>{rows.length} deals · {fmt(totalArr)} ARR · each row links straight into Salesforce</div>
+                            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", color: C.t3, marginBottom: 6 }}>Breakdown</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.navy }}>{rows.length}</span>
+                              <span style={{ fontSize: 13, color: C.t2 }}>deals · {fmt(totalArr)}</span>
+                              {(() => { const chip = { fontSize: 11, fontWeight: 600 as const, color: C.t2, background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 20, padding: "2px 10px" }; return (<>
+                                <span style={chip}>{shortAE(drill.ae)}</span>
+                                {drill.stage && <span style={chip}>{drill.stage}</span>}
+                                {drill.staleOnly && <span style={{ ...chip, color: C.red, fontWeight: 700, background: "rgba(200,40,40,0.06)", border: `1px solid ${C.red}` }}>stale ≥90d</span>}
+                              </>); })()}
+                            </div>
                           </div>
                           <div style={{ display: "flex", gap: 8 }}>
                             <button onClick={() => downloadCsv(drill.title, rows)} style={{ padding: "6px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${C.bd}`, background: C.navy, color: "#fff", cursor: "pointer" }}>⬇ Download CSV</button>
