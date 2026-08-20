@@ -128,7 +128,7 @@ async function buildPayload(): Promise<Payload> {
         { tab: "Booked ARR Snapshot v2", range: "A4:C8" },
         // Deal Health — Aging by Stage: Stage | # of Deals | Avg Age (days) | Avg ACV, all
         // computed by formula over Query 1. Dashboard reads these rows verbatim (no math in code).
-        { tab: "Deal Health — Aging by Stage", range: "A4:D25" },
+        { tab: "Deal Health — Aging by Stage", range: "A4:F25" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -292,7 +292,9 @@ async function buildPayload(): Promise<Payload> {
         stage: String(r[0]).trim(),
         deals: r[1] as number,
         avgAge: typeof r[2] === "number" ? (r[2] as number) : null,
-        avgAcv: typeof r[3] === "number" ? (r[3] as number) : null,
+        stale: typeof r[3] === "number" ? (r[3] as number) : null,
+        staleDollar: typeof r[4] === "number" ? (r[4] as number) : null,
+        avgAcv: typeof r[5] === "number" ? (r[5] as number) : null,
         total: String(r[0]).toUpperCase().startsWith("TOTAL"),
       }));
     // Full standing Booked pilot book total, read from the Booked ARR Snapshot v2 tab — which

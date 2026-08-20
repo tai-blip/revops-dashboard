@@ -77,7 +77,7 @@ type DashboardData = {
     expansionArrMom: { months: string[]; reps: Record<string, number[]> };
   };
   dealHealth: { label: string; min: number; max: number; arr: number; count: number }[];
-  agingByStage?: { stage: string; deals: number; avgAge: number | null; avgAcv: number | null; total: boolean }[];
+  agingByStage?: { stage: string; deals: number; avgAge: number | null; stale: number | null; staleDollar: number | null; avgAcv: number | null; total: boolean }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
   forecast: {
@@ -3238,6 +3238,8 @@ export default function Dashboard() {
                     <Th l>Stage</Th>
                     <Th># Deals</Th>
                     <Th>Avg Age (days)</Th>
+                    <Th>Stale (≥90d)</Th>
+                    <Th>Stale $</Th>
                     <Th>Avg ACV</Th>
                   </tr>
                 </thead>
@@ -3249,6 +3251,8 @@ export default function Dashboard() {
                       <Td mono bold={s.total} color={(s.avgAge ?? 0) > 90 ? C.red : (s.avgAge ?? 0) > 60 ? C.ylw : C.t1}>
                         {s.avgAge ?? "—"}
                       </Td>
+                      <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}>{s.stale ?? "—"}</Td>
+                      <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}>{s.staleDollar != null ? fmt(s.staleDollar) : "—"}</Td>
                       <Td mono bold={s.total}>{s.avgAcv != null ? fmt(s.avgAcv) : "—"}</Td>
                     </tr>
                   ))}

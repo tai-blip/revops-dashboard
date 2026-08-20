@@ -27,9 +27,9 @@ const AGE = `IF(${Q}!$C$3:$C$2000="",0,TODAY()-DATEVALUE(LEFT(IF(${Q}!$L$3:$L$20
 async function main() {
   const api = google.sheets({ version: "v4", auth: gAuth });
   const vals = [
-    [`Deal Health — Aging by Stage · LIVE formula over Query 1 (auto-refreshes). Age = days since Last Stage Change, else Created. ACV = Annual Contract Value (ARR field).`],
+    [`Deal Health — Aging by Stage · LIVE formula over Query 1 (auto-refreshes). Age = days since Last Stage Change, else Created. Stale = age >= 90 days in current stage (leadership's definition). ACV = Annual Contract Value (ARR field).`],
     [],
-    ["Stage", "# of Deals", "Avg Age (days)", "Avg ACV"],
+    ["Stage", "# of Deals", "Avg Age (days)", "Stale (≥90d)", "Stale $", "Avg ACV"],
   ];
   STAGES.forEach((s, i) => {
     const r = i + 4;
@@ -37,6 +37,8 @@ async function main() {
       s,
       `=COUNTIF(${Q}!$C$3:$C$2000,$A${r})`,
       `=IFERROR(ROUND(SUMPRODUCT((${Q}!$C$3:$C$2000=$A${r})*${AGE})/COUNTIF(${Q}!$C$3:$C$2000,$A${r})),"—")`,
+      `=SUMPRODUCT((${Q}!$C$3:$C$2000=$A${r})*(${AGE}>=90))`,
+      `=ROUND(SUMPRODUCT((${Q}!$C$3:$C$2000=$A${r})*(${AGE}>=90)*${Q}!$D$3:$D$2000))`,
       `=IFERROR(ROUND(AVERAGEIF(${Q}!$C$3:$C$2000,$A${r},${Q}!$D$3:$D$2000)),"—")`,
     ]);
   });
@@ -44,6 +46,8 @@ async function main() {
     "TOTAL (all open)",
     `=SUMPRODUCT((${Q}!$C$3:$C$2000<>"")*1)`,
     `=IFERROR(ROUND(SUMPRODUCT((${Q}!$C$3:$C$2000<>"")*${AGE})/SUMPRODUCT((${Q}!$C$3:$C$2000<>"")*1)),"—")`,
+    `=SUMPRODUCT((${Q}!$C$3:$C$2000<>"")*(${AGE}>=90))`,
+    `=ROUND(SUMPRODUCT((${Q}!$C$3:$C$2000<>"")*(${AGE}>=90)*${Q}!$D$3:$D$2000))`,
     `=IFERROR(ROUND(SUMPRODUCT((${Q}!$C$3:$C$2000<>"")*${Q}!$D$3:$D$2000)/SUMPRODUCT((${Q}!$C$3:$C$2000<>"")*1)),"—")`,
   ]);
 
@@ -51,7 +55,7 @@ async function main() {
   const ex = meta.data.sheets.find((s) => s.properties.title === TAB);
   const reqs = [];
   if (ex) reqs.push({ deleteSheet: { sheetId: ex.properties.sheetId } });
-  reqs.push({ addSheet: { properties: { title: TAB, gridProperties: { rowCount: vals.length + 5, columnCount: 4 } } } });
+  reqs.push({ addSheet: { properties: { title: TAB, gridProperties: { rowCount: vals.length + 5, columnCount: 6 } } } });
   await api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: ID, range: `'${TAB}'!A1`, valueInputOption: "USER_ENTERED", requestBody: { values: vals } });
   console.log(`wrote '${TAB}' — ${STAGES.length} stages + TOTAL, formula-driven over Query 1.`);
