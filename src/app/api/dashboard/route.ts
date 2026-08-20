@@ -128,7 +128,7 @@ async function buildPayload(): Promise<Payload> {
         { tab: "Booked ARR Snapshot v2", range: "A4:C8" },
         // Deal Health — Aging by Stage: Stage | # of Deals | Avg Age (days) | Avg ACV, all
         // computed by formula over Query 1. Dashboard reads these rows verbatim (no math in code).
-        { tab: "Deal Health — Aging by Stage", range: "A4:F25" },
+        { tab: "Deal Health — Aging by Stage", range: "A4:G70" },
         // Deal Breakdown = one row per open deal (SFDC link, name, owner, stage, ARR, age, stale),
         // all formula-driven over Query 1. The dashboard drill-down filters these rows into a panel
         // (+ CSV) when a Deal Health number is clicked. Read-only; no computation in the app.
@@ -291,15 +291,16 @@ async function buildPayload(): Promise<Payload> {
     // Aging by stage — read verbatim from the "Deal Health — Aging by Stage" tab (all math is
     // sheet formulas over Query 1). No computation here; just shape the rows for the UI.
     const agingByStage = (agingRows ?? [])
-      .filter((r) => typeof r?.[0] === "string" && String(r[0]).trim() !== "" && typeof r?.[1] === "number")
+      .filter((r) => typeof r?.[0] === "string" && String(r[0]).trim() !== "" && typeof r?.[2] === "number")
       .map((r) => ({
-        stage: String(r[0]).trim(),
-        deals: r[1] as number,
-        avgAge: typeof r[2] === "number" ? (r[2] as number) : null,
-        stale: typeof r[3] === "number" ? (r[3] as number) : null,
-        staleDollar: typeof r[4] === "number" ? (r[4] as number) : null,
-        avgAcv: typeof r[5] === "number" ? (r[5] as number) : null,
-        total: String(r[0]).toUpperCase().startsWith("TOTAL"),
+        ae: String(r[0]).trim(),
+        stage: String(r[1]).trim(),
+        deals: r[2] as number,
+        avgAge: typeof r[3] === "number" ? (r[3] as number) : null,
+        stale: typeof r[4] === "number" ? (r[4] as number) : null,
+        staleDollar: typeof r[5] === "number" ? (r[5] as number) : null,
+        avgAcv: typeof r[6] === "number" ? (r[6] as number) : null,
+        total: String(r[1]).toUpperCase() === "TOTAL",
       }));
     // Deal-level backing for the drill-down — read verbatim from the Deal Breakdown tab. The UI
     // filters these rows client-side when a number is clicked (presentation, not computation).
