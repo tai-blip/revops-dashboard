@@ -1,0 +1,57 @@
+name: Calculation location (PR)
+
+# One rule, checked on every pull request: the Sheet computes, the dashboard reads.
+#
+# The architecture is  Salesforce → script-written RAW tabs → sheet FORMULA tabs → dashboard
+# reads a key. When a number is instead worked out in TypeScript, it stops being auditable in
+# the Sheet and a definition change turns into a code change + deploy. This job scans the
+# PR's ADDED lines for that drift and posts the verdict as a comment on the PR.
+#
+# Report-only: the repo has pre-existing in-code math (~25 places), so blocking would make
+# every PR red for reasons unrelated to that PR. Set --strict once those are migrated.
+
+on:
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  calc-location:
+    name: Is the math in the database?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # fetch-depth: 0 — the audit diffs this branch against the PR's base branch.
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      # No npm ci: the audit uses only Node built-ins, so it runs in seconds with no install.
+      - name: Audit calculation location
+        run: node scripts/audit-calc-location.mjs --base=origin/${{ github.base_ref }} --md=audit.md | tee audit.txt
+
+      - name: Publish to job summary
+        if: always()
+        run: cat audit.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "audit produced no output" >> "$GITHUB_STEP_SUMMARY"
+
+      # Sticky comment: one comment per PR, rewritten on each push rather than piling up.
+      # Skipped for fork PRs, whose GITHUB_TOKEN is read-only.
+      - name: Comment on the PR
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          { cat audit.md; printf '\n<!-- calc-location-audit -->\n'; } > comment.md
+          id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                 -q '.[] | select(.body | contains("<!-- calc-location-audit -->")) | .id' | head -1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@comment.md >/dev/null
+            echo "updated existing audit comment $id"
+          else
+            gh pr comment "$PR" --body-file comment.md
+          fi
