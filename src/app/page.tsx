@@ -77,6 +77,7 @@ type DashboardData = {
     expansionArrMom: { months: string[]; reps: Record<string, number[]> };
   };
   dealHealth: { label: string; min: number; max: number; arr: number; count: number }[];
+  agingByStage?: { stage: string; deals: number; avgAge: number | null; stale: number | null; staleDollar: number | null; avgAcv: number | null; total: boolean }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
   forecast: {
@@ -3225,6 +3226,40 @@ export default function Dashboard() {
               </tbody>
             </table>
           </Card>
+
+          {data.agingByStage && data.agingByStage.length > 0 && (
+            <Card
+              title="Aging by Stage"
+              sub="Open deals grouped by stage — count, average age (days since last stage change), and average ACV. Computed live in the sheet (Deal Health — Aging by Stage tab)."
+            >
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                    <Th l>Stage</Th>
+                    <Th># Deals</Th>
+                    <Th>Avg Age (days)</Th>
+                    <Th>Stale (≥90d)</Th>
+                    <Th>Stale $</Th>
+                    <Th>Avg ACV</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.agingByStage.map((s) => (
+                    <tr key={s.stage} style={{ borderBottom: `1px solid ${C.s1}`, background: s.total ? C.s2 : undefined }}>
+                      <Td l bold={s.total}>{s.stage}</Td>
+                      <Td mono bold={s.total}>{s.deals}</Td>
+                      <Td mono bold={s.total} color={(s.avgAge ?? 0) > 90 ? C.red : (s.avgAge ?? 0) > 60 ? C.ylw : C.t1}>
+                        {s.avgAge ?? "—"}
+                      </Td>
+                      <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}>{s.stale ?? "—"}</Td>
+                      <Td mono bold={s.total} color={(s.stale ?? 0) > 0 ? C.red : C.t1}>{s.staleDollar != null ? fmt(s.staleDollar) : "—"}</Td>
+                      <Td mono bold={s.total}>{s.avgAcv != null ? fmt(s.avgAcv) : "—"}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
 
           <Card title="Largest Open Deals" sub="Top 25 open deals, ranked by ARR">
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
