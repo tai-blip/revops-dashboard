@@ -3253,47 +3253,57 @@ export default function Dashboard() {
                   </tbody>
                 </table>
                 <div style={{ fontSize: 11.5, color: C.t3, marginTop: 8 }}>Tip: click any # Deals / Stale / Stale $ number to see the exact deals behind it (Salesforce links + CSV).</div>
-              </Card>
-            );
-          })()}
-
-          {/* Breakdown panel — always shown, tied to Aging by Stage above. Placeholder until a number is clicked. */}
-          {data.dealBreakdown && !drill && (
-            <Card title="Breakdown" sub="The deals behind any Aging by Stage number appear here.">
-              <div style={{ padding: "28px 8px", textAlign: "center", color: C.t3, fontSize: 14, fontWeight: 600 }}>Choose a number to show your deal</div>
-            </Card>
-          )}
-          {drill && data.dealBreakdown && (() => {
-            const matchStage = (dStage: string) => (drill.stage === "" ? true : drill.stage === "Other (renewal/billing)" ? !AGING_EXPLICIT.includes(dStage) : dStage === drill.stage);
-            const rows = data.dealBreakdown
-              .filter((d) => (drill.ae === "All (everyone)" || d.owner === drill.ae) && matchStage(d.stage) && (!drill.staleOnly || d.stale))
-              .sort((a, b) => b.arr - a.arr);
-            const totalArr = rows.reduce((sum, d) => sum + d.arr, 0);
-            return (
-              <Card title={`Breakdown — ${drill.title} (${rows.length})`} sub={`${rows.length} deals · ${fmt(totalArr)} ARR · each row links straight into Salesforce`} accent={C.coral}>
-                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                  <button onClick={() => downloadCsv(drill.title, rows)} style={{ padding: "6px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${C.bd}`, background: C.navy, color: "#fff", cursor: "pointer" }}>⬇ Download CSV</button>
-                  <button onClick={() => setDrill(null)} style={{ padding: "6px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${C.bd}`, background: "#fff", color: C.t2, cursor: "pointer" }}>✕ Close</button>
-                </div>
-                <div style={{ maxHeight: 420, overflowY: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Opportunity</Th><Th l>Owner</Th><Th l>Stage</Th><Th>Age (d)</Th><Th>ARR</Th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((d) => (
-                        <tr key={d.id} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                          <Td l><a href={d.url} target="_blank" rel="noreferrer" style={{ color: C.navy, textDecoration: "underline", fontWeight: 600 }}>{d.name || d.id}</a></Td>
-                          <Td l>{d.owner}</Td>
-                          <Td l>{d.stage}</Td>
-                          <Td mono color={(d.age ?? 0) >= 90 ? C.red : C.t1}>{d.age ?? "—"}</Td>
-                          <Td mono bold>{fmt(d.arr)}</Td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                {/* Breakdown — folded into this same module (no separate card) */}
+                <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${C.bd}` }}>
+                  {(() => {
+                    if (!drill || !data.dealBreakdown) {
+                      return (
+                        <>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: C.t1, marginBottom: 6 }}>Breakdown</div>
+                          <div style={{ padding: "22px 8px", textAlign: "center", color: C.t3, fontSize: 14, fontWeight: 600 }}>Choose a number to show your deal</div>
+                        </>
+                      );
+                    }
+                    const matchStage = (dStage: string) => (drill.stage === "" ? true : drill.stage === "Other (renewal/billing)" ? !AGING_EXPLICIT.includes(dStage) : dStage === drill.stage);
+                    const rows = data.dealBreakdown
+                      .filter((d) => (drill.ae === "All (everyone)" || d.owner === drill.ae) && matchStage(d.stage) && (!drill.staleOnly || d.stale))
+                      .sort((a, b) => b.arr - a.arr);
+                    const totalArr = rows.reduce((sum, d) => sum + d.arr, 0);
+                    return (
+                      <>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: C.t1 }}>Breakdown — {drill.title}</div>
+                            <div style={{ fontSize: 11.5, color: C.t3 }}>{rows.length} deals · {fmt(totalArr)} ARR · each row links straight into Salesforce</div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button onClick={() => downloadCsv(drill.title, rows)} style={{ padding: "6px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${C.bd}`, background: C.navy, color: "#fff", cursor: "pointer" }}>⬇ Download CSV</button>
+                            <button onClick={() => setDrill(null)} style={{ padding: "6px 14px", fontSize: 12.5, fontWeight: 600, borderRadius: 8, border: `1px solid ${C.bd}`, background: "#fff", color: C.t2, cursor: "pointer" }}>✕ Clear</button>
+                          </div>
+                        </div>
+                        <div style={{ maxHeight: 420, overflowY: "auto" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                            <thead>
+                              <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                                <Th l>Opportunity</Th><Th l>Owner</Th><Th l>Stage</Th><Th>Age (d)</Th><Th>ARR</Th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((d) => (
+                                <tr key={d.id} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                                  <Td l><a href={d.url} target="_blank" rel="noreferrer" style={{ color: C.navy, textDecoration: "underline", fontWeight: 600 }}>{d.name || d.id}</a></Td>
+                                  <Td l>{d.owner}</Td>
+                                  <Td l>{d.stage}</Td>
+                                  <Td mono color={(d.age ?? 0) >= 90 ? C.red : C.t1}>{d.age ?? "—"}</Td>
+                                  <Td mono bold>{fmt(d.arr)}</Td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </Card>
             );
