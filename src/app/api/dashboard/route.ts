@@ -88,7 +88,7 @@ async function buildPayload(): Promise<Payload> {
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
     // NOTE: order here MUST match the destructured variables below.
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows] =
       await getSheetValuesBatch([
         { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
@@ -126,6 +126,9 @@ async function buildPayload(): Promise<Payload> {
         // date falls in the CURRENT quarter). The dashboard shows this total; the tab holds the
         // deal detail behind it. Read the summary total cell so dashboard == database.
         { tab: "Booked ARR Snapshot v2", range: "A4:C8" },
+        // Deal Health — Aging by Stage: Stage | # of Deals | Avg Age (days) | Avg ACV, all
+        // computed by formula over Query 1. Dashboard reads these rows verbatim (no math in code).
+        { tab: "Deal Health — Aging by Stage", range: "A4:D25" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -281,6 +284,17 @@ async function buildPayload(): Promise<Payload> {
     const cashForecast = computeCashForecast(cashForecastRows);
     const arrFunnel = computeArrFunnel(arrFunnelRows);
     const predictedCashflow = computePredictedCashflow(arrFunnelRows);
+    // Aging by stage — read verbatim from the "Deal Health — Aging by Stage" tab (all math is
+    // sheet formulas over Query 1). No computation here; just shape the rows for the UI.
+    const agingByStage = (agingRows ?? [])
+      .filter((r) => typeof r?.[0] === "string" && String(r[0]).trim() !== "" && typeof r?.[1] === "number")
+      .map((r) => ({
+        stage: String(r[0]).trim(),
+        deals: r[1] as number,
+        avgAge: typeof r[2] === "number" ? (r[2] as number) : null,
+        avgAcv: typeof r[3] === "number" ? (r[3] as number) : null,
+        total: String(r[0]).toUpperCase().startsWith("TOTAL"),
+      }));
     // Full standing Booked pilot book total, read from the Booked ARR Snapshot v2 tab — which
     // lists every deal behind it plus a Quarter column for per-quarter filtering. The dashboard
     // shows this total so it ties to the sheet's deals exactly. Null → fall back to the in-code sum.
@@ -352,6 +366,7 @@ async function buildPayload(): Promise<Payload> {
       arrFunnel,
       predictedCashflow,
       bookedTotal,
+      agingByStage,
       pipelineGen,
       dealTracker,
       topBooked,
