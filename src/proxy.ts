@@ -28,6 +28,8 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except static assets and the auth endpoints themselves.
-  matcher: ["/((?!api/auth|_next/static|_next/image|favicon\\.ico|.*\\.(?:png|svg|ico)$).*)"],
+  // Everything except static assets, the auth endpoints themselves, and the Slack
+  // events endpoint — that route authenticates every request itself via Slack's
+  // HMAC signature (see src/lib/slack-bot.ts verifySlackSignature).
+  matcher: ["/((?!api/auth|api/slack|_next/static|_next/image|favicon\\.ico|.*\\.(?:png|svg|ico)$).*)"],
 };
