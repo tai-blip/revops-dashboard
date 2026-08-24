@@ -100,8 +100,15 @@ const API = (process.env.DASH_API_URL || "http://localhost:3000").replace(/\/+$/
 async function loadDash() {
   // Prefer a local snapshot if present (fast for manual dev runs), else fetch the API.
   try { if (fs.existsSync("/tmp/dash.json")) return JSON.parse(fs.readFileSync("/tmp/dash.json", "utf-8")); } catch {}
+  // Prod sits behind the Google-session auth proxy; CI authenticates with CRON_TOKEN
+  // (see src/proxy.ts). Locally the header is simply absent and localhost has no proxy.
+  const headers = process.env.CRON_TOKEN ? { "x-cron-token": process.env.CRON_TOKEN } : {};
   for (let i = 1; i <= 3; i++) {
-    try { const r = await fetch(API, { signal: AbortSignal.timeout(25000) }); if (r.ok) return await r.json(); } catch (e) { console.log(`deal-tracker: fetch ${API} failed (${i}/3): ${e.message}`); }
+    try {
+      const r = await fetch(API, { headers, signal: AbortSignal.timeout(25000) });
+      if (r.ok) return await r.json();
+      console.log(`deal-tracker: fetch ${API} returned ${r.status} (${i}/3)`);
+    } catch (e) { console.log(`deal-tracker: fetch ${API} failed (${i}/3): ${e.message}`); }
     if (i < 3) await new Promise((res) => setTimeout(res, 4000));
   }
   return null;

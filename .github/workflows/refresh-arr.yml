@@ -23,6 +23,7 @@ jobs:
       SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       DASH_API_URL: ${{ vars.DASH_API_URL }}
+      CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

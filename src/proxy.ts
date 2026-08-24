@@ -19,6 +19,14 @@ export async function proxy(request: NextRequest) {
   if (email) return NextResponse.next();
 
   const { pathname, search } = request.nextUrl;
+  // CI escape hatch: the 4-hourly GitHub Action reads /api/dashboard to rebuild the
+  // Deal Tracker tab. It has no Google session, so it authenticates with a shared
+  // token instead (CRON_TOKEN on Vercel = CRON_TOKEN secret in GitHub Actions).
+  // Scoped to the read-only dashboard data endpoint — nothing else.
+  const cron = process.env.CRON_TOKEN;
+  if (cron && pathname === "/api/dashboard" && request.headers.get("x-cron-token") === cron) {
+    return NextResponse.next();
+  }
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
