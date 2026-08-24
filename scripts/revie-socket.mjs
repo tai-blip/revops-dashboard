@@ -144,7 +144,9 @@ function askClaude(question, threadContext, userId, canWrite) {
       clearTimeout(killer);
       try {
         const j = JSON.parse(out);
-        resolve({ text: j.result || "", cost: j.total_cost_usd || 0, isError: !!j.is_error });
+        resolve({ text: j.result || "", cost: j.total_cost_usd || 0, isError: !!j.is_error,
+                  raw: j.is_error ? String(j.result || j.error || "").slice(0, 300) : undefined,
+                  stderr: err.slice(-500) });
       } catch {
         resolve({ text: "", cost: 0, isError: true, raw: (err || out).slice(0, 300) });
       }
@@ -229,6 +231,7 @@ function handleEvent(ev) {
     const a = await askClaude(question, ctx, ev.user, canWrite);
     if (a.cost) recordSpend(a.cost);
     if (a.isError || !a.text) {
+      console.error(`[revie] CLI failed for ${ev.user} in ${ev.channel}: isError=${a.isError} text=${a.text ? a.text.length + "ch" : "empty"} raw=${a.raw || "-"}${a.stderr ? " | stderr: " + a.stderr : ""}`);
       await post(ev.channel, `:warning: I couldn't answer that one${a.raw ? ` (\`${a.raw}\`)` : ""}. Try rephrasing, or ask <@${ADMIN}>.`, isDm ? undefined : threadTs);
       return;
     }
