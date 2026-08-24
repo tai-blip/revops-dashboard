@@ -3,14 +3,14 @@
 //
 // TWO-PHASE BY DESIGN — the headless CLI can NEVER execute a write:
 //   plan   → validates, records a pending proposal, prints a nonce. Mutates nothing.
-//   apply  → run ONLY by revie-socket.mjs, after an authorised human confirms in Slack.
-// The `plan` verb is the only one in the CLI's --allowedTools. So the worst a prompt
-// injection in Slack text can achieve is a *proposal* that a human still has to approve.
+//   apply  → an exported FUNCTION, called in-process by revie-socket.mjs after an authorised
+//            human confirms in Slack. It is deliberately not a command-line verb, so no shell
+//            command can reach it however it is composed.
+// So the worst a prompt injection in Slack text can achieve is a *proposal* a human must approve.
 //
 // Usage:
 //   node --env-file=.env scripts/revie-write.mjs plan <op> <OppId> "<value>" --requester <U…>
-//   node --env-file=.env scripts/revie-write.mjs apply --nonce <N> --confirmer <U…>
-//   node --env-file=.env scripts/revie-write.mjs show  --nonce <N>
+//   node --env-file=.env scripts/revie-write.mjs show --nonce <N>
 //
 // Ops (allowlist — parameterised; no free-form DML is ever accepted):
 //   rescue     <OppId> <StageName>  reopen a stale Closed Lost opp to its correct stage
@@ -140,28 +140,17 @@ async function plan() {
   }));
 }
 
-// Runner-only verbs. The token is minted in memory by revie-socket.mjs at startup, never
-// written to .env, and stripped from the environment of the spawned CLI — so even if the
-// assistant chains shell commands past the --allowedTools pattern, it cannot reach these.
-function requireRunner() {
-  const tok = process.env.REVIE_RUNNER_TOKEN || "";
-  if (!tok || flag("runner-token") !== tok)
-    die("this verb is runner-only — it cannot be invoked from the assistant sandbox.");
-}
-
-// ── apply (runner-only) ───────────────────────────────────────────────────────
-async function apply() {
-  // Runner-only. The token is minted in memory by revie-socket.mjs at startup, never written
-  // to .env, and stripped from the environment of the spawned CLI — so even if the assistant
-  // chains shell commands past the --allowedTools pattern, it cannot reach this verb.
-  requireRunner();
-  const nonce = (flag("nonce") || "").toUpperCase();
-  const confirmer = flag("confirmer") || "";
+// ── apply / cancel — NOT command-line verbs ──────────────────────────────────
+// These are exported functions, imported directly by revie-socket.mjs. There is no CLI
+// path to them at all, so no shell command — however it is composed — can execute a write.
+// Only `plan` is reachable from the command line, and it only ever records a proposal.
+export async function applyPending(nonce, confirmer) {
+  nonce = String(nonce || "").toUpperCase();
+  if (!/^U[A-Z0-9]{6,}$/.test(confirmer || "")) throw new Error("confirmer must be a Slack user id.");
   const p = loadPending();
   const e = p[nonce];
-  if (!e) die("unknown or already-used confirmation code.");
-  if (Date.now() - e.t > TTL_MS) { delete p[nonce]; savePending(p); die("that confirmation expired — ask again."); }
-  if (!/^U[A-Z0-9]{6,}$/.test(confirmer)) die("--confirmer must be a Slack user id.");
+  if (!e) throw new Error("unknown or already-used confirmation code.");
+  if (Date.now() - e.t > TTL_MS) { delete p[nonce]; savePending(p); throw new Error("that confirmation expired — ask again."); }
 
   delete p[nonce]; savePending(p); // single-use: burn before attempting
 
@@ -174,25 +163,25 @@ async function apply() {
   mkdirSync(DIR, { recursive: true });
   appendFileSync(AUDIT, JSON.stringify({
     t: Date.now(), op: e.op, oppId: e.oppId, name: e.name, requester: e.requester, confirmer,
-    before: e.before, patch: e.patch, after: { StageName: after?.StageName ?? null, ClosedLostDetails__c: after?.ClosedLostDetails__c ?? null },
+    before: e.before, patch: e.patch,
+    after: { StageName: after?.StageName ?? null, ClosedLostDetails__c: after?.ClosedLostDetails__c ?? null },
     verified: landed,
   }) + "\n");
 
-  if (!landed) die(`write did not verify — ${field} is "${after?.[field]}", expected "${e.patch[field]}".`);
-  console.log(JSON.stringify({ ok: true, oppId: e.oppId, name: e.name, before: e.before, after: e.patch }));
+  if (!landed) throw new Error(`write did not verify — ${field} is "${after?.[field]}", expected "${e.patch[field]}".`);
+  return { ok: true, oppId: e.oppId, name: e.name, before: e.before, after: e.patch };
 }
 
-function cancel() {
-  requireRunner();
-  const nonce = (flag("nonce") || "").toUpperCase();
+export function cancelPending(nonce, confirmer) {
+  nonce = String(nonce || "").toUpperCase();
   const p = loadPending();
-  if (!p[nonce]) die("unknown or already-used confirmation code.");
   const e = p[nonce];
+  if (!e) throw new Error("unknown or already-used confirmation code.");
   delete p[nonce]; savePending(p);
   mkdirSync(DIR, { recursive: true });
   appendFileSync(AUDIT, JSON.stringify({ t: Date.now(), op: e.op, oppId: e.oppId, name: e.name,
-    requester: e.requester, cancelled_by: flag("confirmer") || "", patch: e.patch }) + "\n");
-  console.log(JSON.stringify({ ok: true, cancelled: true, name: e.name }));
+    requester: e.requester, cancelled_by: confirmer || "", patch: e.patch }) + "\n");
+  return { ok: true, cancelled: true, name: e.name };
 }
 
 function show() {
@@ -202,7 +191,11 @@ function show() {
 }
 
 const cmd = pos[0];
-const verbs = { plan, apply, cancel: async () => cancel(), show: async () => show() };
-const run = verbs[cmd];
-if (!run) { console.error("usage: revie-write.mjs plan|apply|cancel|show …"); process.exit(1); }
-run().catch((e) => { console.error(String(e.message || e)); process.exit(1); });
+// CLI surface: `plan` and `show` only — and only when this file is executed directly.
+// Importing it (as revie-socket.mjs does) runs nothing.
+if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+  const verbs = { plan, show: async () => show() };
+  const run = verbs[cmd];
+  if (!run) { console.error("usage: revie-write.mjs plan|show …"); process.exit(1); }
+  run().catch((e) => { console.error(String(e.message || e)); process.exit(1); });
+}
