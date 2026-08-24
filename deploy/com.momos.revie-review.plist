@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.momos.revie-review</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/opt/node@22/bin/node</string>
+    <string>--env-file=.env</string>
+    <string>scripts/revie-review.mjs</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/tainguyen/Downloads/revops-dashboard</string>
+
+  <!-- every day at 00:00 (midnight); if the Mac was asleep, launchd runs it once on wake -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>0</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/opt/homebrew/opt/node@22/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/tainguyen/Downloads/revops-dashboard/.revie/review.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/tainguyen/Downloads/revops-dashboard/.revie/review.log</string>
+</dict>
+</plist>
