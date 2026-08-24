@@ -9,3 +9,4 @@ data-snapshots/
 
 # Local double-click launcher (machine-specific)
 *.command
+.revie/

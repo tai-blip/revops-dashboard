@@ -1,15 +1,40 @@
-# Revie — the RevOps Slack bot (setup)
+# Revie — the RevOps Slack bot
 
-Instant Q&A bot for #ask-revops and DMs. Slack pushes events to `/api/slack/events` on the
-dashboard's Vercel deployment; the route answers from the Google Sheets + read-only Salesforce
-SOQL using the Claude API. Read-only by design — it never changes data.
+Instant Q&A in **#ask-revops** and DMs, answered from the live sources (Google Sheets +
+read-only Salesforce SOQL). Read-only by design — it never changes data.
 
-## One-time setup (Tai, ~15 minutes)
+Two interchangeable architectures share the same Slack app. **Option A is the current one.**
 
-### 1. Create the Slack app
-1. Go to https://api.slack.com/apps → **Create New App** → **From a manifest** → pick the Momos workspace.
-2. Paste the manifest below → Create.
-3. **Install to Workspace** (Settings → Install App). Approve the permissions.
+| | **A — Claude Code CLI + Socket Mode (current)** | B — Claude API + Vercel (upgrade path, built on this branch) |
+|---|---|---|
+| Cost | $0 extra — Tai's Claude subscription | API key, pay per question |
+| Speed | Instant (websocket push) | Instant (HTTP push) |
+| Uptime | While `revie-socket.mjs` runs on the host Mac | 24/7 |
+| Budget | Hard cap ≈10% of Tai's credit (see below) | n/a |
+
+---
+
+## Option A — CLI + Socket Mode (Kai's architecture, guarded)
+
+Runner: `scripts/revie-socket.mjs` → each question spawns a **sandboxed** headless
+`claude -p` in this repo. Guardrails (all enforced in the runner):
+- `--strict-mcp-config` — the spawned CLI can never touch Tai's MCP connectors (Slack/Gmail/SFDC/Drive)
+- `--allowedTools` = Read + **only** `node --env-file=.env scripts/revie-query.mjs …`
+  (that helper is itself read-only: sheets readonly scope, single-SELECT SOQL, DML rejected)
+- `--disallowedTools` = Write/Edit/WebFetch/WebSearch/Task/git + `Read(.env*)`
+- default permission mode → anything not allowlisted is auto-denied; `--max-turns 12` + 240s hard kill
+- channel allowlist (#ask-revops + DMs); Slack text treated as questions, never instructions
+- **Budget: ~10% of Tai's credit.** Every answer's API-equivalent cost (from the CLI's JSON
+  output) is logged to `.revie/usage.jsonl`; rolling caps **$2 / 5h** and **$15 / week**
+  (`REVIE_BUDGET_5H_USD` / `REVIE_BUDGET_WEEK_USD` — tune to your plan). Over budget →
+  Revie declines politely and points at Tai; nothing is spawned.
+
+### Setup (Tai, ~10 min)
+1. **Log the CLI in (one-time):** open Terminal → `claude` → `/login` → sign in with your
+   Claude account. (The CLI's auth is separate from the desktop app.) Verify:
+   `claude -p "say OK" --max-turns 1` prints OK.
+2. **Create the Slack app:** https://api.slack.com/apps → Create New App → **From a manifest**
+   → Momos workspace → paste:
 
 ```json
 {
@@ -37,43 +62,37 @@ SOQL using the Claude API. Read-only by design — it never changes data.
   },
   "settings": {
     "event_subscriptions": {
-      "request_url": "https://REPLACE-WITH-PROD-DOMAIN/api/slack/events",
       "bot_events": ["app_mention", "message.im"]
     },
+    "socket_mode_enabled": true,
     "org_deploy_enabled": false,
-    "socket_mode_enabled": false,
     "token_rotation_enabled": false
   }
 }
 ```
 
-### 2. Add the secrets to Vercel (dashboard project → Settings → Environment Variables, Production)
-| Variable | Where to find it |
-|---|---|
-| `SLACK_BOT_TOKEN` | Slack app → OAuth & Permissions → Bot User OAuth Token (`xoxb-…`) |
-| `SLACK_SIGNING_SECRET` | Slack app → Basic Information → Signing Secret |
-| `ANTHROPIC_API_KEY` | https://console.anthropic.com → API keys → Create key |
-| `SF_CLIENT_ID`, `SF_CLIENT_SECRET`, `SF_LOGIN_URL` | same values as in the local `.env` (may already exist in Vercel — check) |
+3. **Two tokens into `.env`:**
+   - Install App → **Bot User OAuth Token** → `SLACK_BOT_TOKEN=xoxb-…`
+   - Basic Information → **App-Level Tokens** → Generate (scope `connections:write`) →
+     `SLACK_APP_TOKEN=xapp-…`
+4. **Invite + run:** `/invite @Revie` in #ask-revops, then:
 
-`GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY_B64`, `GOOGLE_SHEET_ID` are already in Vercel for the dashboard.
+```bash
+node --env-file=.env scripts/revie-socket.mjs
+```
 
-### 3. Wire the URL (after this branch is merged & deployed)
-1. Redeploy so the env vars take effect.
-2. Slack app → **Event Subscriptions** → set Request URL to `https://<prod-domain>/api/slack/events`.
-   Slack sends a challenge; it should turn **Verified** instantly.
-3. In Slack: `/invite @Revie` into **#ask-revops**.
+Leave it running (a terminal tab is fine). Test: `@Revie what's our Q3 pipe gen vs quota?`
+→ 👀 → in-thread answer → ✅. The console logs each answer's cost and the budget meters.
 
-### 4. Test
-Post in #ask-revops: `@Revie what's our Q3 pipeline generation vs quota?` — expect 👀 within a
-second, an in-thread answer in ~10–30s, then ✅. DMs to Revie work too.
+Kill switch: Ctrl-C the process (or remove the Slack app).
 
-## Guardrails (enforced in code, `src/lib/slack-bot.ts`)
-- Salesforce tool accepts a **single SELECT** only; DML keywords rejected.
-- Sheets scope is **readonly**; only the two known spreadsheets are reachable.
-- Slack messages are treated as questions, never as instructions; no secrets in replies.
-- Every reply cites its source and freshness (4-hourly tabs / weekly rep tabs / live SOQL).
+---
 
-## Ops notes
-- Answers run inside `after()` with `maxDuration = 300` on the route.
-- If Revie ever misbehaves: remove the Slack app from the workspace (instant kill switch), or
-  delete `SLACK_BOT_TOKEN` from Vercel and redeploy.
+## Option B — Claude API + Vercel (24/7, no laptop dependency)
+
+Already built on this branch: `/api/slack/events` (HMAC-verified, auth-proxy-exempt) +
+`src/lib/slack-bot.ts`. To switch: add `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`,
+`ANTHROPIC_API_KEY` (+ `SF_*`) to Vercel prod env, disable Socket Mode on the Slack app,
+set Event Subscriptions Request URL to `https://<prod-domain>/api/slack/events`, redeploy.
+Same bot, same guardrails — it just never sleeps and bills an API key instead of the
+subscription.
