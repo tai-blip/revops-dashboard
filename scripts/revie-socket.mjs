@@ -40,11 +40,13 @@ const BUDGET_5H = Number(process.env.REVIE_BUDGET_5H_USD || 2);   // API-equival
 const BUDGET_WEEK = Number(process.env.REVIE_BUDGET_WEEK_USD || 15); // per rolling 7d  (~10% of credit — tune)
 const LEDGER_DIR = path.join(REPO, ".revie");
 const LEDGER = path.join(LEDGER_DIR, "usage.jsonl");
+const QALOG = path.join(LEDGER_DIR, "qa.jsonl"); // every Q&A + explicit feedback, for the nightly review
 const CLI_TIMEOUT_MS = 240_000;
 // Who may request and confirm a data change. Defaults to Tai alone; widen via REVIE_WRITERS.
 const WRITERS = new Set([ADMIN, ...(process.env.REVIE_WRITERS || "").split(",").map((s) => s.trim()).filter(Boolean)]);
 
 const SYSTEM = `You are Revie, the RevOps data assistant for Momos, answering one Slack question. Work read-only.
+You are the colleague who knows the numbers cold and is good company about it — warm, funny, never precious.
 
 DATA ACCESS — exactly one command, via Bash:
   node --env-file=.env scripts/revie-query.mjs tabs  <main|rep>
@@ -68,8 +70,20 @@ RULES:
   \`@Revie confirm <code>\` within 15 minutes. NEVER say a change is done, and never invent a code.
   If the command refuses (not an authorised writer, bad stage, unknown deal), relay that verbatim and point at <@${ADMIN}>.
   You have no access to the apply step — a human must confirm in Slack before anything is written.
-- Output Slack mrkdwn: *bold*, _italic_, "•" bullets, backtick code. NO markdown tables, NO # headers.
-- Lead with the number, 1-3 support lines, end with a one-line italic source note (tab + freshness, or "live Salesforce"). Under ~150 words unless a list is asked for.
+VOICE:
+- BE BRIEF. Lead with the number. At most two short support lines, and only if they would change what the
+  reader does next. Do NOT explain definitions, methodology or caveats unless asked, or unless the number
+  would be actively misread without it. Target under 80 words. Most answers are two or three lines.
+- Sound like a person, not a report. Dry warmth. Compliment good numbers, show a little sympathy for bad ones,
+  tease gently where it lands.
+- Drop in the occasional film quote — to celebrate a good number, soften a bad one, or make a point stick.
+  Roughly one reply in three, never more than one per message, and only when it genuinely fits. A forced quote
+  is worse than none, so if nothing comes to mind, just be funny in your own words. Keep it short and don't
+  explain the reference.
+- The joke NEVER touches the data. Numbers, names, dates, stages and sources stay exact and unembellished.
+  If humour and precision conflict, precision wins every time.
+- End with a one-line italic source note (tab + freshness, or "live Salesforce").
+- Slack mrkdwn only: *bold*, _italic_, "•" bullets, backtick code. NO markdown tables, NO # headers.
 - Your final message text IS the Slack reply — no preamble about what you did.`;
 
 // ── budget ledger ─────────────────────────────────────────────────────────────
@@ -83,6 +97,17 @@ function spent(sinceMs) {
     .filter((e) => e && now - e.t < sinceMs)
     .reduce((s, e) => s + (e.c || 0), 0);
 }
+// One line per exchange. This is the raw material for improving the prompt — without it there is
+// no record of what people actually ask or where Revie got it wrong.
+function recordQA(entry) {
+  try {
+    mkdirSync(LEDGER_DIR, { recursive: true });
+    appendFileSync(QALOG, JSON.stringify({ t: Date.now(), ...entry }) + "\n");
+  } catch (e) {
+    console.error("[revie] qa log failed:", e.message || e);
+  }
+}
+
 function recordSpend(cost) {
   mkdirSync(LEDGER_DIR, { recursive: true });
   appendFileSync(LEDGER, JSON.stringify({ t: Date.now(), c: cost }) + "\n");
@@ -211,6 +236,21 @@ function handleEvent(ev) {
   const threadTs = ev.thread_ts ?? ev.ts;
   const canWrite = isDm || WRITE_CHANNELS.has(ev.channel); // changes are confined to #ask-revops + DMs
 
+  // "wrong — Live ARR should exclude X" — records a correction against the thread. Runner-handled,
+  // no CLI spawn, so it is free and always works even when budget-capped.
+  const fb = question.match(/^(wrong|feedback|correction)\b[:,\s-]*(.*)$/is);
+  if (fb) {
+    queue = queue.then(async () => {
+      recordQA({ kind: "feedback", user: ev.user, channel: ev.channel, thread: threadTs,
+                 note: (fb[2] || "").trim() || "(no detail given)" });
+      await react(ev.channel, ev.ts, "pencil");
+      await post(ev.channel, `:pencil: Noted — logged against this thread for the nightly review. Thanks.`,
+                 isDm ? undefined : threadTs);
+      console.log(`[revie] feedback from ${ev.user} in ${ev.channel}`);
+    }).catch((e) => console.error("[revie] feedback error:", e));
+    return;
+  }
+
   // "confirm A1B2C3" / "cancel A1B2C3" — handled by the runner, never by the CLI.
   const conf = question.match(/^(confirm|cancel)\s+([0-9a-fA-F]{6})$/);
   if (conf) {
@@ -231,11 +271,15 @@ function handleEvent(ev) {
     const a = await askClaude(question, ctx, ev.user, canWrite);
     if (a.cost) recordSpend(a.cost);
     if (a.isError || !a.text) {
+      recordQA({ kind: "failure", user: ev.user, channel: ev.channel, thread: threadTs,
+                 question, raw: a.raw || null, stderr: a.stderr || null });
       console.error(`[revie] CLI failed for ${ev.user} in ${ev.channel}: isError=${a.isError} text=${a.text ? a.text.length + "ch" : "empty"} raw=${a.raw || "-"}${a.stderr ? " | stderr: " + a.stderr : ""}`);
       await post(ev.channel, `:warning: I couldn't answer that one${a.raw ? ` (\`${a.raw}\`)` : ""}. Try rephrasing, or ask <@${ADMIN}>.`, isDm ? undefined : threadTs);
       return;
     }
     await post(ev.channel, a.text, isDm ? undefined : threadTs);
+    recordQA({ kind: "qa", user: ev.user, channel: ev.channel, thread: threadTs,
+               question, answer: a.text, cost: a.cost, hadThreadContext: !!ctx });
     await react(ev.channel, ev.ts, "white_check_mark");
     console.log(`[revie] answered in ${ev.channel} · $${a.cost.toFixed(4)} · 5h $${spent(5 * 3600e3).toFixed(2)}/${BUDGET_5H} · wk $${spent(7 * 86400e3).toFixed(2)}/${BUDGET_WEEK}`);
   }).catch((e) => console.error("[revie] handler error:", e));
