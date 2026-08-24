@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.momos.revie</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/opt/node@22/bin/node</string>
+    <string>--env-file=.env</string>
+    <string>scripts/revie-socket.mjs</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/tainguyen/Downloads/revops-dashboard</string>
+
+  <!-- start at login, and restart if the process dies -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <!-- the runner spawns `claude`, so it must be on PATH -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/opt/homebrew/opt/node@22/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/tainguyen/Downloads/revops-dashboard/.revie/revie.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/tainguyen/Downloads/revops-dashboard/.revie/revie.log</string>
+</dict>
+</plist>
