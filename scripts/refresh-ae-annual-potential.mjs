@@ -11,12 +11,19 @@ import { google } from "googleapis";
 const EXCLUDE = new Set(["Sri Muniandy", "Jesse Brennan"]);
 // FY26 ACV quota per rep (leadership's FY26 ACV Quota sheet). Keep in sync with
 // AE_ROSTER.quotaAnnual in src/lib/planConfig.ts.
+//
+// A rep with `null` has no quota set yet — they still get a row with their REAL YTD
+// attainment; only the goal/% columns stay blank. Omitting them here (as Davi was until
+// 2026-08-25) drops the rep from the tab entirely, and the dashboard then falls back to a
+// quarter-scoped Closed-Won figure — which understated Davi's YTD as $57.9k against an
+// actual $1.16M. Every roster member must appear here, quota or not.
 const GOALS = {
   "James Burdick": 1000000,
   "Dorsa Mahmoudnia": 883200,
   "Jed Rutstein": 750000,
   "Jill Bucci": 520000,
   "Mathias Berthelemot": 600000,
+  "David Dubinski": null, // lead — residual quota pending the department total
 };
 const YEAR = new Date().getUTCFullYear();
 
@@ -101,7 +108,7 @@ async function main() {
   const rows = names.map((name) => {
     const y = ytd[name] ?? { nb: 0, exp: 0 };
     const p = pot[name] ?? { nb: 0, exp: 0, count: 0 };
-    const goal = GOALS[name];
+    const goal = GOALS[name] ?? 0; // null (quota TBD) writes 0 — the dashboard renders it as "—"
     const ytdTot = y.nb + y.exp;
     const potTot = p.nb + p.exp;
     const proj = ytdTot + potTot;

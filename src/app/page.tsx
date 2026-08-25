@@ -2373,15 +2373,13 @@ export default function Dashboard() {
         // Yr%-missing still come from the AE_Annual_Potential feed. Projection = YTD + Potential.
         const annY = data.aeAnnual;
         const fByName = Object.fromEntries(F.rows.map((r) => [r.name, r]));
-        const annNames = new Set((annY?.reps ?? []).map((r) => r.name));
-        // Leads (e.g. Davi) sit in the forecast roster but not the annual-potential feed. Inject
-        // them so they appear in the Yearly (FY26) view. Annual goal is TBD until leadership sets
-        // the residual quota; YTD shows their recent Closed Won until the annual feed carries them.
-        const annLeadRows = F.rows.filter((r) => r.lead && !annNames.has(r.name)).map((r) => ({
-          name: r.name, goal: 0, ytdNB: 0, ytdExp: 0, ytdTotal: r.closedWon, pctOfGoal: 0,
-          potNB: 0, potExp: 0, potTotal: 0, projection: 0, pctProj: 0, yrMissing: 0,
-        }));
-        const annYReps = [...(annY?.reps ?? []), ...annLeadRows]
+        // The AE_Annual_Potential feed is the single source for this table — it carries every
+        // roster member, including leads whose quota is still TBD (goal 0 renders as "—").
+        // There is deliberately NO client-side fallback row here: the previous one substituted
+        // `closedWon`, a QUARTER-scoped figure, into the YTD column, which showed Davi at $57.9k
+        // against an actual YTD of $1.16M. If a rep is missing from the feed, fix the roster in
+        // scripts/refresh-ae-annual-potential.mjs rather than reconstructing a number here.
+        const annYReps = [...(annY?.reps ?? [])]
           .filter((r) => !FORECAST_EXCLUDE.has(r.name))
           .map((r) => {
             const fr = fByName[r.name];
