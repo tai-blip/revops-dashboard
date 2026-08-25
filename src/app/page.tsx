@@ -547,7 +547,7 @@ export default function Dashboard() {
     URL.revokeObjectURL(a.href);
   };
   const [cashAE, setCashAE] = useState<string>("all");
-  const [cashTier, setCashTier] = useState<"booked" | "contracted" | "live">("contracted"); // Predicted Cashflow tier toggle
+  const [cashTier, setCashTier] = useState<"booked" | "contracted" | "live">("contracted"); // Forward ARR forecast tier toggle
   const [dealAE, setDealAE] = useState<string>("all");
   const [dealConf, setDealConf] = useState<string>("all");
   const [dealSearch, setDealSearch] = useState<string>("");
@@ -2989,7 +2989,7 @@ export default function Dashboard() {
               );
             })()}
             <div style={{ height: 16 }} />
-            {/* Predicted Cashflow — when each ARR tier turns into collected cash (live/R&R date + 45d net term) */}
+            {/* Forward ARR forecast — cumulative standing ARR per tier at each month-end (NOT cash; the cash model is the "Cash timing" card below) */}
             {data.predictedCashflow && data.predictedCashflow.months.length > 0 && (() => {
               const pc = data.predictedCashflow;
               const curYm = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
@@ -3004,8 +3004,8 @@ export default function Dashboard() {
               const tierDeals = pc.deals.filter((d) => d.tier === tier);
               return (
                 <Card
-                  title="Predicted Cashflow — forward ARR by tier"
-                  sub="Forward projection of each tier's ARR from today. Contracted grows as pilots convert (Trial End + 15d nego); Live grows as contracted deals start paying (Contract-Live date + 45d billing). Booked is context only — too early to forecast."
+                  title="Forward ARR forecast"
+                  sub="Cumulative standing ARR per tier at each month-end — not cash collected, and not per-month increments. Contracted grows as pilots convert (Trial End + 15d nego); Live grows as contracted deals start paying (Contract-Live date + 45d billing). Booked is context only — too early to forecast."
                 >
                   {/* IN PROGRESS banner — methodology (CLD+45, pilot-end dates) still being validated */}
                   <div style={{ margin: "10px 20px 0", padding: "8px 12px", background: C.ylwBg, border: `1px solid ${C.ylw}`, borderRadius: 8, fontSize: 12, color: C.t2, fontWeight: 600 }}>
