@@ -284,11 +284,20 @@ export type FunnelPoint = {
   cLeak: number;      // left Contracted to lost/churn/dropped (not to Live)
   lNewDirect: number; // entered Live directly (from Booked or brand-new), not via Contracted
   lChurn: number;     // left Live (churn / contract ended)
+  ids: Partial<Record<FunnelBucket, number[]>>; // deals behind each number above (→ dealIndex)
 };
 export type ContractedDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string };
-export type ArrFunnel = { stock: FunnelPoint[]; contractedDeals: ContractedDeal[] };
+// Every number in the funnel table is a set of deals; these are the sets, so the dashboard can
+// show "which deals" for any cell without recomputing anything. Stored as indices into
+// ArrFunnel.dealIndex (a deal appears in many months, so repeating the object would bloat the
+// payload). Level buckets are point-in-time membership; flow buckets are what moved that month.
+export type FunnelBucket =
+  | "booked" | "contracted" | "contractedRenewal" | "contractedNewExp" | "live" | "churn"
+  | "bToC" | "cToL" | "bToLost" | "bNew" | "bToLive" | "bDrop" | "cNewSigned" | "cLeak" | "lNewDirect" | "lChurn";
+export type FunnelDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string };
+export type ArrFunnel = { stock: FunnelPoint[]; contractedDeals: ContractedDeal[]; dealIndex: FunnelDeal[] };
 export function computeArrFunnel(rows: Row[]): ArrFunnel {
-  const empty: ArrFunnel = { stock: [], contractedDeals: [] };
+  const empty: ArrFunnel = { stock: [], contractedDeals: [], dealIndex: [] };
   if (!rows || rows.length < 2) return empty;
   const h = rows[0].map((x) => String(x ?? "").toLowerCase());
   const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
@@ -349,33 +358,36 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
       return booked ? "Booked" : "";
     };
     let sB = 0, sC = 0, sCRenew = 0, sCNew = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0, bNew = 0, bToLive = 0, bDrop = 0, cNewSigned = 0, cLeak = 0, lNewDirect = 0, lChurn = 0;
+    // Record WHICH deals land in each bucket alongside the sum, so a click can list them.
+    const ids: Partial<Record<FunnelBucket, number[]>> = {};
+    const tag = (b: FunnelBucket, di: number) => { (ids[b] ??= []).push(di); };
     deals.forEach((d, di) => {
       const t = tierOf(d);
       const p = prevTier[di];
-      if (t === "Booked") sB += d.arr;
-      else if (t === "Contracted") { sC += d.arr; if (/renew/i.test(d.type)) sCRenew += d.arr; else sCNew += d.arr; } // split by deal Type
-      else if (t === "Live") sL += d.arr;
-      if (d.churn && d.end >= first && d.end <= me) sChurn += d.arr;                                                   // churned/paused, contract ended this month
+      if (t === "Booked") { sB += d.arr; tag("booked", di); }
+      else if (t === "Contracted") { sC += d.arr; tag("contracted", di); if (/renew/i.test(d.type)) { sCRenew += d.arr; tag("contractedRenewal", di); } else { sCNew += d.arr; tag("contractedNewExp", di); } } // split by deal Type
+      else if (t === "Live") { sL += d.arr; tag("live", di); }
+      if (d.churn && d.end >= first && d.end <= me) { sChurn += d.arr; tag("churn", di); }                                                   // churned/paused, contract ended this month
       if (!firstMonth) {                                                                                               // $ that moved tier vs the prior month
         // Booked reconciliation — the four ways a pilot can leave the tier, tracked separately.
         const bookedLostThisMo = d.lost !== "" && d.lost >= first && d.lost <= me;
-        if (t === "Booked" && p !== "Booked") bNew += d.arr;                                                          // entered Booked (new pilot)
-        if (p === "Booked" && t === "Contracted") bToC += d.arr;                                                      // → Contracted (signed, not paying)
-        if (p === "Booked" && t === "Live") bToLive += d.arr;                                                         // → Live in one month (good exit)
-        if (p === "Booked" && bookedLostThisMo) bToLost += d.arr;                                                     // → Closed Lost this month
-        if (p === "Booked" && t === "" && !bookedLostThisMo) bDrop += d.arr;                                          // dropped (rolled back to SQO/SAL, etc.)
-        if (p === "Contracted" && t === "Live") cToL += d.arr;
+        if (t === "Booked" && p !== "Booked") { bNew += d.arr; tag("bNew", di); }                                                          // entered Booked (new pilot)
+        if (p === "Booked" && t === "Contracted") { bToC += d.arr; tag("bToC", di); }                                                      // → Contracted (signed, not paying)
+        if (p === "Booked" && t === "Live") { bToLive += d.arr; tag("bToLive", di); }                                                         // → Live in one month (good exit)
+        if (p === "Booked" && bookedLostThisMo) { bToLost += d.arr; tag("bToLost", di); }                                                     // → Closed Lost this month
+        if (p === "Booked" && t === "" && !bookedLostThisMo) { bDrop += d.arr; tag("bDrop", di); }                                          // dropped (rolled back to SQO/SAL, etc.)
+        if (p === "Contracted" && t === "Live") { cToL += d.arr; tag("cToL", di); }
         // Contracted reconciliation: everything else that moved its level.
-        if (t === "Contracted" && p !== "Contracted" && p !== "Booked") cNewSigned += d.arr;                          // entered Contracted directly (new sign)
-        if (p === "Contracted" && t !== "Contracted" && t !== "Live") cLeak += d.arr;                                 // left Contracted to lost/churn/dropped
+        if (t === "Contracted" && p !== "Contracted" && p !== "Booked") { cNewSigned += d.arr; tag("cNewSigned", di); }                          // entered Contracted directly (new sign)
+        if (p === "Contracted" && t !== "Contracted" && t !== "Live") { cLeak += d.arr; tag("cLeak", di); }                                 // left Contracted to lost/churn/dropped
         // Live reconciliation.
-        if (t === "Live" && p !== "Live" && p !== "Contracted") lNewDirect += d.arr;                                  // entered Live directly (from Booked / brand-new)
-        if (p === "Live" && t !== "Live") lChurn += d.arr;                                                            // left Live (churn / ended)
+        if (t === "Live" && p !== "Live" && p !== "Contracted") { lNewDirect += d.arr; tag("lNewDirect", di); }                                  // entered Live directly (from Booked / brand-new)
+        if (p === "Live" && t !== "Live") { lChurn += d.arr; tag("lChurn", di); }                                                            // left Live (churn / ended)
       }
       prevTier[di] = t;
     });
     firstMonth = false;
-    stock.push({ ym, label, booked: sB, contracted: sC, contractedRenewal: sCRenew, contractedNewExp: sCNew, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn });
+    stock.push({ ym, label, booked: sB, contracted: sC, contractedRenewal: sCRenew, contractedNewExp: sCNew, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn, ids });
   }
 
   // Current snapshot: deals sitting in the Contracted state right now (contract-live, not paying).
@@ -387,7 +399,30 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
     .map((d) => ({ account: d.account || d.opp, opp: d.opp, owner: d.owner.split(" ")[0], am: d.am.split(" ")[0], type: d.type, rr: d.rr, arr: d.arr, liveDate: d.liveDate, end: d.end || "(none)" }))
     .sort((a, b) => b.arr - a.arr);
 
-  return { stock, contractedDeals };
+  // Compact the deal references: only deals that appear in at least one bucket are sent, and
+  // each bucket's raw row numbers are remapped onto that shorter list. 1700 sheet rows × 8 months
+  // of repeated objects would otherwise dominate the API payload.
+  const remap = new Map<number, number>();
+  const dealIndex: FunnelDeal[] = [];
+  for (const p of stock) {
+    for (const key of Object.keys(p.ids) as FunnelBucket[]) {
+      p.ids[key] = (p.ids[key] ?? []).map((di) => {
+        let ni = remap.get(di);
+        if (ni === undefined) {
+          const d = deals[di];
+          ni = dealIndex.push({
+            account: d.account || d.opp, opp: d.opp, owner: d.owner.split(" ")[0], am: d.am.split(" ")[0],
+            type: d.type, rr: d.rr, arr: d.arr, stage: d.stage, trial: d.trial, liveDate: d.liveDate,
+            livePay: d.livePay, end: d.end, lost: d.lost,
+          }) - 1;
+          remap.set(di, ni);
+        }
+        return ni;
+      });
+    }
+  }
+
+  return { stock, contractedDeals, dealIndex };
 }
 
 // --- Header-based column resolution -------------------------------------------

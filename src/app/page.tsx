@@ -46,7 +46,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; ids?: Record<string, number[] | undefined> }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
   predictedCashflow?: { months: { ym: string; label: string; contracted: number; live: number }[]; baseline: { contracted: number; live: number }; booked: number; deals: { tier: "contracted" | "live"; opp: string; account: string; owner: string; arr: number; arriveYm: string; arriveDate: string; basis: string }[] };
   bookedTotal?: number; // full standing Booked pilot book total (from Booked ARR Snapshot v2 tab)
   pipelineGen?: { byOwner: Record<string, { arr: number; count: number }>; total: number; totalCount: number };
@@ -541,6 +541,9 @@ export default function Dashboard() {
   // Booked ARR & Cashflow: which month's rows to show. cfDrill = cash-in payments (Cash timing),
   // pcDrill = deals arriving into a tier (Forward ARR forecast).
   const [cfDrill, setCfDrill] = useState<{ ym: string; label: string; kind: "std" | "rr" | "all" } | null>(null);
+  // ARR Funnel (Booked → Contracted → Live): which month + which column was clicked. The deal
+  // sets come from the API (arrFunnel.stock[].ids → arrFunnel.dealIndex) — nothing recomputed here.
+  const [afDrill, setAfDrill] = useState<{ ym: string; label: string; bucket: string; col: string; cell: number } | null>(null);
   const [pcDrill, setPcDrill] = useState<{ ym: string; label: string } | null>(null);
   const AGING_EXPLICIT = ["SQL", "SAL", "SQO", "Trial", "Proposal", "Pending Signature", "Expansion Lead"];
   const clk = { cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: "3px" } as const;
@@ -2527,22 +2530,29 @@ export default function Dashboard() {
             <div style={{ marginTop: 18, paddingTop: 16, borderTop: `1px solid ${C.bd}` }}>
               {(() => {
                 const FB_EARLY = ["SQL", "SAL"], FB_LATE = ["SQO", "Trial"];
+                // The Forecasting tab's Open Pipeline formula is
+                //   SUMIFS('Query 1'!D:D, owner, StageName "<>Billing")
+                // i.e. every open opp EXCEPT stage Billing (already-won deals waiting to bill are
+                // not pipeline). The drill-down has to apply the same exclusion or it reports a
+                // bigger number than the cell it was opened from.
+                const FB_OPEN_EXCLUDE = ["Billing"];
                 let spec: DrillSpec<NonNullable<typeof data.dealBreakdown>[number]> | null = null;
                 if (fDrill && data.dealBreakdown) {
                   const stages = fDrill.bucket === "early" ? FB_EARLY : fDrill.bucket === "late" ? FB_LATE : null;
                   const rows = data.dealBreakdown
-                    .filter((d) => d.owner === fDrill.owner && (!stages || stages.includes(d.stage)))
+                    .filter((d) => d.owner === fDrill.owner
+                      && (stages ? stages.includes(d.stage) : !FB_OPEN_EXCLUDE.includes(d.stage)))
                     .sort((a, b) => b.arr - a.arr);
-                  const bucketChip = fDrill.bucket === "open" ? "open pipeline"
+                  const bucketChip = fDrill.bucket === "open" ? "open pipeline · excl. Billing"
                     : fDrill.bucket === "early" ? "early · SQL + SAL" : "late · SQO + Trial";
-                  const rowSum = rows.reduce((t, d) => t + d.arr, 0);
                   // Why the rows may not add up to the number clicked — state it rather than let
-                  // the reader discover a mismatch and stop trusting the panel.
+                  // the reader discover a mismatch and stop trusting the panel. The panel hands us
+                  // its own row total, so nothing is re-summed here.
                   const note = fDrill.bucket === "open"
-                    ? (Math.abs(rowSum - fDrill.cell) > Math.max(1000, fDrill.cell * 0.01)
-                        ? `The cell shows ${fmt(fDrill.cell)} from the Forecasting tab snapshot; these open deals — read live from the Deal Breakdown tab — sum to ${fmt(rowSum)} (Δ ${fmt(Math.abs(rowSum - fDrill.cell))}). Same deals, different source freshness.`
-                        : undefined)
-                    : `This cell is probability-weighted — Σ(deal value × AE/AM %) = ${fmt(fDrill.cell)}. The deals below show their full unweighted ARR (${fmt(rowSum)}), so they will total more.`;
+                    ? (total: number) => Math.abs(total - fDrill.cell) > Math.max(1000, fDrill.cell * 0.01)
+                        ? `Heads up: the cell reads ${fmt(fDrill.cell)} from the Forecasting tab but these deals sum to ${fmt(total)} (Δ ${fmt(Math.abs(total - fDrill.cell))}). Both should be "open opps excluding stage Billing" — worth a look.`
+                        : `Matches the cell (${fmt(fDrill.cell)}): open opps for this AE, excluding stage Billing, same basis as the Forecasting tab formula.`
+                    : (total: number) => `This cell is probability-weighted — Σ(deal value × AE/AM %) = ${fmt(fDrill.cell)}. The deals below show their full unweighted ARR (${fmt(total)}), so they will total more.`;
                   spec = {
                     title: `forecast-${fDrill.label}-${fDrill.bucket}`,
                     chips: [fDrill.label, bucketChip],
@@ -2908,24 +2918,76 @@ export default function Dashboard() {
                         {series.map((p, i) => {
                           const prev = series[i - 1];
                           const dLive = prev ? p.live - prev.live : null;
+                          // One clickable cell. sign is cosmetic only (a "−" on churn); the deals
+                          // listed are whatever the API put in that bucket for that month.
+                          const fc = (bucket: string, col: string, v: number, color: string, sign?: "+" | "−", bold?: boolean) => (
+                            <Td mono bold={bold} color={v > 0 ? color : C.t3}>
+                              {v > 0
+                                ? <span style={drillable} title={`Click to see the ${col} deals for ${p.label}`}
+                                    onClick={() => setAfDrill({ ym: p.ym, label: p.label, bucket, col, cell: v })}>
+                                    {(sign ?? "") + fmt(v)}
+                                  </span>
+                                : "—"}
+                            </Td>
+                          );
                           return (
                             <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === series.length - 1 ? C.s2 : undefined }}>
                               <Td l bold>{p.label}</Td>
-                              <Td mono color={C.gold}>{p.booked > 0 ? fmt(p.booked) : "—"}</Td>
-                              <Td mono color={p.bToLost > 0 ? C.red : C.t3}>{p.bToLost > 0 ? "−" + fmt(p.bToLost) : "—"}</Td>
-                              <Td mono color={p.bToC > 0 ? C.blue : C.t3}>{p.bToC > 0 ? "+" + fmt(p.bToC) : "—"}</Td>
-                              <Td mono bold color={C.blue}>{p.contracted > 0 ? fmt(p.contracted) : "—"}</Td>
-                              <Td mono color={C.t2}>{p.contractedRenewal > 0 ? fmt(p.contractedRenewal) : "—"}</Td>
-                              <Td mono color={C.t2}>{p.contractedNewExp > 0 ? fmt(p.contractedNewExp) : "—"}</Td>
-                              <Td mono color={p.cToL > 0 ? C.grn : C.t3}>{p.cToL > 0 ? "+" + fmt(p.cToL) : "—"}</Td>
-                              <Td mono bold color={C.grn}>{p.live > 0 ? fmt(p.live) : "—"}</Td>
-                              <Td mono color={p.churn > 0 ? C.red : C.t3}>{p.churn > 0 ? "−" + fmt(p.churn) : "—"}</Td>
+                              {fc("booked", "Booked (pilot)", p.booked, C.gold)}
+                              {fc("bToLost", "Booked → Lost", p.bToLost, C.red, "−")}
+                              {fc("bToC", "Booked → Contracted", p.bToC, C.blue, "+")}
+                              {fc("contracted", "Contracted", p.contracted, C.blue, undefined, true)}
+                              {fc("contractedRenewal", "Contracted · Renewal", p.contractedRenewal, C.t2)}
+                              {fc("contractedNewExp", "Contracted · New/Expansion", p.contractedNewExp, C.t2)}
+                              {fc("cToL", "Contracted → Live", p.cToL, C.grn, "+")}
+                              {fc("live", "Live ARR", p.live, C.grn, undefined, true)}
+                              {fc("churn", "Churn", p.churn, C.red, "−")}
                               <Td mono color={dLive == null ? C.t3 : dLive >= 0 ? C.grn : C.red}>{dLive == null ? "—" : (dLive >= 0 ? "+" : "") + fmt(dLive)}</Td>
                             </tr>
                           );
                         })}
                       </tbody>
                     </table>
+                  </div>
+                  {/* Deals behind whichever funnel cell was clicked. Sits directly under the table
+                      so the number and its evidence read together. */}
+                  <div style={{ padding: "0 20px 14px" }}>
+                    {(() => {
+                      let spec: DrillSpec<NonNullable<typeof data.arrFunnel>["dealIndex"][number]> | null = null;
+                      if (afDrill) {
+                        const pt = AF.stock.find((x) => x.ym === afDrill.ym);
+                        const idx = pt?.ids?.[afDrill.bucket] ?? [];
+                        const rows = idx.map((n) => AF.dealIndex[n]).filter(Boolean).sort((a, b) => b.arr - a.arr);
+                        const isFlow = /^(bTo|cTo|cNew|cLeak|lNew|lChurn|bNew|bDrop)/.test(afDrill.bucket);
+                        spec = {
+                          title: `arr-funnel-${afDrill.ym}-${afDrill.bucket}`,
+                          chips: [afDrill.label, afDrill.col, isFlow ? "moved this month" : "in this tier at month-end"],
+                          note: (total) => Math.abs(total - afDrill.cell) > 1
+                            ? `The cell reads ${fmt(afDrill.cell)} but these deals sum to ${fmt(total)} — worth a look.`
+                            : `Ties to the cell exactly (${fmt(afDrill.cell)}).`,
+                          rows,
+                          amount: (d) => d.arr,
+                          amountLabel: "ARR",
+                          emptyHint: "No deals in this bucket for this month.",
+                          cols: [
+                            { label: "Deal", l: true, csv: (d) => d.opp || d.account,
+                              render: (d) => <>{d.opp || d.account}{d.rr && <span style={{ marginLeft: 6, background: C.ylwBg, color: C.ylw, padding: "1px 7px", borderRadius: 20, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>R&amp;R</span>}</> },
+                            { label: "Account", l: true, csv: (d) => d.account, render: (d) => d.account || "—" },
+                            { label: "AE", l: true, csv: (d) => d.owner, render: (d) => d.owner || "—" },
+                            { label: "AM", l: true, csv: (d) => d.am, render: (d) => d.am || "—" },
+                            { label: "Type", l: true, csv: (d) => d.type,
+                              render: (d) => d.type ? <Pill tone={/Renewal/i.test(d.type) ? "warn" : /Expansion/i.test(d.type) ? "blue" : undefined}>{d.type.replace(/^\d+\.\s*/, "")}</Pill> : "—" },
+                            { label: "Stage", l: true, csv: (d) => d.stage, render: (d) => d.stage || "—" },
+                            { label: "Trial", l: true, csv: (d) => d.trial, render: (d) => d.trial || "—" },
+                            { label: "Contract live", l: true, csv: (d) => d.liveDate, render: (d) => d.liveDate || "—" },
+                            { label: "Live paying", l: true, csv: (d) => d.livePay, render: (d) => d.livePay || "—" },
+                            { label: "Ends", l: true, csv: (d) => d.end, render: (d) => d.end || "—" },
+                            { label: "ARR", mono: true, bold: true, csv: (d) => d.arr, render: (d) => fmt(d.arr) },
+                          ],
+                        };
+                      }
+                      return <DrillPanel spec={spec} onClear={() => setAfDrill(null)} />;
+                    })()}
                   </div>
                   {/* All deals currently in the Contracted state (contract-live, not yet paying) */}
                   {AF.contractedDeals.length > 0 && (() => {

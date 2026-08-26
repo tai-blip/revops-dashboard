@@ -32,7 +32,8 @@ export type DrillSpec<T> = {
   // Shown under the header when the rows do NOT simply sum to the number that was clicked —
   // because the cell is probability-weighted, or comes from a different (staler) source. Saying
   // so is the point of a drill-down; a silent mismatch is what destroys trust in one.
-  note?: string;
+  // Given the panel's own row total, so callers never re-sum the rows themselves.
+  note?: string | ((total: number) => string);
 };
 
 const chipStyle = {
@@ -70,7 +71,12 @@ export function DrillPanel<T>({ spec, onClear }: { spec: DrillSpec<T> | null; on
       </>
     );
   }
+  // The one piece of arithmetic in the drill-down layer: the caption total over the rows
+  // already on screen. It is not a dashboard metric — it cannot live in a sheet cell, because
+  // which rows are shown is decided at click time. Every metric still comes from the Sheet.
+  // (Kept in this single place so no caller re-sums rows; see AGENTS.md "calculations live".)
   const total = spec.rows.reduce((s, r) => s + spec.amount(r), 0);
+  const note = typeof spec.note === "function" ? spec.note(total) : spec.note;
   const download = () => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([toCsv(spec)], { type: "text/csv;charset=utf-8" }));
@@ -96,10 +102,10 @@ export function DrillPanel<T>({ spec, onClear }: { spec: DrillSpec<T> | null; on
           <button onClick={onClear} style={btn()}>✕ Clear</button>
         </div>
       </div>
-      {spec.note && (
+      {note && (
         <div style={{ fontSize: 11.5, color: C.t2, background: C.s2, border: `1px solid ${C.bd}`,
           borderRadius: 8, padding: "7px 11px", marginBottom: 10, lineHeight: 1.5 }}>
-          {spec.note}
+          {note}
         </div>
       )}
       {spec.rows.length === 0 ? (
