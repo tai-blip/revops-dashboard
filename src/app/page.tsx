@@ -46,7 +46,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; ids?: Record<string, number[] | undefined> }[]; contractedDeals: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; ids?: Record<string, number[] | undefined> }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
   predictedCashflow?: { months: { ym: string; label: string; contracted: number; live: number }[]; baseline: { contracted: number; live: number }; booked: number; deals: { tier: "contracted" | "live"; opp: string; account: string; owner: string; arr: number; arriveYm: string; arriveDate: string; basis: string }[] };
   bookedTotal?: number; // full standing Booked pilot book total (from Booked ARR Snapshot v2 tab)
   pipelineGen?: { byOwner: Record<string, { arr: number; count: number }>; total: number; totalCount: number };
@@ -2989,47 +2989,6 @@ export default function Dashboard() {
                       return <DrillPanel spec={spec} onClear={() => setAfDrill(null)} />;
                     })()}
                   </div>
-                  {/* All deals currently in the Contracted state (contract-live, not yet paying) */}
-                  {AF.contractedDeals.length > 0 && (() => {
-                    const cd = AF.contractedDeals;
-                    const cdTot = cd.reduce((s, d) => s + d.arr, 0);
-                    // Split Contracted into Renewals vs the rest (New Business + Expansion).
-                    const cdRenew = cd.filter((d) => /Renewal/i.test(d.type));
-                    const cdRest = cd.filter((d) => !/Renewal/i.test(d.type));
-                    const renewTot = cdRenew.reduce((s, d) => s + d.arr, 0);
-                    const restTot = cdRest.reduce((s, d) => s + d.arr, 0);
-                    return (
-                      <div style={{ padding: "2px 20px 18px" }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "8px 0 8px" }}>
-                          In Contracted right now — contract-live but not yet paying · {cd.length} deals · <span style={{ color: C.blue, fontFamily: "var(--font-dm-mono)" }}>{fmt(cdTot)}</span>
-                        </div>
-                        <div style={{ display: "flex", gap: 22, flexWrap: "wrap", margin: "0 0 12px", fontSize: 12 }}>
-                          <div><span style={{ color: C.t3 }}>New / Expansion (the rest): </span><span style={{ color: C.blue, fontFamily: "var(--font-dm-mono)", fontWeight: 700 }}>{fmt(restTot)}</span> <span style={{ color: C.t3 }}>· {cdRest.length} deals</span></div>
-                          <div><span style={{ color: C.t3 }}>Renewal only: </span><span style={{ color: C.ylw, fontFamily: "var(--font-dm-mono)", fontWeight: 700 }}>{fmt(renewTot)}</span> <span style={{ color: C.t3 }}>· {cdRenew.length} deals</span></div>
-                        </div>
-                        <div style={{ overflowX: "auto", border: `1px solid ${C.s1}`, borderRadius: 10 }}>
-                          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                            <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                              <Th l>Deal</Th><Th l>AE</Th><Th l>AM</Th><Th l>Type</Th><Th>ARR</Th><Th l>Contract Live</Th><Th l>Contract End</Th>
-                            </tr></thead>
-                            <tbody>
-                              {cd.map((d, i) => (
-                                <tr key={i} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                                  <Td l bold>{d.opp || d.account}{d.rr && <span style={{ marginLeft: 6, background: C.ylwBg, color: C.ylw, padding: "1px 7px", borderRadius: 20, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>R&amp;R</span>}</Td>
-                                  <Td l>{d.owner || "—"}</Td>
-                                  <Td l>{d.am || "—"}</Td>
-                                  <Td l>{d.type ? <Pill tone={/Renewal/i.test(d.type) ? "warn" : /Expansion/i.test(d.type) ? "blue" : undefined}>{d.type.replace(/^\d+\.\s*/, "")}</Pill> : "—"}</Td>
-                                  <Td mono bold color={C.blue}>{fmt(d.arr)}</Td>
-                                  <Td l>{d.liveDate}</Td>
-                                  <Td l>{d.end}</Td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    );
-                  })()}
                 </Card>
               );
             })()}

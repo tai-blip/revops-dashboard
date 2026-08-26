@@ -286,7 +286,6 @@ export type FunnelPoint = {
   lChurn: number;     // left Live (churn / contract ended)
   ids: Partial<Record<FunnelBucket, number[]>>; // deals behind each number above (→ dealIndex)
 };
-export type ContractedDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; liveDate: string; end: string };
 // Every number in the funnel table is a set of deals; these are the sets, so the dashboard can
 // show "which deals" for any cell without recomputing anything. Stored as indices into
 // ArrFunnel.dealIndex (a deal appears in many months, so repeating the object would bloat the
@@ -295,9 +294,9 @@ export type FunnelBucket =
   | "booked" | "contracted" | "contractedRenewal" | "contractedNewExp" | "live" | "churn"
   | "bToC" | "cToL" | "bToLost" | "bNew" | "bToLive" | "bDrop" | "cNewSigned" | "cLeak" | "lNewDirect" | "lChurn";
 export type FunnelDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string };
-export type ArrFunnel = { stock: FunnelPoint[]; contractedDeals: ContractedDeal[]; dealIndex: FunnelDeal[] };
+export type ArrFunnel = { stock: FunnelPoint[]; dealIndex: FunnelDeal[] };
 export function computeArrFunnel(rows: Row[]): ArrFunnel {
-  const empty: ArrFunnel = { stock: [], contractedDeals: [], dealIndex: [] };
+  const empty: ArrFunnel = { stock: [], dealIndex: [] };
   if (!rows || rows.length < 2) return empty;
   const h = rows[0].map((x) => String(x ?? "").toLowerCase());
   const ci = (n: string) => h.findIndex((x) => x === n.toLowerCase());
@@ -390,15 +389,6 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
     stock.push({ ym, label, booked: sB, contracted: sC, contractedRenewal: sCRenew, contractedNewExp: sCNew, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn, ids });
   }
 
-  // Current snapshot: deals sitting in the Contracted state right now (contract-live, not paying).
-  const T = now.toISOString().slice(0, 10);
-  const beforeT = (d: string) => d !== "" && d <= T;
-  const afterT = (d: string) => d === "" || d > T;
-  const contractedDeals: ContractedDeal[] = deals
-    .filter((d) => d.signed_stage && beforeT(d.liveDate) && afterT(d.livePay) && afterT(d.end) && afterT(d.lost) && !d.churn)
-    .map((d) => ({ account: d.account || d.opp, opp: d.opp, owner: d.owner.split(" ")[0], am: d.am.split(" ")[0], type: d.type, rr: d.rr, arr: d.arr, liveDate: d.liveDate, end: d.end || "(none)" }))
-    .sort((a, b) => b.arr - a.arr);
-
   // Compact the deal references: only deals that appear in at least one bucket are sent, and
   // each bucket's raw row numbers are remapped onto that shorter list. 1700 sheet rows × 8 months
   // of repeated objects would otherwise dominate the API payload.
@@ -422,7 +412,7 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
     }
   }
 
-  return { stock, contractedDeals, dealIndex };
+  return { stock, dealIndex };
 }
 
 // --- Header-based column resolution -------------------------------------------
