@@ -161,19 +161,28 @@ function askClaude(question, threadContext, userId, canWrite) {
   if (process.env.REVIE_MODEL) args.push("--model", process.env.REVIE_MODEL);
   return new Promise((resolve) => {
     const child = spawn("claude", args, { cwd: REPO, stdio: ["ignore", "pipe", "pipe"] });
-    let out = "", err = "";
+    let out = "", err = "", done = false;
     const killer = setTimeout(() => child.kill("SIGKILL"), CLI_TIMEOUT_MS);
-    child.stdout.on("data", (d) => (out += d));
-    child.stderr.on("data", (d) => (err += d));
+    const finish = (r) => { if (done) return; done = true; clearTimeout(killer); resolve(r); };
+    child.stdout?.on("data", (d) => (out += d));
+    child.stderr?.on("data", (d) => (err += d));
+    // spawn() itself can fail — a broken CLI install, a bad PATH, a binary that isn't executable.
+    // Node emits 'error' on the child, and with no listener that is an *unhandled* error event:
+    // it takes the whole bot down. That is how a bad `npm -g` update turned into total silence in
+    // Slack instead of one failed answer. Fail the question, stay listening.
+    child.on("error", (e) => {
+      console.error(`[revie] could not start the claude CLI: ${e.code || ""} ${e.message}`);
+      finish({ text: "", cost: 0, isError: true,
+               raw: `could not start the claude CLI (${e.code || e.message}) — my own tooling is broken, not your question.` });
+    });
     child.on("close", () => {
-      clearTimeout(killer);
       try {
         const j = JSON.parse(out);
-        resolve({ text: j.result || "", cost: j.total_cost_usd || 0, isError: !!j.is_error,
-                  raw: j.is_error ? String(j.result || j.error || "").slice(0, 300) : undefined,
-                  stderr: err.slice(-500) });
+        finish({ text: j.result || "", cost: j.total_cost_usd || 0, isError: !!j.is_error,
+                 raw: j.is_error ? String(j.result || j.error || "").slice(0, 300) : undefined,
+                 stderr: err.slice(-500) });
       } catch {
-        resolve({ text: "", cost: 0, isError: true, raw: (err || out).slice(0, 300) });
+        finish({ text: "", cost: 0, isError: true, raw: (err || out).slice(0, 300) });
       }
     });
   });
@@ -313,10 +322,31 @@ async function connect() {
   await new Promise((res) => { ws.onclose = res; ws.onerror = res; });
 }
 
+// Revie's whole ability to answer rests on a CLI it does not own and does not version-pin:
+// `claude` updates itself out from under this process. Check it can actually start, at boot, so a
+// broken install shows up as a loud line in the log instead of a bot that just stops replying.
+function preflightCLI() {
+  return new Promise((resolve) => {
+    const c = spawn("claude", ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    const t = setTimeout(() => { c.kill("SIGKILL"); resolve(null); }, 20_000);
+    c.stdout?.on("data", (d) => (out += d));
+    c.on("error", (e) => { clearTimeout(t); resolve({ err: `${e.code || ""} ${e.message}`.trim() }); });
+    c.on("close", (code) => { clearTimeout(t); resolve(code === 0 ? { version: out.trim() } : { err: `exited ${code}` }); });
+  });
+}
+
 async function main() {
   if (!process.env.SLACK_BOT_TOKEN || !process.env.SLACK_APP_TOKEN) {
     console.error("Missing SLACK_BOT_TOKEN / SLACK_APP_TOKEN in .env — see docs/slack-bot-setup.md");
     process.exit(1);
+  }
+  const cli = await preflightCLI();
+  if (cli?.version) {
+    console.log(`[revie] claude CLI ok — ${cli.version}`);
+  } else {
+    console.error(`[revie] *** claude CLI NOT USABLE (${cli?.err || "timed out"}) — I will connect to Slack but every`);
+    console.error(`[revie] *** question will fail until this is fixed. Try: npm i -g @anthropic-ai/claude-code`);
   }
   console.log(`[revie] budget: $${BUDGET_5H}/5h · $${BUDGET_WEEK}/week (API-equivalent). Ledger: ${LEDGER}`);
   for (;;) {
