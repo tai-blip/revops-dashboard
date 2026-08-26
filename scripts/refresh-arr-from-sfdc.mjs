@@ -571,7 +571,13 @@ async function main() {
   // bind to the sheetId, not the name — a same-named replacement does NOT restore them). So we
   // clear & rewrite these IN PLACE: the sheetId, and therefore every downstream formula, survives.
   // Their layouts are fixed (col A/B dates, C+ numbers) so the preserved cell formats stay correct.
-  const KEEP_IN_PLACE = { ARR_MoM_Rebuild: { rowCount: mom.length + 20, columnCount: 26, lastCol: "Z" }, ARR_WoW_Rebuild: { rowCount: wow.length + 20, columnCount: 10, lastCol: "J" }, ARR_Forward: { rowCount: 44, columnCount: 6, lastCol: "F" } };
+  // ARR_Funnel is kept in place for the same reason: the three "… ARR Snapshot v2" tabs are
+  // formula-driven off it but are written ONCE (scripts/build-arr-snapshot-tabs.mjs), not on
+  // every refresh — so unlike ARR_MoM_Rebuild's dependents they never get re-bound. Deleting it
+  // left them evaluating to `#REF! Unresolved sheet name 'ARR_Funnel'` within 4 hours of every
+  // rebuild, which also silently dropped the dashboard's Booked ARR tile to its in-code fallback.
+  // lastCol "AD" (col 30) so the AA:AB tier-totals block is cleared along with the A:Y data.
+  const KEEP_IN_PLACE = { ARR_MoM_Rebuild: { rowCount: mom.length + 20, columnCount: 26, lastCol: "Z" }, ARR_WoW_Rebuild: { rowCount: wow.length + 20, columnCount: 10, lastCol: "J" }, ARR_Forward: { rowCount: 44, columnCount: 6, lastCol: "F" }, ARR_Funnel: { rowCount: funnel.length + 10, columnCount: 30, lastCol: "AD" } };
   const reqs = [];
   for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR","ARR_Forward","Cash_Forecast","ARR_Funnel"])
     if (byTitle[t] != null && !(t in KEEP_IN_PLACE)) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
@@ -584,7 +590,6 @@ async function main() {
     { addSheet: { properties: { title: "SOQL_PaymentMix", gridProperties: { rowCount: pmix.length + 10, columnCount: 14 } } } },
     { addSheet: { properties: { title: "Top_Booked_ARR", gridProperties: { rowCount: 20, columnCount: 6 } } } },
     { addSheet: { properties: { title: "Cash_Forecast", gridProperties: { rowCount: cashFc.length + 10, columnCount: 9 } } } },
-    { addSheet: { properties: { title: "ARR_Funnel", gridProperties: { rowCount: funnel.length + 10, columnCount: 30 } } } },
   );
   // Keep-in-place tabs: create on first run, else resize the grid (preserving sheetId + refs).
   for (const [t, g] of Object.entries(KEEP_IN_PLACE)) {
