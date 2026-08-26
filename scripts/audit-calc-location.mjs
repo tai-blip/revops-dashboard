@@ -97,7 +97,14 @@ for (const f of added) {
   const c = code(f.text);
   if (!c.trim()) continue;
   if (PROSE_LINE(f.text)) continue;
-  const ok = f.text.match(OK_RE) ?? (prevText.get(f.file + ":" + (f.line - 1)) ?? "").match(OK_RE);
+  // The marker may sit on the line itself or anywhere in the comment block just above it, since
+  // the reason usually reads before the explanation rather than jammed onto the code line.
+  let ok = f.text.match(OK_RE);
+  for (let back = 1; !ok && back <= 6; back++) {
+    const prev = prevText.get(f.file + ":" + (f.line - back));
+    if (prev === undefined || !/^\s*(\/\/|\*|\/\*|\{\/\*)/.test(prev)) break; // stop at the first non-comment line
+    ok = prev.match(OK_RE);
+  }
   if (ok) { acked.push({ file: f.file, line: f.line, reason: ok[1], code: f.text.trim().slice(0, 120) }); continue; }
 
   // ── Rule 1 — a metric AGGREGATED in the dashboard instead of read from a sheet key. ──
