@@ -23,6 +23,7 @@ jobs:
       SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       DASH_API_URL: ${{ vars.DASH_API_URL }}
+      CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -52,13 +53,15 @@ jobs:
       - name: Sheet health check
         if: always()
         run: node scripts/check-sheet.mjs
-      - name: Slack daily digest (what changed vs yesterday)
+      - name: RevOps Pulse digest (rep scorecard, once a day)
         if: always()
         # Data refreshes every 4 hours, but the digest is a once-a-day summary — post it
         # only on the 12:00 UTC run (8pm Singapore) so Slack isn't spammed 6×/day.
+        # Pulls its numbers from the deployed dashboard API (DASH_API_URL + CRON_TOKEN)
+        # so the digest shows exactly what the dashboard shows.
         run: |
           if [ "$(date -u +%H)" = "12" ]; then
-            node scripts/daily-digest.mjs
+            node scripts/post-revops-digest.mjs
           else
             echo "digest skipped — only posts on the 12:00 UTC run (current hour $(date -u +%H) UTC)"
           fi

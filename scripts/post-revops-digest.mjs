@@ -1,13 +1,30 @@
-// RevOps Pulse — leadership digest (new "Rep Scorecard" format).
+// RevOps Pulse — the recurring RevOps daily digest ("Rep Scorecard" format).
 // ARR status-lights + a per-rep scorecard (attainment · pipeline generated · weighted
 // forecast) + forecasting/deal-health. Posts to SLACK_WEBHOOK_URL.
-// Reads the dashboard snapshot at /tmp/dash.json (same data the dashboard shows).
-// Run: node --env-file=.env scripts/post-revops-digest.mjs [--dry]
-import fs from "node:fs";
+// Data source: the deployed dashboard API (DASH_API_URL) — it reads the freshly
+// refreshed sheet, so the digest reuses the exact numbers the dashboard shows.
+// Run (local): node --env-file=.env scripts/post-revops-digest.mjs [--dry]
+//   (defaults to http://localhost:3000; set DASH_API_URL to the prod origin in CI)
 
 const DRY = process.argv.includes("--dry");
 const WEBHOOK = process.env.SLACK_WEBHOOK_URL;
-const d = JSON.parse(fs.readFileSync("/tmp/dash.json", "utf-8"));
+const API = (process.env.DASH_API_URL || "http://localhost:3000").replace(/\/+$/, "") + "/api/dashboard";
+// Prod sits behind the Google-session auth proxy; CI authenticates with CRON_TOKEN
+// (see src/proxy.ts). Locally the header is simply absent and localhost has no proxy.
+const HEADERS = process.env.CRON_TOKEN ? { "x-cron-token": process.env.CRON_TOKEN } : {};
+async function loadData() {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const r = await fetch(API, { headers: HEADERS, signal: AbortSignal.timeout(25000) });
+      if (r.ok) return await r.json();
+      console.log(`revops-digest: ${API} → HTTP ${r.status} (attempt ${attempt}/3)`);
+    } catch (e) { console.log(`revops-digest: fetch failed (attempt ${attempt}/3): ${e.message}`); }
+    if (attempt < 3) await new Promise((res) => setTimeout(res, 4000));
+  }
+  return null;
+}
+const d = await loadData();
+if (!d || !d.forecastTab) { console.log(`revops-digest: could not load dashboard data from ${API} — skipping (no-op).`); process.exit(0); }
 
 // ---- formatting ----
 const M = (n) => (n == null ? "—" : (n === 0 ? "$0" : Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : "$" + Math.round(n / 1e3) + "k"));
