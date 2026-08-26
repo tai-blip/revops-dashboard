@@ -50,6 +50,15 @@ jobs:
       - name: Deal Tracker snapshot (replace)
         if: always()
         run: node scripts/build-deal-tracker.mjs
+      - name: ARR Definitions tab (mirror of the dashboard funnel)
+        if: always()
+        # Writes the "ARR Definitions" tab from the deployed dashboard API, so the Sheet always
+        # carries the same Pilot / Invoiced / Billed / Live ARR / Booked Pilot figures the
+        # dashboard shows — that tab is what Revie reads when asked about ARR. Runs after the
+        # SFDC pulls above so the API it reads is already fresh. Mirror only: nothing reads back
+        # from this tab, so it cannot move a dashboard number.
+        run: node scripts/build-arr-definitions-tab.mjs
+
       - name: Sheet health check
         if: always()
         run: node scripts/check-sheet.mjs
