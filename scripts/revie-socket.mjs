@@ -26,7 +26,8 @@
 // Run: node --env-file=.env scripts/revie-socket.mjs
 import { spawn } from "child_process";
 import { applyPending, cancelPending } from "./revie-write.mjs";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from "fs";
+import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -42,6 +43,7 @@ const LEDGER_DIR = path.join(REPO, ".revie");
 const LEDGER = path.join(LEDGER_DIR, "usage.jsonl");
 const QALOG = path.join(LEDGER_DIR, "qa.jsonl"); // every Q&A + explicit feedback, for the nightly review
 const CLI_TIMEOUT_MS = 240_000;
+const CLI_CHECK_MS = 30 * 60_000; // how often to confirm the CLI still starts
 // Who may request and confirm a data change. Defaults to Tai alone; widen via REVIE_WRITERS.
 const WRITERS = new Set([ADMIN, ...(process.env.REVIE_WRITERS || "").split(",").map((s) => s.trim()).filter(Boolean)]);
 
@@ -336,18 +338,122 @@ function preflightCLI() {
   });
 }
 
+// Run a command to completion and hand back its exit code and output. Never rejects — a spawn
+// that cannot start is a result here, not an exception, which is the whole lesson of this file.
+function runCmd(cmd, args, timeoutMs) {
+  return new Promise((resolve) => {
+    const c = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "", done = false;
+    const finish = (r) => { if (done) return; done = true; clearTimeout(t); resolve(r); };
+    const t = setTimeout(() => { c.kill("SIGKILL"); finish({ code: null, out, err: err + " (timed out)" }); }, timeoutMs);
+    c.stdout?.on("data", (d) => (out += d));
+    c.stderr?.on("data", (d) => (err += d));
+    c.on("error", (e) => finish({ code: null, out, err: String(e.message || e) }));
+    c.on("close", (code) => finish({ code, out, err }));
+  });
+}
+
+// The repair Revie could not do for itself on 2026-08-26.
+//
+// That morning an auto-update failed halfway and left a half-renamed npm staging directory behind.
+// Every retry the CLI's own updater made — 08:37, 09:07 — then died on that same debris with
+// ENOTEMPTY, so it could never heal. Revie was silent for five hours over four mechanical steps.
+// These are the four steps.
+async function repairCLI() {
+  const steps = [];
+
+  // 1. Clear the debris that makes every reinstall fail. Scoped hard: only entries named
+  //    `.claude-code-*` (npm's own scratch naming) inside the global @anthropic-ai directory.
+  //    Moved to the OS temp dir rather than deleted — this is npm's scratch, not Revie's, and
+  //    Revie should not be in the business of destroying anything it did not create.
+  const root = (await runCmd("npm", ["root", "-g"], 30_000)).out.trim();
+  if (root) {
+    const scope = path.join(root, "@anthropic-ai");
+    let debris = [];
+    try { debris = readdirSync(scope).filter((n) => n.startsWith(".claude-code-")); } catch { /* nothing to clear */ }
+    for (const name of debris) {
+      const to = path.join(os.tmpdir(), `revie-npm-debris-${name}-${Date.now()}`);
+      try { renameSync(path.join(scope, name), to); steps.push(`cleared leftover \`${name}\``); }
+      catch (e) { steps.push(`could NOT clear \`${name}\` (${e.code || e.message})`); }
+    }
+  } else {
+    steps.push("could not locate the global npm root");
+  }
+
+  // 2. Reinstall.
+  const npm = await runCmd("npm", ["i", "-g", "@anthropic-ai/claude-code"], 600_000);
+  steps.push(npm.code === 0 ? "reinstalled the CLI"
+                            : `npm install failed (exit ${npm.code}): ${(npm.err || "").trim().slice(-200)}`);
+
+  // 3. Verify by actually starting it — an exit code from npm is not proof the binary runs.
+  const after = await preflightCLI();
+  return { ok: !!after?.version, version: after?.version, err: after?.err, steps };
+}
+
+const dm = (text) => post(ADMIN, text).catch((e) => console.error("[revie] could not DM admin:", e.message || e));
+
+// Health state. Revie only speaks up on a CHANGE — broken, or recovered — so a long healthy run is
+// silent and a genuine break is not buried under repetition.
+let cliHealthy = true;
+let lastRepairAt = 0;
+const REPAIR_COOLDOWN_MS = 60 * 60_000; // at most one reinstall an hour, however often we check
+
+async function ensureCLI(reason) {
+  const c = await preflightCLI();
+  if (c?.version) {
+    if (!cliHealthy) {
+      cliHealthy = true;
+      console.log(`[revie] claude CLI recovered — ${c.version}`);
+      await dm(`:white_check_mark: My CLI is working again — ${c.version}. Back to answering.`);
+    }
+    return true;
+  }
+
+  const why = c?.err || "timed out";
+  console.error(`[revie] claude CLI unusable (${reason}): ${why}`);
+  const firstNotice = cliHealthy;
+  cliHealthy = false;
+
+  const since = Date.now() - lastRepairAt;
+  if (since < REPAIR_COOLDOWN_MS) {
+    console.error(`[revie] not retrying the repair yet (${Math.round((REPAIR_COOLDOWN_MS - since) / 60000)} min of cooldown left)`);
+    return false;
+  }
+  lastRepairAt = Date.now();
+
+  if (firstNotice) await dm(`:wrench: My \`claude\` CLI stopped working (\`${why}\`) — I can't answer anything until it's back. Trying to repair it myself now.`);
+  console.log("[revie] attempting CLI self-repair…");
+  const r = await repairCLI();
+  const detail = r.steps.map((x) => `• ${x}`).join("\n");
+
+  if (r.ok) {
+    cliHealthy = true;
+    console.log(`[revie] self-repair succeeded — ${r.version}`);
+    await dm(`:white_check_mark: Fixed it myself — ${r.version}. Answering again.\n${detail}`);
+  } else {
+    console.error(`[revie] self-repair FAILED: ${r.err || "still not runnable"}`);
+    await dm(`:rotating_light: I could not repair my own CLI, so I'm down until someone looks.\n${detail}\n` +
+             `Last error: \`${r.err || "still not runnable"}\`\nOn the Mac: \`npm i -g @anthropic-ai/claude-code\``);
+  }
+  return r.ok;
+}
+
 async function main() {
   if (!process.env.SLACK_BOT_TOKEN || !process.env.SLACK_APP_TOKEN) {
     console.error("Missing SLACK_BOT_TOKEN / SLACK_APP_TOKEN in .env — see docs/slack-bot-setup.md");
     process.exit(1);
   }
   const cli = await preflightCLI();
-  if (cli?.version) {
-    console.log(`[revie] claude CLI ok — ${cli.version}`);
-  } else {
-    console.error(`[revie] *** claude CLI NOT USABLE (${cli?.err || "timed out"}) — I will connect to Slack but every`);
-    console.error(`[revie] *** question will fail until this is fixed. Try: npm i -g @anthropic-ai/claude-code`);
-  }
+  if (cli?.version) console.log(`[revie] claude CLI ok — ${cli.version}`);
+  else await ensureCLI("startup");
+
+  // Keep checking. The 2026-08-26 break happened at 05:19 with Revie already up and nobody
+  // restarting it, so a startup-only check would have caught it five hours late. Queued behind
+  // whatever Revie is doing, so a repair can never yank the CLI out from under a live question.
+  setInterval(() => {
+    queue = queue.then(() => ensureCLI("periodic")).catch((e) => console.error("[revie] health check error:", e));
+  }, CLI_CHECK_MS);
+
   console.log(`[revie] budget: $${BUDGET_5H}/5h · $${BUDGET_WEEK}/week (API-equivalent). Ledger: ${LEDGER}`);
   for (;;) {
     try { await connect(); } catch (e) { console.error("[revie] socket error:", e.message || e); }
