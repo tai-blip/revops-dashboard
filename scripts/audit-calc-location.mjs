@@ -67,10 +67,28 @@ const add = (rule, f, why, fix) =>
 // Strip string literals and comments so quoted text / prose can't trip the pattern matchers.
 const code = (t) => t.replace(/\/\/.*$/, "").replace(/\/\*.*?\*\//g, "").replace(/(["'`])(?:\\.|(?!\1).)*\1/g, '""');
 
+// JSX TEXT NODES ARE ENGLISH, NOT CODE. A sentence carries no string quotes for code() to
+// strip, so the operator patterns below can match it by accident — "Standard / Rip" reads as a
+// division, "several months." as a data access, "Tip:" as a binding. That produced a false
+// positive on an explanatory line of copy. A line with no JS syntax at all (no parens, braces
+// or `=`) and three or more running words is prose: every real aggregation has `.reduce(` or an
+// `=`, so nothing genuine can hide behind this test.
+const PROSE_LINE = (t) => !/[(){}=]/.test(t) && /\s\w+\s\w+\s\w+/.test(t);
+
+// Deliberate, reviewed exception: `calc-ok: <reason>` on the line (or the line above) declares a
+// line as presentational and prints the reason in the report instead of a finding. It is a claim
+// the reviewer can see and challenge — not a silent mute. Use it only where no sheet cell could
+// own the number, e.g. a caption total over rows the reader just chose by clicking.
+const OK_RE = /(?:\/\/|\/\*|\{\/\*)\s*calc-ok:\s*(.+?)\s*(?:\*\/|\*\/\}|$)/;
+const acked = [];
+
 // Technical constants that are units of time / bytes / pixels, never business figures.
 const TECH_CONSTANT = new Set([86400000, 86400, 3600000, 604800000, 604800, 1000, 1024, 1e6, 65536, 1200, 1440, 1080, 1920]);
 // Lines whose numbers are layout, bucket labels or wire plumbing rather than finance.
 const PRESENTATION_LINE = /style=|maxWidth|minWidth|padding|margin|width:|height:|fontSize|strokeWidth|viewBox|zIndex|maxAge|timeout|setTimeout|86400000|\brange:\s*["']|label:\s*["'][^"']*["']\s*,\s*(min|max):/i;
+
+// Text of every added line, so a `calc-ok:` comment can sit on the line ABOVE the code it covers.
+const prevText = new Map(added.map((f) => [f.file + ":" + f.line, f.text]));
 
 for (const f of added) {
   if (!/\.(ts|tsx|mjs|js)$/.test(f.file ?? "")) continue;   // skip json snapshots, md, css
@@ -78,6 +96,16 @@ for (const f of added) {
   const isScript = f.file.startsWith("scripts/");
   const c = code(f.text);
   if (!c.trim()) continue;
+  if (PROSE_LINE(f.text)) continue;
+  // The marker may sit on the line itself or anywhere in the comment block just above it, since
+  // the reason usually reads before the explanation rather than jammed onto the code line.
+  let ok = f.text.match(OK_RE);
+  for (let back = 1; !ok && back <= 6; back++) {
+    const prev = prevText.get(f.file + ":" + (f.line - back));
+    if (prev === undefined || !/^\s*(\/\/|\*|\/\*|\{\/\*)/.test(prev)) break; // stop at the first non-comment line
+    ok = prev.match(OK_RE);
+  }
+  if (ok) { acked.push({ file: f.file, line: f.line, reason: ok[1], code: f.text.trim().slice(0, 120) }); continue; }
 
   // ── Rule 1 — a metric AGGREGATED in the dashboard instead of read from a sheet key. ──
   // An aggregation over server data (reduce / sum loop / count) assigned to a const, with no
@@ -190,6 +218,16 @@ if (!findings.length) {
   }
   P("These are heuristics, not verdicts — a genuinely presentational or fallback-only line is fine.");
   P("The rule being checked: the Sheet computes, the dashboard reads. See AGENTS.md → \"Where calculations live\".");
+}
+// Declared exceptions are printed either way — an exception nobody sees is an exception nobody
+// reviews, which is how a real finding eventually gets waved through.
+if (acked.length) {
+  P("");
+  P(`DECLARED EXCEPTIONS — ${acked.length} line(s) marked \`calc-ok:\` by the author. Check the reasons:`);
+  for (const a of acked) {
+    P(`  ${a.file}:${a.line}  ${a.reason}`);
+    P(`      ${a.code}`);
+  }
 }
 const report = lines.join("\n");
 console.log(report);
