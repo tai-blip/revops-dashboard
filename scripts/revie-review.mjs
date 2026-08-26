@@ -91,7 +91,13 @@ async function main() {
     const when = new Date(e.t).toISOString().slice(11, 16);
     if (e.kind === "feedback") return `[${i + 1}] ${when} CORRECTION from ${e.user}: ${e.note}`;
     if (e.kind === "failure") return `[${i + 1}] ${when} FAILED to answer: ${e.question}\n    error: ${e.raw || "unknown"}`;
-    return `[${i + 1}] ${when} Q (${e.user}): ${e.question}\n    A: ${(e.answer || "").replace(/\n/g, " ").slice(0, 700)}`;
+    // Show the reviewer the whole answer. At 700 chars this clipped ordinary replies mid-word and
+    // the 2026-08-25 review duly reported that Revie was truncating and proposed a length cap to
+    // fix it — a defect invented by the harness. If a genuinely huge answer must be cut, say so
+    // inline, so the reviewer can tell our truncation from Revie's.
+    const ans = (e.answer || "").replace(/\n/g, " ");
+    const shown = ans.length > 4000 ? ans.slice(0, 4000) + " …[clipped by the review script, not by Revie]" : ans;
+    return `[${i + 1}] ${when} Q (${e.user}): ${e.question}\n    A: ${shown}`;
   }).join("\n\n");
 
   const prompt = `You are reviewing one day of a Slack bot's answers to improve its system prompt.
