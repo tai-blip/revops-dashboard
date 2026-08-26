@@ -71,10 +71,11 @@ export function DrillPanel<T>({ spec, onClear }: { spec: DrillSpec<T> | null; on
       </>
     );
   }
-  // The one piece of arithmetic in the drill-down layer: the caption total over the rows
-  // already on screen. It is not a dashboard metric — it cannot live in a sheet cell, because
-  // which rows are shown is decided at click time. Every metric still comes from the Sheet.
-  // (Kept in this single place so no caller re-sums rows; see AGENTS.md "calculations live".)
+  // calc-ok: caption total over the rows the reader just chose by clicking — no sheet cell can own it
+  // The one piece of arithmetic in the drill-down layer: the total of the rows already on screen.
+  // It is not a dashboard metric. Which rows are shown is decided at click time, so no sheet cell
+  // could hold this figure. Every metric still comes from the Sheet; this only labels the evidence.
+  // Kept in this single place so no caller re-sums rows. See AGENTS.md "Where calculations live".
   const total = spec.rows.reduce((s, r) => s + spec.amount(r), 0);
   const note = typeof spec.note === "function" ? spec.note(total) : spec.note;
   const download = () => {
