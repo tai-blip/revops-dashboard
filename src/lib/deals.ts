@@ -261,14 +261,14 @@ export function computePredictedCashflow(rows: Row[]): PredictedCashflow {
 }
 
 // Three-tier ARR funnel MoM (from the ARR_Funnel tab), point-in-time stock — ARR sitting
-// IN each tier at month-end (interval logic):
-//   • Booked     = in Trial (pilot): trial date reached, not yet signed / live / lost.
-//   • Contracted = contract-LIVE but not yet paying: ContractLiveDate ≤ M, no Live Paying
-//       Date, contract not ended, not churned. (R&R / timing gap before first payment.)
-//   • Live       = paying: Live Paying Date ≤ M, contract not ended, not churned.
-// Contracted + Live = the date-based contract-live book (ties to finance's $5.78M), split
-// by whether payment has started. Window is fixed Jan-2026 → current month. Also returns
-// the current-snapshot list of deals sitting in the Contracted state.
+// IN each tier at month-end (interval logic). Tai's naming, 2026-08-27; the internal keys keep
+// the old words so the sheet parsing and every drill-down id stay put:
+//   • booked     → "Pilot":    in Trial. Trial date reached, not yet signed / live / lost.
+//   • contracted → "Invoiced": contract-LIVE but not yet paying. ContractLiveDate ≤ M, no Live
+//       Paying Date, contract not ended, not churned. (R&R / timing gap before first payment.)
+//   • live       → "Billed":   paying. Live Paying Date ≤ M, contract not ended, not churned.
+// Invoiced + Billed = "Live ARR", the whole signed contract-live book — the figure the Command
+// tab headline reports. Live ARR + Pilot = "Booked Pilot". Window is fixed Jan-2026 → now.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
 export type FunnelPoint = {
   ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number;
@@ -284,6 +284,12 @@ export type FunnelPoint = {
   cLeak: number;      // left Contracted to lost/churn/dropped (not to Live)
   lNewDirect: number; // entered Live directly (from Booked or brand-new), not via Contracted
   lChurn: number;     // left Live (churn / contract ended)
+  // Two roll-ups over the tiers above, named for the vocabulary Tai and finance use:
+  //   liveArr    = Invoiced + Billed — the whole signed contract-live book, whether or not
+  //                payment has started. This is the number the Command tab calls Live ARR.
+  //   bookedPilot = Live ARR + Pilot — the same book plus what is still in pilot.
+  liveArr: number;
+  bookedPilot: number;
   ids: Partial<Record<FunnelBucket, number[]>>; // deals behind each number above (→ dealIndex)
 };
 // Every number in the funnel table is a set of deals; these are the sets, so the dashboard can
@@ -292,6 +298,7 @@ export type FunnelPoint = {
 // payload). Level buckets are point-in-time membership; flow buckets are what moved that month.
 export type FunnelBucket =
   | "booked" | "contracted" | "contractedRenewal" | "contractedNewExp" | "live" | "churn"
+  | "liveArr" | "bookedPilot"
   | "bToC" | "cToL" | "bToLost" | "bNew" | "bToLive" | "bDrop" | "cNewSigned" | "cLeak" | "lNewDirect" | "lChurn";
 export type FunnelDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string };
 export type ArrFunnel = { stock: FunnelPoint[]; dealIndex: FunnelDeal[] };
@@ -386,7 +393,11 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
       prevTier[di] = t;
     });
     firstMonth = false;
-    stock.push({ ym, label, booked: sB, contracted: sC, contractedRenewal: sCRenew, contractedNewExp: sCNew, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn, ids });
+    // The two roll-ups. A deal is in exactly one tier at a time, so the tiers never overlap and
+    // the roll-up is the concatenation of their deal sets — which is what makes them clickable.
+    ids.liveArr = [...(ids.contracted ?? []), ...(ids.live ?? [])];
+    ids.bookedPilot = [...ids.liveArr, ...(ids.booked ?? [])];
+    stock.push({ ym, label, booked: sB, contracted: sC, contractedRenewal: sCRenew, contractedNewExp: sCNew, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn, liveArr: sC + sL, bookedPilot: sC + sL + sB, ids });
   }
 
   // Compact the deal references: only deals that appear in at least one bucket are sent, and

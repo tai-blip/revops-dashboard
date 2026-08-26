@@ -46,7 +46,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; ids?: Record<string, number[] | undefined> }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; liveArr: number; bookedPilot: number; ids?: Record<string, number[] | undefined> }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
   predictedCashflow?: { months: { ym: string; label: string; contracted: number; live: number }[]; baseline: { contracted: number; live: number }; booked: number; deals: { tier: "contracted" | "live"; opp: string; account: string; owner: string; arr: number; arriveYm: string; arriveDate: string; basis: string }[] };
   bookedTotal?: number; // full standing Booked pilot book total (from Booked ARR Snapshot v2 tab)
   pipelineGen?: { byOwner: Record<string, { arr: number; count: number }>; total: number; totalCount: number };
@@ -541,7 +541,7 @@ export default function Dashboard() {
   // Booked ARR & Cashflow: which month's rows to show. cfDrill = cash-in payments (Cash timing),
   // pcDrill = deals arriving into a tier (Forward ARR forecast).
   const [cfDrill, setCfDrill] = useState<{ ym: string; label: string; kind: "std" | "rr" | "all" } | null>(null);
-  // ARR Funnel (Booked → Contracted → Live): which month + which column was clicked. The deal
+  // ARR Funnel (Pilot → Invoiced → Billed): which month + which column was clicked. The deal
   // sets come from the API (arrFunnel.stock[].ids → arrFunnel.dealIndex) — nothing recomputed here.
   const [afDrill, setAfDrill] = useState<{ ym: string; label: string; bucket: string; col: string; cell: number } | null>(null);
   const [pcDrill, setPcDrill] = useState<{ ym: string; label: string } | null>(null);
@@ -2860,29 +2860,32 @@ export default function Dashboard() {
         const short = (s: string) => (s || "").split(" ")[0];
         return (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-            {/* ARR Funnel — Booked (pilot) → Contracted (signed, not live) → Live (paying), MoM, two models */}
+            {/* ARR Funnel — Pilot (in trial) → Invoiced (signed, not paying) → Billed (paying), MoM.
+                Invoiced + Billed = Live ARR, the Command tab's headline figure. */}
             {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
               const AF = data.arrFunnel;
               const series = AF.stock;
-              const cur = series[series.length - 1] ?? { booked: 0, contracted: 0, live: 0 };
-              const maxV = Math.max(1, ...series.map((p) => Math.max(p.booked, p.contracted, p.live)));
+              const cur = series[series.length - 1] ?? { booked: 0, contracted: 0, live: 0, liveArr: 0 };
+              const maxV = Math.max(1, ...series.map((p) => Math.max(p.booked, p.contracted, p.live, p.liveArr)));
               const W = 920, H = 240, padL = 58, padR = 16, padT = 16, padB = 30;
               const iw = W - padL - padR, ih = H - padT - padB;
               const xx = (i: number) => padL + (series.length <= 1 ? iw / 2 : (i / (series.length - 1)) * iw);
               const yy = (v: number) => padT + ih - (v / (maxV * 1.08)) * ih;
               const LINES = [
-                { key: "booked" as const, label: "Booked (pilot · Trial)", color: C.gold },
-                { key: "contracted" as const, label: "Contracted (live, not paying)", color: C.blue },
-                { key: "live" as const, label: "Live ARR (paying)", color: C.grn },
+                { key: "booked" as const, label: "Pilot (in trial)", color: C.gold },
+                { key: "contracted" as const, label: "Invoiced (signed, not paying)", color: C.blue },
+                { key: "live" as const, label: "Billed (paying)", color: C.grn },
+                { key: "liveArr" as const, label: "Live ARR (Invoiced + Billed)", color: C.navy },
               ];
-              const path = (key: "booked" | "contracted" | "live") => series.map((p, i) => `${i === 0 ? "M" : "L"}${xx(i).toFixed(1)} ${yy(p[key]).toFixed(1)}`).join(" ");
+              type LineKey = "booked" | "contracted" | "live" | "liveArr";
+              const path = (key: LineKey) => series.map((p, i) => `${i === 0 ? "M" : "L"}${xx(i).toFixed(1)} ${yy(p[key]).toFixed(1)}`).join(" ");
               const every = Math.ceil(series.length / 12) || 1;
               const ticks = [0, 0.5, 1].map((f) => f * maxV * 1.08);
               const kM = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : "$" + Math.round(n / 1e3) + "k");
               return (
                 <Card
-                  title="ARR Funnel — Booked → Contracted → Live (MoM · Jan-26 → now)"
-                  sub="Point-in-time ARR in each tier at month-end: Booked = in pilot (Trial); Contracted = contract-live but not yet paying (R&R/timing); Live = live-paying (churn excluded). Contracted + Live = the contract-live book that ties to finance's ~$5.78M — split by whether payment has started."
+                  title="ARR Funnel — Pilot → Invoiced → Billed (MoM · Jan-26 → now)"
+                  sub="Point-in-time ARR in each tier at month-end. Pilot = in trial. Invoiced = signed and contract-live but payment has not started (R&R / billing timing). Billed = paying. Live ARR = Invoiced + Billed, the whole signed contract-live book and the figure the Command tab headline reports. Booked Pilot = Live ARR + Pilot. Churn excluded throughout."
                   accent={C.navy}
                 >
                   <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 2px" }}>
@@ -2912,12 +2915,14 @@ export default function Dashboard() {
                   <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Booked (pilot)</Th><Th>$ B→Lost</Th><Th>$ B→C</Th><Th>Contracted</Th><Th>· Renewal</Th><Th>· Exp/New Biz</Th><Th>$ C→L</Th><Th>Live ARR</Th><Th>Churn</Th><Th>MoM</Th>
+                        <Th l>Month</Th><Th>Pilot</Th><Th>$ P→Lost</Th><Th>$ P→Inv</Th><Th>Invoiced</Th><Th>· Renewal</Th><Th>· Exp/New Biz</Th><Th>$ Inv→Billed</Th><Th>Billed</Th><Th>Churn</Th><Th>Live ARR</Th><Th>Booked Pilot</Th><Th>MoM</Th>
                       </tr></thead>
                       <tbody>
                         {series.map((p, i) => {
                           const prev = series[i - 1];
-                          const dLive = prev ? p.live - prev.live : null;
+                          // MoM now tracks Live ARR (Invoiced + Billed) — the headline figure —
+                          // rather than Billed alone, so it answers "did the book grow".
+                          const dLive = prev ? p.liveArr - prev.liveArr : null;
                           // One clickable cell. sign is cosmetic only (a "−" on churn); the deals
                           // listed are whatever the API put in that bucket for that month.
                           const fc = (bucket: string, col: string, v: number, color: string, sign?: "+" | "−", bold?: boolean) => (
@@ -2933,15 +2938,17 @@ export default function Dashboard() {
                           return (
                             <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === series.length - 1 ? C.s2 : undefined }}>
                               <Td l bold>{p.label}</Td>
-                              {fc("booked", "Booked (pilot)", p.booked, C.gold)}
+                              {fc("booked", "Pilot", p.booked, C.gold)}
                               {fc("bToLost", "Booked → Lost", p.bToLost, C.red, "−")}
-                              {fc("bToC", "Booked → Contracted", p.bToC, C.blue, "+")}
-                              {fc("contracted", "Contracted", p.contracted, C.blue, undefined, true)}
-                              {fc("contractedRenewal", "Contracted · Renewal", p.contractedRenewal, C.t2)}
-                              {fc("contractedNewExp", "Contracted · New/Expansion", p.contractedNewExp, C.t2)}
-                              {fc("cToL", "Contracted → Live", p.cToL, C.grn, "+")}
-                              {fc("live", "Live ARR", p.live, C.grn, undefined, true)}
+                              {fc("bToC", "Pilot → Invoiced", p.bToC, C.blue, "+")}
+                              {fc("contracted", "Invoiced", p.contracted, C.blue, undefined, true)}
+                              {fc("contractedRenewal", "Invoiced · Renewal", p.contractedRenewal, C.t2)}
+                              {fc("contractedNewExp", "Invoiced · New/Expansion", p.contractedNewExp, C.t2)}
+                              {fc("cToL", "Invoiced → Billed", p.cToL, C.grn, "+")}
+                              {fc("live", "Billed", p.live, C.grn, undefined, true)}
                               {fc("churn", "Churn", p.churn, C.red, "−")}
+                              {fc("liveArr", "Live ARR (Invoiced + Billed)", p.liveArr, C.navy, undefined, true)}
+                              {fc("bookedPilot", "Booked Pilot (Live ARR + Pilot)", p.bookedPilot, C.gold)}
                               <Td mono color={dLive == null ? C.t3 : dLive >= 0 ? C.grn : C.red}>{dLive == null ? "—" : (dLive >= 0 ? "+" : "") + fmt(dLive)}</Td>
                             </tr>
                           );
@@ -2959,9 +2966,11 @@ export default function Dashboard() {
                         const idx = pt?.ids?.[afDrill.bucket] ?? [];
                         const rows = idx.map((n) => AF.dealIndex[n]).filter(Boolean).sort((a, b) => b.arr - a.arr);
                         const isFlow = /^(bTo|cTo|cNew|cLeak|lNew|lChurn|bNew|bDrop)/.test(afDrill.bucket);
+                        const isRollup = afDrill.bucket === "liveArr" || afDrill.bucket === "bookedPilot";
                         spec = {
                           title: `arr-funnel-${afDrill.ym}-${afDrill.bucket}`,
-                          chips: [afDrill.label, afDrill.col, isFlow ? "moved this month" : "in this tier at month-end"],
+                          chips: [afDrill.label, afDrill.col,
+                            isFlow ? "moved this month" : isRollup ? "every deal in the roll-up, at month-end" : "in this tier at month-end"],
                           note: (total) => Math.abs(total - afDrill.cell) > 1
                             ? `The cell reads ${fmt(afDrill.cell)} but these deals sum to ${fmt(total)} — worth a look.`
                             : `Ties to the cell exactly (${fmt(afDrill.cell)}).`,
@@ -3001,13 +3010,13 @@ export default function Dashboard() {
               return (
                 <Card
                   title="Funnel Movement — how each tier's level reconciles (MoM)"
-                  sub="Each tier's level = last month + what came in − what went out; every row ties out exactly. Booked: 'Rolled back' = a pilot reverted from Trial to SQO/SAL/SQL (fell out of pilot without converting). Contracted can fall even while deals convert to Live because newly-signed deals enter Contracted directly (never a tracked pilot)."
+                  sub="Each tier's level = last month + what came in − what went out; every row ties out exactly. Pilot: 'Rolled back' = a pilot reverted from Trial to SQO/SAL/SQL (fell out of pilot without converting). Invoiced can fall even while deals start being billed, because newly-signed deals enter Invoiced directly (never a tracked pilot)."
                 >
-                  <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.gold }}>Booked (in pilot)</div>
+                  <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.gold }}>Pilot (in trial)</div>
                   <div style={{ overflowX: "auto", padding: "2px 20px 10px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Open</Th><Th>+ New pilots</Th><Th>− To Contracted</Th><Th>→ Live (direct)</Th><Th>− Lost</Th><Th>− Rolled back</Th><Th>Close</Th>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ New pilots</Th><Th>− To Invoiced</Th><Th>→ Billed (direct)</Th><Th>− Lost</Th><Th>− Rolled back</Th><Th>Close</Th>
                       </tr></thead>
                       <tbody>
                         {rows.map((p, i) => (
@@ -3025,11 +3034,11 @@ export default function Dashboard() {
                       </tbody>
                     </table>
                   </div>
-                  <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.blue }}>Contracted (signed, not yet paying)</div>
+                  <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.blue }}>Invoiced (signed, not yet paying)</div>
                   <div style={{ overflowX: "auto", padding: "2px 20px 10px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Open</Th><Th>+ New signed</Th><Th>+ From Booked</Th><Th>− To Live</Th><Th>− Lost/Churn</Th><Th>Close</Th>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ New signed</Th><Th>+ From Pilot</Th><Th>− To Billed</Th><Th>− Lost/Churn</Th><Th>Close</Th>
                       </tr></thead>
                       <tbody>
                         {rows.map((p, i) => (
@@ -3046,11 +3055,11 @@ export default function Dashboard() {
                       </tbody>
                     </table>
                   </div>
-                  <div style={{ padding: "6px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.grn }}>Live (paying)</div>
+                  <div style={{ padding: "6px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.grn }}>Billed (paying)</div>
                   <div style={{ overflowX: "auto", padding: "2px 20px 16px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Open</Th><Th>+ From Contracted</Th><Th>+ New direct</Th><Th>− Churn / ended</Th><Th>Close</Th>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ From Invoiced</Th><Th>+ New direct</Th><Th>− Churn / ended</Th><Th>Close</Th>
                       </tr></thead>
                       <tbody>
                         {rows.map((p, i) => (
@@ -3070,14 +3079,14 @@ export default function Dashboard() {
               );
             })()}
             <div style={{ height: 16 }} />
-            {/* Forward ARR forecast — cumulative standing ARR per tier at each month-end (NOT cash; the cash model is the "Cash timing" card below) */}
+            {/* Forward ARR forecast — cumulative standing ARR per tier at each month-end (NOT cash; the cash model is the "Cash timing" card below). Tiers are Pilot / Invoiced / Billed. */}
             {data.predictedCashflow && data.predictedCashflow.months.length > 0 && (() => {
               const pc = data.predictedCashflow;
               const curYm = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
               const tier: "contracted" | "live" = cashTier === "live" ? "live" : "contracted";
               const meta = {
-                contracted: { label: "Contracted", color: C.blue, base: pc.baseline.contracted, sub: "+ pilots converting in (Trial End + 15d)" },
-                live: { label: "Live", color: C.grn, base: pc.baseline.live, sub: "+ contracted going live-paying (Contract-Live + 45d)" },
+                contracted: { label: "Invoiced", color: C.blue, base: pc.baseline.contracted, sub: "+ pilots converting in (Trial End + 15d)" },
+                live: { label: "Billed", color: C.grn, base: pc.baseline.live, sub: "+ invoiced deals starting to be billed (Contract-Live + 45d)" },
               } as const;
               const active = meta[tier];
               const endpoint = pc.months.length ? pc.months[pc.months.length - 1][tier] : active.base;
@@ -3088,7 +3097,7 @@ export default function Dashboard() {
               return (
                 <Card
                   title="Forward ARR forecast"
-                  sub="Cumulative standing ARR per tier at each month-end — not cash collected, and not per-month increments. Contracted grows as pilots convert (Trial End + 15d nego); Live grows as contracted deals start paying (Contract-Live date + 45d billing). Booked is context only — too early to forecast."
+                  sub="Cumulative standing ARR per tier at each month-end — not cash collected, and not per-month increments. Invoiced grows as pilots convert (Trial End + 15d nego); Billed grows as invoiced deals start paying (Contract-Live date + 45d billing). Pilot is context only — too early to forecast."
                 >
                   {/* IN PROGRESS banner — methodology (CLD+45, pilot-end dates) still being validated */}
                   <div style={{ margin: "10px 20px 0", padding: "8px 12px", background: C.ylwBg, border: `1px solid ${C.ylw}`, borderRadius: 8, fontSize: 12, color: C.t2, fontWeight: 600 }}>
@@ -3101,7 +3110,7 @@ export default function Dashboard() {
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
                       <div style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: "12px 14px", opacity: 0.75 }}>
-                        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.gold }}>Booked ARR <span style={{ color: C.t3, fontWeight: 400 }}>· all pilots</span></div>
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: C.gold }}>Pilot ARR <span style={{ color: C.t3, fontWeight: 400 }}>· all pilots</span></div>
                         <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(data.bookedTotal ?? pc.booked)}</div>
                       </div>
                       {(["contracted", "live"] as const).map((k) => (
@@ -3112,7 +3121,7 @@ export default function Dashboard() {
                       ))}
                     </div>
                   </div>
-                  {/* Toggle — Contracted vs Live forecast */}
+                  {/* Toggle — Invoiced vs Billed forecast */}
                   <div style={{ padding: "8px 20px 4px", display: "flex", gap: 8 }}>
                     {(["contracted", "live"] as const).map((k) => (
                       <button key={k} onClick={() => setCashTier(k)}
@@ -3153,7 +3162,7 @@ export default function Dashboard() {
                   {/* Deal-level detail — the deals converting into the selected tier */}
                   <div style={{ padding: "2px 20px 18px" }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>
-                      {tier === "contracted" ? "Pilots converting to Contracted" : "Contracted deals going Live-paying"}
+                      {tier === "contracted" ? "Pilots converting to Invoiced" : "Invoiced deals starting to be billed"}
                       {pcDrill ? <> in <span style={{ color: active.color }}>{pcDrill.label}</span></> : null} — {shownDeals.length} deals · <span style={{ color: active.color, fontFamily: "var(--font-dm-mono)" }}>{fmt(shownDeals.reduce((s, d) => s + d.arr, 0))}</span>
                       {pcDrill && <button onClick={() => setPcDrill(null)} style={{ marginLeft: 10, padding: "3px 10px", fontSize: 11.5, fontWeight: 600, borderRadius: 7, border: `1px solid ${C.bd}`, background: "#fff", color: C.t2, cursor: "pointer" }}>✕ all months</button>}
                     </div>
