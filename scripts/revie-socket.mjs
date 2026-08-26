@@ -26,7 +26,7 @@
 // One-time: `claude` → /login in a terminal (CLI auth is separate from the desktop app).
 // Run: node --env-file=.env scripts/revie-socket.mjs
 import { spawn } from "child_process";
-import { applyPending, cancelPending } from "./revie-write.mjs";
+import { applyPending, cancelPending, CONFIRM_WINDOW } from "./revie-write.mjs";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from "fs";
 import os from "os";
 import path from "path";
@@ -62,6 +62,7 @@ function loadSystem() {
       const text = readFileSync(PROMPT_FILE, "utf-8")
         .replace(/<!--[\s\S]*?-->/g, "")     // notes for whoever edits the file, not for Revie
         .replace(/\{\{ADMIN\}\}/g, ADMIN)
+        .replace(/\{\{CONFIRM_WINDOW\}\}/g, CONFIRM_WINDOW)
         .trim();
       if (!text) throw new Error("the prompt file is empty");
       brief = { mtime: mtimeMs, text };
@@ -133,7 +134,7 @@ function askClaude(question, threadContext, userId, canWrite) {
   if (!system) return Promise.resolve({ text: "", cost: 0, isError: true,
     raw: "my brief (scripts/revie-prompt.md) is missing or empty — I won't answer without it." });
   const who = `The person asking is <@${userId}> (Slack id ${userId}). They are ${WRITERS.has(userId) ? "" : "NOT "}an authorised writer.` +
-    (canWrite ? "" : " CHANGES ARE NOT AVAILABLE IN THIS CHANNEL — you have no write tool here. If they ask for one, say changes are only possible in #ask-revops or a DM with you, and answer any read-only part of their question normally.");
+    (canWrite ? "" : " You have no write tool in this channel. Do not mention that unless they actually ask you to change something — an unrequested disclaimer is noise. If they do ask, say changes are only possible in #ask-revops or a DM with you, and answer any read-only part of their question normally.");
   const prompt = threadContext
     ? `${who}\n\nThread context (earlier messages, for reference):\n${threadContext}\n\nAnswer this question:\n${question}`
     : `${who}\n\nAnswer this question:\n${question}`;
@@ -169,9 +170,12 @@ function askClaude(question, threadContext, userId, canWrite) {
     child.on("close", () => {
       try {
         const j = JSON.parse(out);
+        // An empty answer with is_error false is a real failure mode (max turns, refusal) and used
+        // to reach the log as "error: unknown". Record what the run actually did.
+        const why = j.is_error ? String(j.result || j.error || "").slice(0, 300)
+                  : (j.result ? undefined : `no text returned (subtype=${j.subtype || "?"}, turns=${j.num_turns ?? "?"}, stop=${j.stop_reason || "?"})`);
         finish({ text: j.result || "", cost: j.total_cost_usd || 0, isError: !!j.is_error,
-                 raw: j.is_error ? String(j.result || j.error || "").slice(0, 300) : undefined,
-                 stderr: err.slice(-500) });
+                 raw: why, stderr: err.slice(-500) });
       } catch {
         finish({ text: "", cost: 0, isError: true, raw: (err || out).slice(0, 300) });
       }

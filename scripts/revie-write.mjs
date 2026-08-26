@@ -40,6 +40,9 @@ const TTL_MIN = Math.min(Math.max(Number(process.env.REVIE_CONFIRM_TTL_MIN) || 2
 const TTL_MS = TTL_MIN * 60_000;
 const humanTTL = (m) =>
   m % 60 === 0 ? `${m / 60} hour${m === 60 ? "" : "s"}` : `${m} minute${m === 1 ? "" : "s"}`;
+// The one place that knows how long a confirmation lasts. Revie's brief interpolates this rather
+// than stating a duration, so changing REVIE_CONFIRM_TTL_MIN can never leave the prompt lying.
+export const CONFIRM_WINDOW = humanTTL(TTL_MIN);
 
 const OPS = {
   rescue:       { field: "StageName",            verb: "reopen to stage" },
