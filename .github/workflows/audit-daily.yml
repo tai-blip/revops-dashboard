@@ -1,0 +1,42 @@
+# Daily dashboard audit — runs every auditor and posts ONE digest to Slack.
+#
+# Why a workflow and not a local scheduled task: the audits must run whether or not Tai's
+# Mac is awake. Detection belongs on a server; interpretation can stay with the agents.
+#
+# Timed for 00:30 UTC = 8:30am Singapore, so the result is waiting at the start of the day.
+# It runs 30 min after the 00:00 refresh so it audits fresh data, not the previous cycle's.
+name: Daily dashboard audit
+
+on:
+  schedule:
+    - cron: "30 0 * * *"   # 00:30 UTC = 08:30 Asia/Singapore
+  workflow_dispatch:        # so it can be run on demand from the Actions tab
+
+concurrency:
+  group: audit-daily
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+      GOOGLE_PRIVATE_KEY_B64: ${{ secrets.GOOGLE_PRIVATE_KEY_B64 }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
+      SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
+      SF_LOGIN_URL: ${{ secrets.SF_LOGIN_URL }}
+      SF_API_VERSION: ${{ secrets.SF_API_VERSION }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+
+      # Posts the Slack digest itself (green or red) and exits 1 if any auditor failed,
+      # so the run also goes red in the Actions tab as a durable record.
+      - name: Run audit suite + post to Slack
+        run: node scripts/audit-suite.mjs
