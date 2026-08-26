@@ -19,8 +19,10 @@
 //
 // Guards: Opportunity only · fields limited to StageName + ClosedLostDetails__c ·
 // stage validated against the live picklist · revenue-affecting stages refused ·
-// exactly one record per call (no bulk) · nonce single-use with a 15-min TTL ·
-// every apply verified by re-query and audited to .revie/writes.jsonl.
+// exactly one record per call (no bulk) · nonce single-use with a configurable TTL
+// (REVIE_CONFIRM_TTL_MIN, default 4h) · a proposal dies if the stage or loss reason it was made
+// against moves before the confirmation lands · every apply verified by re-query and audited to
+// .revie/writes.jsonl.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { randomBytes } from "crypto";
 import path from "path";
@@ -30,7 +32,14 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = path.join(REPO, ".revie");
 const PENDING = path.join(DIR, "pending.json");
 const AUDIT = path.join(DIR, "writes.jsonl");
-const TTL_MS = 15 * 60_000;
+// How long a proposal stays confirmable. Deals get discussed in a thread and confirmed after a
+// call or a meeting, so the window is hours, not minutes. What keeps a long window safe is the
+// staleness check in applyPending — a proposal dies the moment the stage or loss reason it was
+// made against moves — not a short clock. Clamped to [1 min, 24 h].
+const TTL_MIN = Math.min(Math.max(Number(process.env.REVIE_CONFIRM_TTL_MIN) || 240, 1), 1440);
+const TTL_MS = TTL_MIN * 60_000;
+const humanTTL = (m) =>
+  m % 60 === 0 ? `${m / 60} hour${m === 60 ? "" : "s"}` : `${m} minute${m === 1 ? "" : "s"}`;
 
 const OPS = {
   rescue:       { field: "StageName",            verb: "reopen to stage" },
@@ -83,6 +92,20 @@ async function sf() {
   };
 }
 
+// Which of the fields a proposal was made against have moved since. Exported so the guard can be
+// tested directly — the alternative is proving it by writing to live Salesforce.
+const normField = (v) => (v === undefined || v === null || v === "" ? null : String(v));
+export function fieldsDrifted(before, live) {
+  return Object.entries(before || {})
+    .filter(([f, was]) => normField(live?.[f]) !== normField(was))
+    .map(([f, was]) => ({ field: f, was: normField(was), now: normField(live?.[f]) }));
+}
+
+const appendAudit = (entry) => {
+  mkdirSync(DIR, { recursive: true });
+  appendFileSync(AUDIT, JSON.stringify(entry) + "\n");
+};
+
 // ── pending store ─────────────────────────────────────────────────────────────
 const loadPending = () => { try { return JSON.parse(readFileSync(PENDING, "utf-8")); } catch { return {}; } };
 function savePending(p) {
@@ -109,7 +132,7 @@ async function plan() {
 
   const api = await sf();
   const [rec] = await api.query(
-    `SELECT Id, Name, Account.Name, Owner.Name, StageName, Amount, ClosedLostDetails__c FROM Opportunity WHERE Id='${oppId}'`
+    `SELECT Id, Name, Account.Name, Owner.Name, StageName, Amount, ClosedLostDetails__c, LastModifiedDate FROM Opportunity WHERE Id='${oppId}'`
   );
   if (!rec) die(`no Opportunity ${oppId}.`);
 
@@ -128,6 +151,7 @@ async function plan() {
   const nonce = randomBytes(3).toString("hex").toUpperCase();
   const p = loadPending();
   p[nonce] = { t: Date.now(), op, oppId, patch, before, requester,
+               lastModified: rec.LastModifiedDate ?? null, // context for the audit log, not the staleness test
                name: rec.Name, account: rec.Account?.Name ?? "?", owner: rec.Owner?.Name ?? "?",
                amount: rec.Amount ?? 0 };
   savePending(p);
@@ -136,7 +160,8 @@ async function plan() {
     nonce,
     summary: `${rec.Name} (${rec.Account?.Name ?? "?"}, owner ${rec.Owner?.Name ?? "?"}) — ` +
              `${OPS[op].verb} "${value}". Currently ${rec.StageName}.`,
-    expires_in_minutes: TTL_MS / 60000,
+    expires_in_minutes: TTL_MIN,
+    expires_in: humanTTL(TTL_MIN),
   }));
 }
 
@@ -155,18 +180,40 @@ export async function applyPending(nonce, confirmer) {
   delete p[nonce]; savePending(p); // single-use: burn before attempting
 
   const api = await sf();
+  // The proposal must still describe the deal it was made against. Across a multi-hour window
+  // someone else may have worked the opp; applying then would overwrite their change with a
+  // decision taken against stale facts.
+  // Scoped to the fields this write would touch, NOT to LastModifiedDate: that stamp moves on any
+  // edit at all — a Next Step note, an amount, a nightly refresh script — and anchoring on it would
+  // refuse proposals that are still perfectly valid. What invalidates a proposal is the stage or
+  // loss reason moving, because those are what it was reasoned about and what it would overwrite.
+  const [live] = await api.query(
+    `SELECT StageName, ClosedLostDetails__c, LastModifiedDate FROM Opportunity WHERE Id='${e.oppId}'`
+  );
+  if (!live) throw new Error(`Opportunity ${e.oppId} is no longer readable — nothing was changed.`);
+  const drift = fieldsDrifted(e.before, live);
+  if (drift.length) {
+    appendAudit({ t: Date.now(), op: e.op, oppId: e.oppId, name: e.name, requester: e.requester,
+      confirmer, patch: e.patch, refused: "fields changed since the proposal",
+      proposed_against: e.before, lastModified: { at_proposal: e.lastModified ?? null, now: live.LastModifiedDate ?? null },
+      found: { StageName: live.StageName, ClosedLostDetails__c: live.ClosedLostDetails__c ?? null } });
+    throw new Error(
+      `${e.name} has changed since that was proposed — ` +
+      drift.map((d) => `${d.field} is now "${d.now ?? "—"}" (was "${d.was ?? "—"}")`).join("; ") +
+      `. Nothing was written. Ask again for a fresh code.`
+    );
+  }
   await api.patch(e.oppId, e.patch);
   const [after] = await api.query(`SELECT StageName, ClosedLostDetails__c FROM Opportunity WHERE Id='${e.oppId}'`);
   const field = Object.keys(e.patch)[0];
   const landed = String(after?.[field] ?? "") === String(e.patch[field] ?? "");
 
-  mkdirSync(DIR, { recursive: true });
-  appendFileSync(AUDIT, JSON.stringify({
+  appendAudit({
     t: Date.now(), op: e.op, oppId: e.oppId, name: e.name, requester: e.requester, confirmer,
     before: e.before, patch: e.patch,
     after: { StageName: after?.StageName ?? null, ClosedLostDetails__c: after?.ClosedLostDetails__c ?? null },
     verified: landed,
-  }) + "\n");
+  });
 
   if (!landed) throw new Error(`write did not verify — ${field} is "${after?.[field]}", expected "${e.patch[field]}".`);
   return { ok: true, oppId: e.oppId, name: e.name, before: e.before, after: e.patch };
@@ -178,9 +225,8 @@ export function cancelPending(nonce, confirmer) {
   const e = p[nonce];
   if (!e) throw new Error("unknown or already-used confirmation code.");
   delete p[nonce]; savePending(p);
-  mkdirSync(DIR, { recursive: true });
-  appendFileSync(AUDIT, JSON.stringify({ t: Date.now(), op: e.op, oppId: e.oppId, name: e.name,
-    requester: e.requester, cancelled_by: confirmer || "", patch: e.patch }) + "\n");
+  appendAudit({ t: Date.now(), op: e.op, oppId: e.oppId, name: e.name,
+    requester: e.requester, cancelled_by: confirmer || "", patch: e.patch });
   return { ok: true, cancelled: true, name: e.name };
 }
 

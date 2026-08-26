@@ -21,7 +21,8 @@
 //
 // Env (.env): SLACK_BOT_TOKEN (xoxb-…), SLACK_APP_TOKEN (xapp-…, connections:write)
 // Optional: REVIE_BUDGET_5H_USD (default 2), REVIE_BUDGET_WEEK_USD (default 15),
-//           REVIE_CHANNELS (extra channels where CHANGES are allowed), REVIE_MODEL, REVIE_ADMIN.
+//           REVIE_CHANNELS (extra channels where CHANGES are allowed), REVIE_MODEL, REVIE_ADMIN,
+//           REVIE_CONFIRM_TTL_MIN (how long a proposed change stays confirmable; default 240 = 4h).
 // One-time: `claude` → /login in a terminal (CLI auth is separate from the desktop app).
 // Run: node --env-file=.env scripts/revie-socket.mjs
 import { spawn } from "child_process";
@@ -69,7 +70,9 @@ RULES:
     node --env-file=.env scripts/revie-write.mjs plan <op> <OppId> "<value>" --requester <asker's Slack id>
   ops: rescue (reopen a Closed Lost opp to a stage) · stage (move stage) · close-lost (close as lost, with reason).
   This only PROPOSES — nothing has changed. Relay the summary it prints and tell the asker to reply
-  \`@Revie confirm <code>\` within 15 minutes. NEVER say a change is done, and never invent a code.
+  \`@Revie confirm <code>\` within the window the command prints as \`expires_in\` — quote that window,
+  never a number you guessed. The code also stops working if the deal's stage or loss reason changes
+  in the meantime. NEVER say a change is done, and never invent a code.
   If the command refuses (not an authorised writer, bad stage, unknown deal), relay that verbatim and point at <@${ADMIN}>.
   You have no access to the apply step — a human must confirm in Slack before anything is written.
 VOICE:
