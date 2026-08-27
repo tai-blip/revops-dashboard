@@ -272,10 +272,10 @@ export function computePredictedCashflow(rows: Row[]): PredictedCashflow {
 // IN each tier at month-end (interval logic). Tai's naming, 2026-08-27; the internal keys keep
 // the old words so the sheet parsing and every drill-down id stay put:
 //   • booked     → "Pilot":    in Trial. Trial date reached, not yet signed / live / lost.
-//   • contracted → "Invoiced": contract-LIVE but not yet paying. ContractLiveDate ≤ M, no Live
+//   • contracted → "Contracted": contract-LIVE but not yet paying. ContractLiveDate ≤ M, no Live
 //       Paying Date, contract not ended, not churned. (R&R / timing gap before first payment.)
 //   • live       → "Billed":   paying. Live Paying Date ≤ M, contract not ended, not churned.
-// Invoiced + Billed = "Live ARR", the whole signed contract-live book — the figure the Command
+// Contracted + Billed = "Live ARR", the whole signed contract-live book — the figure the Command
 // tab headline reports. Live ARR + Pilot = "Booked Pilot". Window is fixed Jan-2026 → now.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
 export type FunnelPoint = {
@@ -293,7 +293,7 @@ export type FunnelPoint = {
   lNewDirect: number; // entered Live directly (from Booked or brand-new), not via Contracted
   lChurn: number;     // left Live (churn / contract ended)
   // Two roll-ups over the tiers above, named for the vocabulary Tai and finance use:
-  //   liveArr    = Invoiced + Billed — the whole signed contract-live book, whether or not
+  //   liveArr    = Contracted + Billed — the whole signed contract-live book, whether or not
   //                payment has started. This is the number the Command tab calls Live ARR.
   //   bookedPilot = Live ARR + Pilot — the same book plus what is still in pilot.
   liveArr: number;
