@@ -3065,9 +3065,21 @@ export default function Dashboard() {
                                       textDecoration: row.hint && !hasKids ? "underline dotted" : undefined,
                                       textDecorationColor: C.bd, textUnderlineOffset: "3px" }}>
                                     {hasKids
-                                      ? <span style={{ display: "inline-block", width: 15, color: C.t3, fontSize: 10 }}>{open ? "▾" : "▸"}</span>
+                                      ? <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                          width: 18, height: 18, marginRight: 8, borderRadius: 4, fontSize: 10, lineHeight: 1,
+                                          border: `1px solid ${open ? row.color : C.bd}`,
+                                          background: open ? row.color : "transparent",
+                                          color: open ? "#fff" : row.color, verticalAlign: "middle" }}>
+                                          {open ? "▾" : "▸"}
+                                        </span>
                                       : null}
                                     {row.label}
+                                    {hasKids && (
+                                      <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: C.t3,
+                                        letterSpacing: ".03em", textTransform: "uppercase" }}>
+                                        {open ? "hide split" : "show split"}
+                                      </span>
+                                    )}
                                   </span>
                                 </td>
                                 {series.map((p) => {
