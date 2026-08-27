@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { C, fmt, pct, Card, KV, Bar, Pill, Th, Td } from "@/lib/ui";
 import { DrillPanel, drillable, type DrillSpec } from "@/lib/DrillPanel";
 import { ArrChart } from "@/lib/ArrChart";
@@ -46,7 +46,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; liveArr: number; bookedPilot: number; ids?: Record<string, number[] | undefined> }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; contractedRR: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; liveArr: number; bookedPilot: number; ids?: Record<string, number[] | undefined> }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
   predictedCashflow?: { months: { ym: string; label: string; contracted: number; live: number }[]; baseline: { contracted: number; live: number }; booked: number; deals: { tier: "contracted" | "live"; opp: string; account: string; owner: string; arr: number; arriveYm: string; arriveDate: string; basis: string }[] };
   bookedTotal?: number; // full standing Booked pilot book total (from Booked ARR Snapshot v2 tab)
   pipelineGen?: { byOwner: Record<string, { arr: number; count: number }>; total: number; totalCount: number };
@@ -80,6 +80,11 @@ type DashboardData = {
   dealHealth: { label: string; min: number; max: number; arr: number; count: number }[];
   agingByStage?: { ae: string; stage: string; deals: number; avgAge: number | null; stale: number | null; staleDollar: number | null; avgAcv: number | null; total: boolean }[];
   dealBreakdown?: { id: string; url: string; name: string; owner: string; stage: string; arr: number; age: number | null; stale: boolean }[];
+  // Signed deals (Billing / Closed Won) whose effective live date falls in the current year —
+  // the same rows the "AE Attainment (Official)" formulas sum, so the Closed Won drill-down can
+  // tie to the cell. `eld` is Effective_Live_Date (what attainment counts on); `cld` is the raw
+  // Contract Live Date, which is NOT always the same day.
+  closedWonFeed?: { name: string; owner: string; stage: string; status: string; arr: number; rt: string; rtRaw: string; eld: string; cld: string }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
   forecast: {
@@ -541,9 +546,15 @@ export default function Dashboard() {
   // Booked ARR & Cashflow: which month's rows to show. cfDrill = cash-in payments (Cash timing),
   // pcDrill = deals arriving into a tier (Forward ARR forecast).
   const [cfDrill, setCfDrill] = useState<{ ym: string; label: string; kind: "std" | "rr" | "all" } | null>(null);
-  // ARR Funnel (Pilot → Invoiced → Billed): which month + which column was clicked. The deal
+  // ARR Funnel (Pilot → Contracted → Billed): which month + which column was clicked. The deal
   // sets come from the API (arrFunnel.stock[].ids → arrFunnel.dealIndex) — nothing recomputed here.
   const [afDrill, setAfDrill] = useState<{ ym: string; label: string; bucket: string; col: string; cell: number } | null>(null);
+  // Forecast tab — Closed Won / YTD click-through. Separate from fDrill because it lists CLOSED
+  // deals (from closedWonFeed) rather than open pipeline; the two never show at once.
+  const [cwDrill, setCwDrill] = useState<{ owner: string; label: string; scope: "q" | "y"; cell: number } | null>(null);
+  // Which funnel rows have their breakdown expanded. Collapsed by default so the matrix reads
+  // as the five headline lines; click "Contracted" to see the renewal / expansion split.
+  const [funnelOpen, setFunnelOpen] = useState<Record<string, boolean>>({});
   const [pcDrill, setPcDrill] = useState<{ ym: string; label: string } | null>(null);
   const AGING_EXPLICIT = ["SQL", "SAL", "SQO", "Trial", "Proposal", "Pending Signature", "Expansion Lead"];
   const clk = { cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: "3px" } as const;
@@ -2293,9 +2304,31 @@ export default function Dashboard() {
         // Click a forecast number → the deals behind it. A span (not the cell) so the column keeps
         // its colour, and the click stores only the SELECTION — the panel re-derives the rows.
         const dnum = (owner: string, label: string, bucket: "open" | "early" | "late", value: number) => (
-          <span style={drillable} onClick={() => setFDrill({ owner, label, bucket, cell: value })} title="Click to see the deals">{fmt(value)}</span>
+          <span style={drillable} onClick={() => { setCwDrill(null); setFDrill({ owner, label, bucket, cell: value }); }} title="Click to see the deals">{fmt(value)}</span>
         );
         // Quarterly per-row cells (toggle-aware). Potential = Closed Won + Early + Late.
+        // "Pot. Late" (SQO + Trial) is the half of Potential with a real chance of closing in
+        // the period — Early is SQL/SAL, which rarely converts in-quarter. Boxed in red in both
+        // tables so it is read as the number that decides the forecast, not just another column.
+        const LATE_WHY = "SQO + Trial — late-stage, the highest-probability slice of Potential and the part that realistically lands in this period. Early (SQL + SAL) rarely converts in time. Watch this column.";
+        const TdLate = ({ children, bold, last }: { children: ReactNode; bold?: boolean; last?: boolean }) => (
+          <td title={LATE_WHY} style={{ textAlign: "right", padding: "10px 16px 10px 0", cursor: "help",
+            background: C.redBg, borderLeft: `1.5px solid ${C.red}`, borderRight: `1.5px solid ${C.red}`,
+            borderBottom: last ? `1.5px solid ${C.red}` : undefined,
+            fontFamily: "var(--font-dm-mono)", fontSize: 13, fontWeight: bold ? 700 : 400, color: C.red }}>
+            {children}
+          </td>
+        );
+        const ThLate = ({ children }: { children: ReactNode }) => (
+          <th title={LATE_WHY} style={{ textAlign: "right", padding: "8px 16px 8px 0", whiteSpace: "nowrap",
+            cursor: "help", background: C.redBg,
+            borderLeft: `1.5px solid ${C.red}`, borderRight: `1.5px solid ${C.red}`, borderTop: `1.5px solid ${C.red}`,
+            color: C.red, fontFamily: "var(--font-dm-mono)", fontSize: 10.5, fontWeight: 700,
+            letterSpacing: ".06em", textTransform: "uppercase" }}>
+            {children}
+          </th>
+        );
+
         const qCells = (r: PotRow & { closedWon: number; quota: number | null }) => {
           const early = earlyPot(r, false), late = latePot(r, false);
           const pot = r.closedWon + early + late;
@@ -2307,14 +2340,8 @@ export default function Dashboard() {
         const totalPot = T.closedWon + openPot(T, false);
         const totalQuota = T.quota;
         const totalCW = T.closedWon;
-        // End-of-Q2 live ARR = Active/Live ARR of the calendar month before the quarter starts.
-        const qStartYM = Q.start.slice(0, 7);
-        const [qsY, qsM] = qStartYM.split("-").map(Number);
-        const q2EndYM = `${qsM === 1 ? qsY - 1 : qsY}-${String(qsM === 1 ? 12 : qsM - 1).padStart(2, "0")}`;
-        const endOfQ2ARR = data.arr.monthly.find((m) => m.label === q2EndYM)?.activeARR ?? F.currentLiveARR;
-        // Projected year-end / Expected Q3 end = end-of-Q2 live ARR + Q3 potential ARR.
-        const projYE2 = endOfQ2ARR + totalPot;
-        const yeGap2 = F.annualTarget - projYE2;
+        // (The projection baseline used to be end-of-Q2 live ARR; it is now TODAY'S Live ARR plus
+        // open potential — see projEnd below, which also follows the Quarterly/Yearly toggle.)
         // Remainder of quarter, measured against the TOTAL quota (incl AM + Davi).
         const remGap = Math.max(0, totalQuota - totalCW);
         const remPerWeek = F.weeksLeft > 0 ? remGap / F.weeksLeft : 0;
@@ -2406,7 +2433,30 @@ export default function Dashboard() {
           })
           .sort((a, b) => b.pctProj - a.pctProj);
         const kMY = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : "$" + Math.round(n / 1e3) + "k");
-        const annYTot = annYReps.reduce((t, r) => ({ goal: t.goal + r.goal, ytd: t.ytd + r.ytdTotal, pot: t.pot + r.potTotal, proj: t.proj + r.projection, miss: t.miss + r.yrMissing }), { goal: 0, ytd: 0, pot: 0, proj: 0, miss: 0 });
+        const annYTot = annYReps.reduce((t, r) => ({ goal: t.goal + r.goal, ytd: t.ytd + r.ytdTotal, pot: t.pot + r.potTotal, proj: t.proj + r.projection, miss: t.miss + r.yrMissing,
+            early: t.early + (fByName[r.name] ? earlyPot(fByName[r.name], true) : 0), late: t.late + (fByName[r.name] ? latePot(fByName[r.name], true) : 0) }),
+          { goal: 0, ytd: 0, pot: 0, proj: 0, miss: 0, early: 0, late: 0 });
+
+        // Expected period end = TODAY'S Live ARR + the team's Potential, following the toggle.
+        // The components are quoted EXACTLY as the table below shows them, so the tile reconciles
+        // on screen: quarterly Potential is the "Total · incl AM + Davi" row ($1.05M), yearly is
+        // Pot. Early + Pot. Late on the Team row ($3.00M).
+        //
+        // The one adjustment, shown on the tile rather than hidden: the QUARTERLY Potential column
+        // is Closed Won + Early + Late, and those closed deals are signed and contract-live, so
+        // they are already inside Live ARR. Adding the column whole would count them twice, so it
+        // is subtracted as a visible line. The yearly Potential is Early + Late only (YTD is its
+        // own column), so there is nothing to subtract.
+        const projBase = F.currentLiveARR;
+        // Potential here is Early + Late ONLY. Closed Won is not added on top because it is
+        // already inside Live ARR — which is exactly how the tile reads it out:
+        //   Live ARR (incl. Closed Won) + Potential (Early + Late)
+        const projEarly = fcastView === "yearly" ? annYTot.early : T.potEarlyQ;
+        const projLate = fcastView === "yearly" ? annYTot.late : T.potLateQ;
+        const projPot = projEarly + projLate;
+        const projEnd = projBase + projPot;
+        const projGap = F.annualTarget - projEnd;
+        const projPeriod = fcastView === "yearly" ? "Year End" : `${Q.key} End`;
 
         return (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
@@ -2418,10 +2468,13 @@ export default function Dashboard() {
                 <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>Potential ARR vs {fmt(totalQuota)} quota · {pct(potVsQuota)}</div>
               </div>
             </Card>
-            <Card title="Expected Q3 End · Projected Year-End ARR">
+            <Card title={`Expected ${projPeriod}`}>
               <div style={{ padding: "14px 18px" }}>
-                <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projYE2 >= F.annualTarget ? C.grn : C.coralDk }}>{fmt(projYE2)}</div>
-                <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>End-of-Q2 {fmt(endOfQ2ARR)} + {fmt(totalPot)} potential · vs {fmt(F.annualTarget)} target</div>
+                <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projEnd >= F.annualTarget ? C.grn : C.coralDk }}>{fmt(projEnd)}</div>
+                <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>
+                  Live ARR <b>{fmt(projBase)}</b> (Closed Won) &nbsp;+&nbsp; Potential <b>{fmt(projPot)}</b> (Early {fmt(projEarly)} and Late {fmt(projLate)})
+                </div>
+                <div style={{ fontSize: 11, color: C.t3, marginTop: 3 }}>vs {fmt(F.annualTarget)} target</div>
               </div>
             </Card>
           </div>
@@ -2444,7 +2497,7 @@ export default function Dashboard() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Annual Goal</Th><Th>YTD (Closed)</Th><Th>Pot. Early (SQL+SAL)</Th><Th>Pot. Late (SQO+Trial)</Th><Th>Projection</Th><Th>vs Goal</Th>
+                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Annual Goal</Th><Th>YTD (Closed)</Th><Th>Pot. Early (SQL+SAL)</Th><ThLate>Pot. Late (SQO+Trial)</ThLate><Th>Projection</Th><Th>vs Goal</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2456,9 +2509,14 @@ export default function Dashboard() {
                       <Td l bold>{r.name.split(" ")[0]}</Td>
                       <Td mono color={C.blue}>{fr ? dnum(r.name, r.name.split(" ")[0], "open", fr.openPipe) : "—"}</Td>
                       <Td mono color={C.t2}>{r.goal > 0 ? fmt(r.goal) : "—"}</Td>
-                      <Td mono color={r.ytdTotal > 0 ? C.coralDk : C.t1}>{fmt(r.ytdTotal)}</Td>
+                      <Td mono color={r.ytdTotal > 0 ? C.coralDk : C.t1}>
+                        <span style={drillable} title="Click to see the closed deals"
+                          onClick={() => { setFDrill(null); setCwDrill({ owner: r.name, label: r.name.split(" ")[0], scope: "y", cell: r.ytdTotal }); }}>
+                          {fmt(r.ytdTotal)}
+                        </span>
+                      </Td>
                       <Td mono color={C.coralDk}>{dnum(r.name, r.name.split(" ")[0], "early", early)}</Td>
-                      <Td mono color={C.purp}>{dnum(r.name, r.name.split(" ")[0], "late", late)}</Td>
+                      <TdLate>{dnum(r.name, r.name.split(" ")[0], "late", late)}</TdLate>
                       <Td mono bold>{fmt(r.projection)}</Td>
                       <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(r.goal > 0 ? r.pctProj : null, r.goal > 0 ? r.projection - r.goal : null)}</td>
                     </tr>
@@ -2470,7 +2528,7 @@ export default function Dashboard() {
                     <Td mono>{fmt(annYTot.goal)}</Td>
                     <Td mono color={C.coralDk}>{fmt(annYTot.ytd)}</Td>
                     <Td mono color={C.coralDk}>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? earlyPot(fr, true) : 0); }, 0))}</Td>
-                    <Td mono color={C.purp}>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? latePot(fr, true) : 0); }, 0))}</Td>
+                    <TdLate bold last>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? latePot(fr, true) : 0); }, 0))}</TdLate>
                     <Td mono bold>{fmt(annYTot.proj)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(annYTot.goal > 0 ? annYTot.proj / annYTot.goal : null, annYTot.goal > 0 ? annYTot.proj - annYTot.goal : null)}</td>
                   </tr>
@@ -2482,7 +2540,7 @@ export default function Dashboard() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed Won</Th><Th>Pot. Early (SQL+SAL)</Th><Th>Pot. Late (SQO+Trial)</Th><Th>Potential</Th><Th>vs Quota</Th>
+                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed Won</Th><Th>Pot. Early (SQL+SAL)</Th><ThLate>Pot. Late (SQO+Trial)</ThLate><Th>Potential</Th><Th>vs Quota</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2491,9 +2549,14 @@ export default function Dashboard() {
                       <Td l bold>{r.short ?? short(r.name)}{r.am && <span style={{ color: C.t3, fontWeight: 400, fontSize: 11 }}> · AM</span>}</Td>
                       <Td mono color={C.blue}>{dnum(r.name, r.short ?? short(r.name), "open", r.openPipe)}</Td>
                       <Td mono color={C.t2}>{r.quota != null && r.quota > 0 ? fmt(r.quota) : "\u2014"}</Td>
-                      <Td mono color={r.closedWon > 0 ? C.coralDk : C.t1}>{fmt(r.closedWon)}</Td>
+                      <Td mono color={r.closedWon > 0 ? C.coralDk : C.t1}>
+                        <span style={drillable} title="Click to see the closed deals"
+                          onClick={() => { setFDrill(null); setCwDrill({ owner: r.name, label: r.short ?? short(r.name), scope: "q", cell: r.closedWon }); }}>
+                          {fmt(r.closedWon)}
+                        </span>
+                      </Td>
                       <Td mono color={C.coralDk}>{dnum(r.name, r.short ?? short(r.name), "early", earlyPot(r, false))}</Td>
-                      <Td mono color={C.purp}>{dnum(r.name, r.short ?? short(r.name), "late", latePot(r, false))}</Td>
+                      <TdLate>{dnum(r.name, r.short ?? short(r.name), "late", latePot(r, false))}</TdLate>
                       <Td mono bold>{fmt(qCells(r).pot)}</Td>
                       <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(r).attainP, qCells(r).variance)}</td>
                     </tr>
@@ -2501,13 +2564,13 @@ export default function Dashboard() {
                   <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
                     <Td l bold>AE team</Td>
                     <Td mono>{fmt(F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono>{fmt(F.aeTeam.closedWon)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.aeTeam, false))}</Td><Td mono color={C.purp}>{fmt(latePot(F.aeTeam, false))}</Td><Td mono bold>{fmt(qCells(F.aeTeam).pot)}</Td>
+                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.aeTeam, false))}</Td><TdLate bold>{fmt(latePot(F.aeTeam, false))}</TdLate><Td mono bold>{fmt(qCells(F.aeTeam).pot)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.aeTeam).attainP, qCells(F.aeTeam).variance)}</td>
                   </tr>
                   <tr style={{ background: "#EEF2F8", fontWeight: 700 }}>
                     <Td l bold>Total · incl AM</Td>
                     <Td mono>{fmt(F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono>{fmt(F.totalInclAM.closedWon)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.totalInclAM, false))}</Td><Td mono color={C.purp}>{fmt(latePot(F.totalInclAM, false))}</Td><Td mono bold>{fmt(qCells(F.totalInclAM).pot)}</Td>
+                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.totalInclAM, false))}</Td><TdLate bold last={!hasLead}>{fmt(latePot(F.totalInclAM, false))}</TdLate><Td mono bold>{fmt(qCells(F.totalInclAM).pot)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.totalInclAM).attainP, null)}</td>
                   </tr>
                   {hasLead && (() => {
@@ -2516,7 +2579,7 @@ export default function Dashboard() {
                       <tr style={{ background: "#E4EAF2", fontWeight: 700 }}>
                         <Td l bold>Total · incl AM + Davi</Td>
                         <Td mono>{fmt(G.openPipe)}</Td><Td mono>{fmt(G.quota)}</Td><Td mono>{fmt(G.closedWon)}</Td>
-                        <Td mono color={C.coralDk}>{fmt(earlyPot(G, false))}</Td><Td mono color={C.purp}>{fmt(latePot(G, false))}</Td><Td mono bold>{fmt(qCells(G).pot)}</Td>
+                        <Td mono color={C.coralDk}>{fmt(earlyPot(G, false))}</Td><TdLate bold last>{fmt(latePot(G, false))}</TdLate><Td mono bold>{fmt(qCells(G).pot)}</Td>
                         <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(G).attainP, null)}</td>
                       </tr>
                     );
@@ -2571,12 +2634,73 @@ export default function Dashboard() {
                     ],
                   };
                 }
+                // Closed Won / YTD click-through. Different rows (closed deals, not open
+                // pipeline), so it gets its own spec; only ever one panel is on screen.
+                let cwSpec: DrillSpec<NonNullable<typeof data.closedWonFeed>[number]> | null = null;
+                if (cwDrill && data.closedWonFeed) {
+                  const yr = String(new Date().getUTCFullYear());
+                  // CALENDAR quarter bounds, not the sales quarter. The attainment formula reads
+                  // DATE(2026,7,1) → DATE(2026,10,1); the dashboard's sales quarter starts a day
+                  // later (2 Jul), and using that here would drop a deal live on the 1st.
+                  const qNum = Number(Q.key.replace(/\D/g, "")) || 1;
+                  const qStart = `${yr}-${String((qNum - 1) * 3 + 1).padStart(2, "0")}-01`;
+                  const qEndEx = qNum === 4 ? `${Number(yr) + 1}-01-01` : `${yr}-${String(qNum * 3 + 1).padStart(2, "0")}-01`;
+                  const inQ = (d: { eld: string }) => d.eld >= qStart && d.eld < qEndEx;
+                  // Quarterly cell = the OFFICIAL attainment number: New Business only, counted on
+                  // Effective_Live_Date. Yearly cell = the annual tab: every record type, counted
+                  // on the raw Contract Live Date. Same-looking columns, deliberately different
+                  // scopes — so each side filters the way its own source does.
+                  const mine = data.closedWonFeed.filter((d) => d.owner === cwDrill.owner);
+                  const rows = cwDrill.scope === "q"
+                    ? mine.filter((d) => d.rt === "NB" && inQ(d))
+                    : mine.filter((d) => d.cld.startsWith(yr));
+                  // What the official quarterly filter leaves out, so a $0 cell can be read as
+                  // "nothing counted" rather than "nothing happened".
+                  const excluded = cwDrill.scope === "q"
+                    ? mine.filter((d) => d.rt !== "NB" && inQ(d))
+                    : [];
+                  const exclTotal = excluded.reduce((t, d) => t + d.arr, 0);
+                  cwSpec = {
+                    title: `closed-won-${cwDrill.label}-${cwDrill.scope}`,
+                    chips: [cwDrill.label,
+                      cwDrill.scope === "q" ? `${Q.key} · New Business only` : `FY${yr.slice(2)} · all record types`,
+                      cwDrill.scope === "q" ? "by effective live date" : "by contract live date"],
+                    note: (total) => {
+                      const tie = Math.abs(total - cwDrill.cell) > 1
+                        ? `Heads up: the cell reads ${fmt(cwDrill.cell)} but these deals sum to ${fmt(total)} (Δ ${fmt(Math.abs(total - cwDrill.cell))}) — worth a look.`
+                        : `Ties to the cell exactly (${fmt(cwDrill.cell)}).`;
+                      const note2 = excluded.length
+                        ? ` Excluded from this column: ${excluded.length} ${excluded.length === 1 ? "deal" : "deals"} worth ${fmt(exclTotal)} that closed in ${Q.key} but ${excluded.length === 1 ? "is not" : "are not"} New Business — the official attainment filter counts New Business only, so ${excluded.length === 1 ? "it does" : "they do"} not appear in Closed Won.`
+                        : "";
+                      return tie + note2;
+                    },
+                    rows,
+                    amount: (d) => d.arr,
+                    amountLabel: "ARR",
+                    emptyHint: excluded.length
+                      ? "No New Business closed in this quarter — see the note above for what did close."
+                      : "Nothing closed for this AE in this period.",
+                    cols: [
+                      { label: "Deal", l: true, csv: (d) => d.name, render: (d) => d.name },
+                      { label: "Type", l: true, csv: (d) => d.rtRaw,
+                        render: (d) => <Pill tone={d.rt === "NB" ? undefined : d.rt === "EXP" ? "blue" : "warn"}>{d.rtRaw.replace(/^\d+\.\s*/, "") || "—"}</Pill> },
+                      { label: "Stage", l: true, csv: (d) => d.stage, render: (d) => d.stage },
+                      { label: "Status", l: true, csv: (d) => d.status, render: (d) => d.status || "—" },
+                      { label: "Effective live", l: true, csv: (d) => d.eld, render: (d) => d.eld || "—" },
+                      { label: "Contract live", l: true, csv: (d) => d.cld,
+                        render: (d) => <span style={{ color: d.cld && d.eld && d.cld !== d.eld ? C.ylw : C.t1 }}>{d.cld || "—"}</span> },
+                      { label: "ARR", mono: true, bold: true, csv: (d) => d.arr, render: (d) => fmt(d.arr) },
+                    ],
+                  };
+                }
+                if (cwDrill) return <DrillPanel spec={cwSpec} onClear={() => setCwDrill(null)} />;
                 return <DrillPanel spec={spec} onClear={() => setFDrill(null)} />;
               })()}
             </div>
             <div style={{ fontSize: 11.5, color: C.t3, marginTop: 10 }}>
-              Tip: click <b>Open Pipeline</b>, <b>Pot. Early</b> or <b>Pot. Late</b> on any row to see the exact deals (Salesforce links + CSV).
-              Closed Won / YTD is not clickable yet — it needs a closed-deal feed.
+              Tip: every number on a row opens the deals behind it — <b>Open Pipeline</b>, <b>Pot. Early</b>, <b>Pot. Late</b>,
+              and <b>Closed Won</b> / <b>YTD</b>. Closed Won counts <b>New Business only</b>, on each deal&rsquo;s effective live date;
+              the yearly YTD column counts <b>every record type</b> on the contract live date. Click either to see exactly what is in it.
             </div>
           </Card>
 
@@ -2793,13 +2917,13 @@ export default function Dashboard() {
               return s + "$" + Math.round(a);
             };
             const PLOT = 300;
-            const maxV = Math.max(F.annualTarget, projYE2) * 1.05;
+            const maxV = Math.max(F.annualTarget, projEnd) * 1.05;
             const yPx = (v: number) => (v / maxV) * PLOT;
             type Step = { label: string; type: "base" | "inc" | "gap" | "target"; value: number; of?: string; from?: number };
             const steps: Step[] = [
-              { label: "End of Q2 live ARR", type: "base", value: endOfQ2ARR },
-              { label: "Q3 Potential ARR", type: "inc", value: totalPot, of: `${pct(potVsQuota)} of quota` },
-              { label: "Gap to target", type: "gap", value: Math.max(0, yeGap2), from: projYE2 },
+              { label: "Live ARR today", type: "base", value: projBase },
+              { label: "Potential (Early + Late)", type: "inc", value: projPot, of: `${pct(potVsQuota)} of quota` },
+              { label: "Gap to target", type: "gap", value: Math.max(0, projGap), from: projEnd },
               { label: "FY26 target", type: "target", value: F.annualTarget },
             ];
             const n = steps.length;
@@ -2834,18 +2958,18 @@ export default function Dashboard() {
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginTop: 18 }}>
-                    <div><div style={{ fontSize: 11, color: C.t3 }}>End of Q2 Live ARR</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(endOfQ2ARR)}</div></div>
-                    <div><div style={{ fontSize: 11, color: C.t3 }}>Q3 Potential ARR</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.blue }}>{fk(totalPot)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>from Quarter Forecast</div></div>
-                    <div><div style={{ fontSize: 11, color: C.t3 }}>Projected Year-End</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk }}>{fk(projYE2)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Live ARR today</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(projBase)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Potential</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.blue }}>{fk(projPot)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>Early {fk(projEarly)} + Late {fk(projLate)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Expected {projPeriod}</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk }}>{fk(projEnd)}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Annual Target</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(F.annualTarget)}</div></div>
-                    <div><div style={{ fontSize: 11, color: C.t3 }}>Gap</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: yeGap2 > 0 ? C.red : C.grn }}>{fk(yeGap2)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Gap</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projGap > 0 ? C.red : C.grn }}>{fk(projGap)}</div></div>
                   </div>
 
                   <div style={{ background: "#FAEEDA", borderRadius: 12, padding: "14px 16px", marginTop: 16, fontSize: 13.5, color: "#6b5320", lineHeight: 1.55 }}>
-                    {yeGap2 > 0 ? (
-                      <>Projected year-end of <b>{fk(projYE2)}</b> (end-of-Q2 {fk(endOfQ2ARR)} + {fk(totalPot)} Q3 potential) is <b style={{ color: C.coralDk }}>{fk(yeGap2)}</b> short of the <b>{fk(F.annualTarget)}</b> target.</>
+                    {projGap > 0 ? (
+                      <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> (Live ARR {fk(projBase)} + {fk(projPot)} potential, Early {fk(projEarly)} and Late {fk(projLate)}) is <b style={{ color: C.coralDk }}>{fk(projGap)}</b> short of the <b>{fk(F.annualTarget)}</b> target.</>
                     ) : (
-                      <>Projected year-end of <b>{fk(projYE2)}</b> is on track to meet or exceed the <b>{fk(F.annualTarget)}</b> target.</>
+                      <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> is on track to meet or exceed the <b>{fk(F.annualTarget)}</b> target.</>
                     )}
                   </div>
                 </div>
@@ -2860,8 +2984,8 @@ export default function Dashboard() {
         const short = (s: string) => (s || "").split(" ")[0];
         return (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
-            {/* ARR Funnel — Pilot (in trial) → Invoiced (signed, not paying) → Billed (paying), MoM.
-                Invoiced + Billed = Live ARR, the Command tab's headline figure. */}
+            {/* ARR Funnel — Pilot (in trial) → Contracted (signed, not paying) → Billed (paying), MoM.
+                Contracted + Billed = Live ARR, the Command tab's headline figure. */}
             {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
               const AF = data.arrFunnel;
               const series = AF.stock;
@@ -2873,19 +2997,61 @@ export default function Dashboard() {
               const yy = (v: number) => padT + ih - (v / (maxV * 1.08)) * ih;
               const LINES = [
                 { key: "booked" as const, label: "Pilot (in trial)", color: C.gold },
-                { key: "contracted" as const, label: "Invoiced (signed, not paying)", color: C.blue },
+                { key: "contracted" as const, label: "Contracted (signed, not paying)", color: C.blue },
                 { key: "live" as const, label: "Billed (paying)", color: C.grn },
-                { key: "liveArr" as const, label: "Live ARR (Invoiced + Billed)", color: C.navy },
+                { key: "liveArr" as const, label: "Live ARR (Contracted + Billed)", color: C.navy },
               ];
               type LineKey = "booked" | "contracted" | "live" | "liveArr";
               const path = (key: LineKey) => series.map((p, i) => `${i === 0 ? "M" : "L"}${xx(i).toFixed(1)} ${yy(p[key]).toFixed(1)}`).join(" ");
               const every = Math.ceil(series.length / 12) || 1;
               const ticks = [0, 0.5, 1].map((f) => f * maxV * 1.08);
               const kM = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : "$" + Math.round(n / 1e3) + "k");
+              // The two blocks of the matrix. `bucket` is the deal-set key the drill-down uses,
+              // so every cell stays clickable; `total` marks the line the block adds up to.
+              type FRow = { bucket: string; label: string; color: string; get: (p: typeof series[number]) => number;
+                sign?: string; total?: boolean;
+                // `parent` makes this a child row: it hides unless its parent is expanded.
+                parent?: string; hint?: string;
+                // A cross-cut sits under a parent but is NOT part of its sum — mark it so.
+                cross?: boolean };
+              const FUNNEL_SECTIONS: { title: string; sub: string; rows: FRow[] }[] = [
+                {
+                  title: "ARR",
+                  sub: "Contracted + Billed = Live ARR",
+                  rows: [
+                    { bucket: "contracted", label: "Contracted", color: C.blue, get: (p) => p.contracted,
+                      hint: "Awaiting Billing — signed and contract-live, but payment has not started yet" },
+                    { bucket: "contractedRenewal", label: "Contracted Renewal", color: C.t2, get: (p) => p.contractedRenewal,
+                      parent: "contracted", hint: "The renewal share of Contracted" },
+                    { bucket: "contractedNewExp", label: "Contracted Expansion", color: C.t2, get: (p) => p.contractedNewExp,
+                      parent: "contracted", hint: "The rest of Contracted — new business and expansion, i.e. everything that is not a renewal" },
+                    { bucket: "contractedRR", label: "Contracted — Rip & Replace", color: C.ylw, get: (p) => p.contractedRR,
+                      parent: "contracted", cross: true,
+                      hint: "A cross-cut, not a third slice: these deals are ALREADY counted in Renewal or Expansion above. Broken out because a rip & replace changeover is the usual reason a deal is contracted but not yet billing." },
+                    { bucket: "live", label: "Billed", color: C.grn, get: (p) => p.live },
+                    { bucket: "liveArr", label: "Live ARR", color: C.navy, get: (p) => p.liveArr, total: true },
+                  ],
+                },
+                {
+                  title: "Pilot, and what moves",
+                  sub: "Live ARR + Pilot = Booked ARR",
+                  rows: [
+                    { bucket: "booked", label: "Pilot", color: C.gold, get: (p) => p.booked },
+                    { bucket: "bToLost", label: "Pilot → Lost", color: C.red, get: (p) => p.bToLost, sign: "−",
+                      parent: "booked", hint: "Pilots that went Closed Lost this month" },
+                    { bucket: "bToC", label: "Pilot → Contracted", color: C.blue, get: (p) => p.bToC, sign: "+",
+                      parent: "booked", hint: "Pilots that signed and went contract-live this month" },
+                    { bucket: "cToL", label: "Contracted → Billed", color: C.grn, get: (p) => p.cToL, sign: "+" },
+                    { bucket: "churn", label: "Churn", color: C.red, get: (p) => p.churn, sign: "−" },
+                    { bucket: "bookedPilot", label: "Booked ARR", color: C.gold, get: (p) => p.bookedPilot, total: true,
+                      hint: "Live ARR + Pilot — the widest view. Note: before 27 Aug 2026 \"Booked ARR\" meant the pilot book alone, which is now just Pilot." },
+                  ],
+                },
+              ];
               return (
                 <Card
-                  title="ARR Funnel — Pilot → Invoiced → Billed (MoM · Jan-26 → now)"
-                  sub="Point-in-time ARR in each tier at month-end. Pilot = in trial. Invoiced = signed and contract-live but payment has not started (R&R / billing timing). Billed = paying. Live ARR = Invoiced + Billed, the whole signed contract-live book and the figure the Command tab headline reports. Booked Pilot = Live ARR + Pilot. Churn excluded throughout."
+                  title="ARR Funnel — Pilot → Contracted → Billed (MoM · Jan-26 → now)"
+                  sub="Point-in-time ARR in each tier at month-end. Pilot = in trial. Contracted = signed and contract-live but payment has not started (R&R / billing timing). Billed = paying. Live ARR = Contracted + Billed, the whole signed contract-live book and the figure the Command tab headline reports. Booked ARR = Live ARR + Pilot. Churn excluded throughout."
                   accent={C.navy}
                 >
                   <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 2px" }}>
@@ -2912,47 +3078,84 @@ export default function Dashboard() {
                       {LINES.map((l) => <circle key={l.key} cx={xx(series.length - 1)} cy={yy(cur[l.key])} r={3.5} fill={l.color} />)}
                     </svg>
                   </div>
+                  {/* Months run ACROSS; the metrics run DOWN in two blocks — the ARR that adds
+                      up to Live ARR, then the pilot book and the movements that feed it, ending
+                      at Booked ARR. Every cell still opens its deals. */}
                   <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Pilot</Th><Th>$ P→Lost</Th><Th>$ P→Inv</Th><Th>Invoiced</Th><Th>· Renewal</Th><Th>· Exp/New Biz</Th><Th>$ Inv→Billed</Th><Th>Billed</Th><Th>Churn</Th><Th>Live ARR</Th><Th>Booked Pilot</Th><Th>MoM</Th>
-                      </tr></thead>
+                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                          <th style={{ textAlign: "left", padding: "8px 16px 8px 0", minWidth: 178 }} />
+                          {series.map((p, i) => (
+                            <Th key={p.ym}>{i === series.length - 1 ? <b>{p.label}</b> : p.label}</Th>
+                          ))}
+                        </tr>
+                      </thead>
                       <tbody>
-                        {series.map((p, i) => {
-                          const prev = series[i - 1];
-                          // MoM now tracks Live ARR (Invoiced + Billed) — the headline figure —
-                          // rather than Billed alone, so it answers "did the book grow".
-                          const dLive = prev ? p.liveArr - prev.liveArr : null;
-                          // One clickable cell. sign is cosmetic only (a "−" on churn); the deals
-                          // listed are whatever the API put in that bucket for that month.
-                          const fc = (bucket: string, col: string, v: number, color: string, sign?: "+" | "−", bold?: boolean) => (
-                            <Td mono bold={bold} color={v > 0 ? color : C.t3}>
-                              {v > 0
-                                ? <span style={drillable} title={`Click to see the ${col} deals for ${p.label}`}
-                                    onClick={() => setAfDrill({ ym: p.ym, label: p.label, bucket, col, cell: v })}>
-                                    {(sign ?? "") + fmt(v)}
-                                  </span>
-                                : "—"}
-                            </Td>
-                          );
-                          return (
-                            <tr key={p.ym} style={{ borderBottom: `1px solid ${C.s1}`, background: i === series.length - 1 ? C.s2 : undefined }}>
-                              <Td l bold>{p.label}</Td>
-                              {fc("booked", "Pilot", p.booked, C.gold)}
-                              {fc("bToLost", "Booked → Lost", p.bToLost, C.red, "−")}
-                              {fc("bToC", "Pilot → Invoiced", p.bToC, C.blue, "+")}
-                              {fc("contracted", "Invoiced", p.contracted, C.blue, undefined, true)}
-                              {fc("contractedRenewal", "Invoiced · Renewal", p.contractedRenewal, C.t2)}
-                              {fc("contractedNewExp", "Invoiced · New/Expansion", p.contractedNewExp, C.t2)}
-                              {fc("cToL", "Invoiced → Billed", p.cToL, C.grn, "+")}
-                              {fc("live", "Billed", p.live, C.grn, undefined, true)}
-                              {fc("churn", "Churn", p.churn, C.red, "−")}
-                              {fc("liveArr", "Live ARR (Invoiced + Billed)", p.liveArr, C.navy, undefined, true)}
-                              {fc("bookedPilot", "Booked Pilot (Live ARR + Pilot)", p.bookedPilot, C.gold)}
-                              <Td mono color={dLive == null ? C.t3 : dLive >= 0 ? C.grn : C.red}>{dLive == null ? "—" : (dLive >= 0 ? "+" : "") + fmt(dLive)}</Td>
+                        {FUNNEL_SECTIONS.map((sec) => (
+                          <Fragment key={sec.title}>
+                            <tr>
+                              <td colSpan={series.length + 1} style={{ padding: "14px 16px 5px 0", borderBottom: `1px solid ${C.s1}` }}>
+                                <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: C.t3 }}>{sec.title}</span>
+                                <span style={{ fontSize: 11.5, color: C.t3, marginLeft: 10 }}>{sec.sub}</span>
+                              </td>
                             </tr>
-                          );
-                        })}
+                            {sec.rows.filter((row) => !row.parent || funnelOpen[row.parent]).map((row) => {
+                              const hasKids = sec.rows.some((r) => r.parent === row.bucket);
+                              const open = !!funnelOpen[row.bucket];
+                              return (
+                              <tr key={row.bucket} style={{ borderBottom: `1px solid ${C.s1}`, background: row.total ? C.s2 : undefined }}>
+                                <td style={{ textAlign: "left", padding: "10px 16px 10px 0",
+                                  paddingLeft: row.parent ? 22 : 0, whiteSpace: "nowrap" }}>
+                                  <span title={row.hint}
+                                    onClick={hasKids ? () => setFunnelOpen((o) => ({ ...o, [row.bucket]: !open })) : undefined}
+                                    style={{ color: row.color, fontSize: 13,
+                                      fontWeight: row.total ? 700 : row.parent ? 400 : 600,
+                                      cursor: hasKids ? "pointer" : row.hint ? "help" : undefined,
+                                      textDecoration: row.hint && !hasKids ? "underline dotted" : undefined,
+                                      textDecorationColor: C.bd, textUnderlineOffset: "3px" }}>
+                                    {hasKids
+                                      ? <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                          width: 18, height: 18, marginRight: 8, borderRadius: 4, fontSize: 10, lineHeight: 1,
+                                          border: `1px solid ${open ? row.color : C.bd}`,
+                                          background: open ? row.color : "transparent",
+                                          color: open ? "#fff" : row.color, verticalAlign: "middle" }}>
+                                          {open ? "▾" : "▸"}
+                                        </span>
+                                      : null}
+                                    {row.label}
+                                    {row.cross && (
+                                      <span style={{ marginLeft: 7, fontSize: 9.5, fontWeight: 700, color: C.t3,
+                                        border: `1px solid ${C.bd}`, borderRadius: 3, padding: "1px 5px", letterSpacing: ".03em" }}>
+                                        OVERLAPS
+                                      </span>
+                                    )}
+                                    {hasKids && (
+                                      <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: C.t3,
+                                        letterSpacing: ".03em", textTransform: "uppercase" }}>
+                                        {open ? "hide split" : "show split"}
+                                      </span>
+                                    )}
+                                  </span>
+                                </td>
+                                {series.map((p) => {
+                                  const v = row.get(p);
+                                  return (
+                                    <Td key={p.ym} mono bold={!!row.total} color={v > 0 ? row.color : C.t3}>
+                                      {v > 0
+                                        ? <span style={drillable} title={`Click to see the ${row.label} deals for ${p.label}`}
+                                            onClick={() => setAfDrill({ ym: p.ym, label: p.label, bucket: row.bucket, col: row.label, cell: v })}>
+                                            {(row.sign ?? "") + fmt(v)}
+                                          </span>
+                                        : "—"}
+                                    </Td>
+                                  );
+                                })}
+                              </tr>
+                              );
+                            })}
+                          </Fragment>
+                        ))}
                       </tbody>
                     </table>
                   </div>
@@ -3010,13 +3213,13 @@ export default function Dashboard() {
               return (
                 <Card
                   title="Funnel Movement — how each tier's level reconciles (MoM)"
-                  sub="Each tier's level = last month + what came in − what went out; every row ties out exactly. Pilot: 'Rolled back' = a pilot reverted from Trial to SQO/SAL/SQL (fell out of pilot without converting). Invoiced can fall even while deals start being billed, because newly-signed deals enter Invoiced directly (never a tracked pilot)."
+                  sub="Each tier's level = last month + what came in − what went out; every row ties out exactly. Pilot: 'Rolled back' = a pilot reverted from Trial to SQO/SAL/SQL (fell out of pilot without converting). Contracted can fall even while deals start being billed, because newly-signed deals enter Contracted directly (never a tracked pilot)."
                 >
                   <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.gold }}>Pilot (in trial)</div>
                   <div style={{ overflowX: "auto", padding: "2px 20px 10px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Open</Th><Th>+ New pilots</Th><Th>− To Invoiced</Th><Th>→ Billed (direct)</Th><Th>− Lost</Th><Th>− Rolled back</Th><Th>Close</Th>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ New pilots</Th><Th>− To Contracted</Th><Th>→ Billed (direct)</Th><Th>− Lost</Th><Th>− Rolled back</Th><Th>Close</Th>
                       </tr></thead>
                       <tbody>
                         {rows.map((p, i) => (
@@ -3034,7 +3237,7 @@ export default function Dashboard() {
                       </tbody>
                     </table>
                   </div>
-                  <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.blue }}>Invoiced (signed, not yet paying)</div>
+                  <div style={{ padding: "8px 20px 2px", fontSize: 12.5, fontWeight: 700, color: C.blue }}>Contracted (signed, not yet paying)</div>
                   <div style={{ overflowX: "auto", padding: "2px 20px 10px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
@@ -3059,7 +3262,7 @@ export default function Dashboard() {
                   <div style={{ overflowX: "auto", padding: "2px 20px 16px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <Th l>Month</Th><Th>Open</Th><Th>+ From Invoiced</Th><Th>+ New direct</Th><Th>− Churn / ended</Th><Th>Close</Th>
+                        <Th l>Month</Th><Th>Open</Th><Th>+ From Contracted</Th><Th>+ New direct</Th><Th>− Churn / ended</Th><Th>Close</Th>
                       </tr></thead>
                       <tbody>
                         {rows.map((p, i) => (
@@ -3079,14 +3282,14 @@ export default function Dashboard() {
               );
             })()}
             <div style={{ height: 16 }} />
-            {/* Forward ARR forecast — cumulative standing ARR per tier at each month-end (NOT cash; the cash model is the "Cash timing" card below). Tiers are Pilot / Invoiced / Billed. */}
+            {/* Forward ARR forecast — cumulative standing ARR per tier at each month-end (NOT cash; the cash model is the "Cash timing" card below). Tiers are Pilot / Contracted / Billed. */}
             {data.predictedCashflow && data.predictedCashflow.months.length > 0 && (() => {
               const pc = data.predictedCashflow;
               const curYm = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
               const tier: "contracted" | "live" = cashTier === "live" ? "live" : "contracted";
               const meta = {
-                contracted: { label: "Invoiced", color: C.blue, base: pc.baseline.contracted, sub: "+ pilots converting in (Trial End + 15d)" },
-                live: { label: "Billed", color: C.grn, base: pc.baseline.live, sub: "+ invoiced deals starting to be billed (Contract-Live + 45d)" },
+                contracted: { label: "Contracted", color: C.blue, base: pc.baseline.contracted, sub: "+ pilots converting in (Trial End + 15d)" },
+                live: { label: "Billed", color: C.grn, base: pc.baseline.live, sub: "+ contracted deals starting to be billed (Contract-Live + 45d)" },
               } as const;
               const active = meta[tier];
               const endpoint = pc.months.length ? pc.months[pc.months.length - 1][tier] : active.base;
@@ -3097,7 +3300,7 @@ export default function Dashboard() {
               return (
                 <Card
                   title="Forward ARR forecast"
-                  sub="Cumulative standing ARR per tier at each month-end — not cash collected, and not per-month increments. Invoiced grows as pilots convert (Trial End + 15d nego); Billed grows as invoiced deals start paying (Contract-Live date + 45d billing). Pilot is context only — too early to forecast."
+                  sub="Cumulative standing ARR per tier at each month-end — not cash collected, and not per-month increments. Contracted grows as pilots convert (Trial End + 15d nego); Billed grows as contracted deals start paying (Contract-Live date + 45d billing). Pilot is context only — too early to forecast."
                 >
                   {/* IN PROGRESS banner — methodology (CLD+45, pilot-end dates) still being validated */}
                   <div style={{ margin: "10px 20px 0", padding: "8px 12px", background: C.ylwBg, border: `1px solid ${C.ylw}`, borderRadius: 8, fontSize: 12, color: C.t2, fontWeight: 600 }}>
@@ -3121,7 +3324,7 @@ export default function Dashboard() {
                       ))}
                     </div>
                   </div>
-                  {/* Toggle — Invoiced vs Billed forecast */}
+                  {/* Toggle — Contracted vs Billed forecast */}
                   <div style={{ padding: "8px 20px 4px", display: "flex", gap: 8 }}>
                     {(["contracted", "live"] as const).map((k) => (
                       <button key={k} onClick={() => setCashTier(k)}
@@ -3162,7 +3365,7 @@ export default function Dashboard() {
                   {/* Deal-level detail — the deals converting into the selected tier */}
                   <div style={{ padding: "2px 20px 18px" }}>
                     <div style={{ fontSize: 12, fontWeight: 700, color: C.t2, margin: "6px 0 8px" }}>
-                      {tier === "contracted" ? "Pilots converting to Invoiced" : "Invoiced deals starting to be billed"}
+                      {tier === "contracted" ? "Pilots converting to Contracted" : "Contracted deals starting to be billed"}
                       {pcDrill ? <> in <span style={{ color: active.color }}>{pcDrill.label}</span></> : null} — {shownDeals.length} deals · <span style={{ color: active.color, fontFamily: "var(--font-dm-mono)" }}>{fmt(shownDeals.reduce((s, d) => s + d.arr, 0))}</span>
                       {pcDrill && <button onClick={() => setPcDrill(null)} style={{ marginLeft: 10, padding: "3px 10px", fontSize: 11.5, fontWeight: 600, borderRadius: 7, border: `1px solid ${C.bd}`, background: "#fff", color: C.t2, cursor: "pointer" }}>✕ all months</button>}
                     </div>

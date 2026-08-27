@@ -36,6 +36,7 @@ import {
   computeArrFunnel,
   computePredictedCashflow,
   computePipelineGenByAE,
+  sheetDateToIso,
 } from "@/lib/deals";
 import {
   SALES_Q,
@@ -88,7 +89,7 @@ async function buildPayload(): Promise<Payload> {
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
     // NOTE: order here MUST match the destructured variables below.
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows, liveArrPullRows] =
       await getSheetValuesBatch([
         { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
@@ -133,6 +134,11 @@ async function buildPayload(): Promise<Payload> {
         // all formula-driven over Query 1. The dashboard drill-down filters these rows into a panel
         // (+ CSV) when a Deal Health number is clicked. Read-only; no computation in the app.
         { tab: "Deal Breakdown", range: "A2:H2000" },
+        // LiveARR - SOQL Pull = one row per signed deal (Billing / Closed Won). This is the tab
+        // the "AE Attainment (Official)" formulas SUMPRODUCT over, so reading the same rows is
+        // what lets the Closed Won drill-down tie to the cell exactly. Note the attainment
+        // formula keys on col S "Effective_Live_Date", NOT the raw ContractLiveDate in col F.
+        { tab: "LiveARR - SOQL Pull", range: "A2:S2000" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -316,6 +322,34 @@ async function buildPayload(): Promise<Payload> {
         age: typeof r[6] === "number" ? (r[6] as number) : null,
         stale: String(r[7] ?? "") === "Yes",
       }));
+    // Deal-level backing for the Closed Won drill-down, read verbatim from the same tab the
+    // official attainment formulas use. Scoped to signed deals whose EFFECTIVE live date falls in
+    // the current year — that keeps the payload small and covers both the quarterly (Q3) and
+    // yearly (FY) columns on the Forecast tab. The UI filters these rows; it computes nothing.
+    //   cols: B name · C stage · D status · E ARR · F contract-live · L owner · M record type · S effective-live
+    const cwYear = String(new Date().getUTCFullYear());
+    const closedWonFeed = (liveArrPullRows ?? [])
+      .filter((r) => {
+        const stage = String(r?.[2] ?? "");
+        const eld = sheetDateToIso(r?.[18]);
+        return (stage === "Billing" || stage === "Closed Won") && eld.startsWith(cwYear) && typeof r?.[4] === "number";
+      })
+      .map((r) => {
+        const rt = String(r[12] ?? "");
+        return {
+          name: String(r[1] ?? ""),
+          owner: String(r[11] ?? ""),
+          stage: String(r[2] ?? ""),
+          status: String(r[3] ?? ""),
+          arr: r[4] as number,
+          rt: /new business/i.test(rt) ? "NB" : /expansion/i.test(rt) ? "EXP" : "OTHER",
+          rtRaw: rt,
+          eld: sheetDateToIso(r[18]),       // Effective_Live_Date — what attainment counts on
+          cld: sheetDateToIso(r[5]),        // raw ContractLiveDate, for when the two differ
+        };
+      })
+      .sort((a, b) => b.arr - a.arr);
+
     // Full standing Booked pilot book total, read from the Booked ARR Snapshot v2 tab — which
     // lists every deal behind it plus a Quarter column for per-quarter filtering. The dashboard
     // shows this total so it ties to the sheet's deals exactly. Null → fall back to the in-code sum.
@@ -389,6 +423,7 @@ async function buildPayload(): Promise<Payload> {
       bookedTotal,
       agingByStage,
       dealBreakdown,
+      closedWonFeed,
       pipelineGen,
       dealTracker,
       topBooked,
