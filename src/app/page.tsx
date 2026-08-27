@@ -46,7 +46,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; liveArr: number; bookedPilot: number; ids?: Record<string, number[] | undefined> }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; contractedRR: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; liveArr: number; bookedPilot: number; ids?: Record<string, number[] | undefined> }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
   predictedCashflow?: { months: { ym: string; label: string; contracted: number; live: number }[]; baseline: { contracted: number; live: number }; booked: number; deals: { tier: "contracted" | "live"; opp: string; account: string; owner: string; arr: number; arriveYm: string; arriveDate: string; basis: string }[] };
   bookedTotal?: number; // full standing Booked pilot book total (from Booked ARR Snapshot v2 tab)
   pipelineGen?: { byOwner: Record<string, { arr: number; count: number }>; total: number; totalCount: number };
@@ -2969,7 +2969,9 @@ export default function Dashboard() {
               type FRow = { bucket: string; label: string; color: string; get: (p: typeof series[number]) => number;
                 sign?: string; total?: boolean;
                 // `parent` makes this a child row: it hides unless its parent is expanded.
-                parent?: string; hint?: string };
+                parent?: string; hint?: string;
+                // A cross-cut sits under a parent but is NOT part of its sum — mark it so.
+                cross?: boolean };
               const FUNNEL_SECTIONS: { title: string; sub: string; rows: FRow[] }[] = [
                 {
                   title: "ARR",
@@ -2981,27 +2983,33 @@ export default function Dashboard() {
                       parent: "contracted", hint: "The renewal share of Contracted" },
                     { bucket: "contractedNewExp", label: "Contracted Expansion", color: C.t2, get: (p) => p.contractedNewExp,
                       parent: "contracted", hint: "The rest of Contracted — new business and expansion, i.e. everything that is not a renewal" },
+                    { bucket: "contractedRR", label: "Contracted — Rip & Replace", color: C.ylw, get: (p) => p.contractedRR,
+                      parent: "contracted", cross: true,
+                      hint: "A cross-cut, not a third slice: these deals are ALREADY counted in Renewal or Expansion above. Broken out because a rip & replace changeover is the usual reason a deal is contracted but not yet billing." },
                     { bucket: "live", label: "Billed", color: C.grn, get: (p) => p.live },
                     { bucket: "liveArr", label: "Live ARR", color: C.navy, get: (p) => p.liveArr, total: true },
                   ],
                 },
                 {
                   title: "Pilot, and what moves",
-                  sub: "Live ARR + Pilot = Booked Pilot",
+                  sub: "Live ARR + Pilot = Booked ARR",
                   rows: [
                     { bucket: "booked", label: "Pilot", color: C.gold, get: (p) => p.booked },
-                    { bucket: "bToLost", label: "Pilot → Lost", color: C.red, get: (p) => p.bToLost, sign: "−" },
-                    { bucket: "bToC", label: "Pilot → Contracted", color: C.blue, get: (p) => p.bToC, sign: "+" },
+                    { bucket: "bToLost", label: "Pilot → Lost", color: C.red, get: (p) => p.bToLost, sign: "−",
+                      parent: "booked", hint: "Pilots that went Closed Lost this month" },
+                    { bucket: "bToC", label: "Pilot → Contracted", color: C.blue, get: (p) => p.bToC, sign: "+",
+                      parent: "booked", hint: "Pilots that signed and went contract-live this month" },
                     { bucket: "cToL", label: "Contracted → Billed", color: C.grn, get: (p) => p.cToL, sign: "+" },
                     { bucket: "churn", label: "Churn", color: C.red, get: (p) => p.churn, sign: "−" },
-                    { bucket: "bookedPilot", label: "Booked Pilot", color: C.gold, get: (p) => p.bookedPilot, total: true },
+                    { bucket: "bookedPilot", label: "Booked ARR", color: C.gold, get: (p) => p.bookedPilot, total: true,
+                      hint: "Live ARR + Pilot — the widest view. Note: before 27 Aug 2026 \"Booked ARR\" meant the pilot book alone, which is now just Pilot." },
                   ],
                 },
               ];
               return (
                 <Card
                   title="ARR Funnel — Pilot → Contracted → Billed (MoM · Jan-26 → now)"
-                  sub="Point-in-time ARR in each tier at month-end. Pilot = in trial. Contracted = signed and contract-live but payment has not started (R&R / billing timing). Billed = paying. Live ARR = Contracted + Billed, the whole signed contract-live book and the figure the Command tab headline reports. Booked Pilot = Live ARR + Pilot. Churn excluded throughout."
+                  sub="Point-in-time ARR in each tier at month-end. Pilot = in trial. Contracted = signed and contract-live but payment has not started (R&R / billing timing). Billed = paying. Live ARR = Contracted + Billed, the whole signed contract-live book and the figure the Command tab headline reports. Booked ARR = Live ARR + Pilot. Churn excluded throughout."
                   accent={C.navy}
                 >
                   <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 2px" }}>
@@ -3030,7 +3038,7 @@ export default function Dashboard() {
                   </div>
                   {/* Months run ACROSS; the metrics run DOWN in two blocks — the ARR that adds
                       up to Live ARR, then the pilot book and the movements that feed it, ending
-                      at Booked Pilot. Every cell still opens its deals. */}
+                      at Booked ARR. Every cell still opens its deals. */}
                   <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
                       <thead>
@@ -3074,6 +3082,12 @@ export default function Dashboard() {
                                         </span>
                                       : null}
                                     {row.label}
+                                    {row.cross && (
+                                      <span style={{ marginLeft: 7, fontSize: 9.5, fontWeight: 700, color: C.t3,
+                                        border: `1px solid ${C.bd}`, borderRadius: 3, padding: "1px 5px", letterSpacing: ".03em" }}>
+                                        OVERLAPS
+                                      </span>
+                                    )}
                                     {hasKids && (
                                       <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: C.t3,
                                         letterSpacing: ".03em", textTransform: "uppercase" }}>

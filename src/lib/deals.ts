@@ -276,10 +276,16 @@ export function computePredictedCashflow(rows: Row[]): PredictedCashflow {
 //       Paying Date, contract not ended, not churned. (R&R / timing gap before first payment.)
 //   • live       → "Billed":   paying. Live Paying Date ≤ M, contract not ended, not churned.
 // Contracted + Billed = "Live ARR", the whole signed contract-live book — the figure the Command
-// tab headline reports. Live ARR + Pilot = "Booked Pilot". Window is fixed Jan-2026 → now.
+// tab headline reports. Live ARR + Pilot = "Booked ARR" (Tai, 2026-08-27 — the name previously meant the pilot
+// book alone). Window is fixed Jan-2026 → now.
 const FUNNEL_CHURN = new Set(["Contracts Ended (Churned)", "Contract Paused"]);
 export type FunnelPoint = {
-  ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; live: number; churn: number;
+  ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number;
+  // Rip & Replace is a CROSS-CUT of Contracted, not a third slice: an R&R deal is already
+  // inside Renewal or New/Expansion above. It is broken out because "why is this contracted
+  // but not billing?" is usually answered by "it is a rip & replace changeover".
+  contractedRR: number;
+  live: number; churn: number;
   bToC: number; cToL: number; bToLost: number;
   // Full reconciliation flows so each tier's level ties out exactly month-to-month:
   //   Booked[M]     = Booked[M-1] + bNew − bToC − bToLive − bToLost − bDrop
@@ -305,7 +311,7 @@ export type FunnelPoint = {
 // ArrFunnel.dealIndex (a deal appears in many months, so repeating the object would bloat the
 // payload). Level buckets are point-in-time membership; flow buckets are what moved that month.
 export type FunnelBucket =
-  | "booked" | "contracted" | "contractedRenewal" | "contractedNewExp" | "live" | "churn"
+  | "booked" | "contracted" | "contractedRenewal" | "contractedNewExp" | "contractedRR" | "live" | "churn"
   | "liveArr" | "bookedPilot"
   | "bToC" | "cToL" | "bToLost" | "bNew" | "bToLive" | "bDrop" | "cNewSigned" | "cLeak" | "lNewDirect" | "lChurn";
 export type FunnelDeal = { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string };
@@ -371,7 +377,7 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
                                : (d.pilotStart !== "" && before(d.trial) && after(d.liveDate) && after(d.livePay) && after(d.lost));
       return booked ? "Booked" : "";
     };
-    let sB = 0, sC = 0, sCRenew = 0, sCNew = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0, bNew = 0, bToLive = 0, bDrop = 0, cNewSigned = 0, cLeak = 0, lNewDirect = 0, lChurn = 0;
+    let sB = 0, sC = 0, sCRenew = 0, sCNew = 0, sCRR = 0, sL = 0, sChurn = 0, bToC = 0, cToL = 0, bToLost = 0, bNew = 0, bToLive = 0, bDrop = 0, cNewSigned = 0, cLeak = 0, lNewDirect = 0, lChurn = 0;
     // Record WHICH deals land in each bucket alongside the sum, so a click can list them.
     const ids: Partial<Record<FunnelBucket, number[]>> = {};
     const tag = (b: FunnelBucket, di: number) => { (ids[b] ??= []).push(di); };
@@ -379,7 +385,11 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
       const t = tierOf(d);
       const p = prevTier[di];
       if (t === "Booked") { sB += d.arr; tag("booked", di); }
-      else if (t === "Contracted") { sC += d.arr; tag("contracted", di); if (/renew/i.test(d.type)) { sCRenew += d.arr; tag("contractedRenewal", di); } else { sCNew += d.arr; tag("contractedNewExp", di); } } // split by deal Type
+      else if (t === "Contracted") {
+        sC += d.arr; tag("contracted", di);
+        if (/renew/i.test(d.type)) { sCRenew += d.arr; tag("contractedRenewal", di); } else { sCNew += d.arr; tag("contractedNewExp", di); } // split by deal Type
+        if (d.rr) { sCRR += d.arr; tag("contractedRR", di); }                                                          // cross-cut, not a third slice
+      }
       else if (t === "Live") { sL += d.arr; tag("live", di); }
       if (d.churn && d.end >= first && d.end <= me) { sChurn += d.arr; tag("churn", di); }                                                   // churned/paused, contract ended this month
       if (!firstMonth) {                                                                                               // $ that moved tier vs the prior month
@@ -405,7 +415,7 @@ export function computeArrFunnel(rows: Row[]): ArrFunnel {
     // the roll-up is the concatenation of their deal sets — which is what makes them clickable.
     ids.liveArr = [...(ids.contracted ?? []), ...(ids.live ?? [])];
     ids.bookedPilot = [...ids.liveArr, ...(ids.booked ?? [])];
-    stock.push({ ym, label, booked: sB, contracted: sC, contractedRenewal: sCRenew, contractedNewExp: sCNew, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn, liveArr: sC + sL, bookedPilot: sC + sL + sB, ids });
+    stock.push({ ym, label, booked: sB, contracted: sC, contractedRenewal: sCRenew, contractedNewExp: sCNew, contractedRR: sCRR, live: sL, churn: sChurn, bToC, cToL, bToLost, bNew, bToLive, bDrop, cNewSigned, cLeak, lNewDirect, lChurn, liveArr: sC + sL, bookedPilot: sC + sL + sB, ids });
   }
 
   // Compact the deal references: only deals that appear in at least one bucket are sent, and
