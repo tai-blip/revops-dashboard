@@ -3035,7 +3035,7 @@ export default function Dashboard() {
                     <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
                       <thead>
                         <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                          <Th l>&nbsp;</Th>
+                          <th style={{ textAlign: "left", padding: "8px 16px 8px 0", minWidth: 178 }} />
                           {series.map((p, i) => (
                             <Th key={p.ym}>{i === series.length - 1 ? <b>{p.label}</b> : p.label}</Th>
                           ))}
@@ -3055,17 +3055,21 @@ export default function Dashboard() {
                               const open = !!funnelOpen[row.bucket];
                               return (
                               <tr key={row.bucket} style={{ borderBottom: `1px solid ${C.s1}`, background: row.total ? C.s2 : undefined }}>
-                                <Td l bold={!!row.total}>
+                                <td style={{ textAlign: "left", padding: "10px 16px 10px 0",
+                                  paddingLeft: row.parent ? 22 : 0, whiteSpace: "nowrap" }}>
                                   <span title={row.hint}
                                     onClick={hasKids ? () => setFunnelOpen((o) => ({ ...o, [row.bucket]: !open })) : undefined}
-                                    style={{ color: row.color, paddingLeft: row.parent ? 20 : 0,
+                                    style={{ color: row.color, fontSize: 13,
                                       fontWeight: row.total ? 700 : row.parent ? 400 : 600,
                                       cursor: hasKids ? "pointer" : row.hint ? "help" : undefined,
-                                      borderBottom: row.hint && !hasKids ? `1px dotted ${C.bd}` : undefined }}>
-                                    {hasKids && <span style={{ display: "inline-block", width: 14, color: C.t3, fontSize: 10 }}>{open ? "▾" : "▸"}</span>}
+                                      textDecoration: row.hint && !hasKids ? "underline dotted" : undefined,
+                                      textDecorationColor: C.bd, textUnderlineOffset: "3px" }}>
+                                    {hasKids
+                                      ? <span style={{ display: "inline-block", width: 15, color: C.t3, fontSize: 10 }}>{open ? "▾" : "▸"}</span>
+                                      : null}
                                     {row.label}
                                   </span>
-                                </Td>
+                                </td>
                                 {series.map((p) => {
                                   const v = row.get(p);
                                   return (
