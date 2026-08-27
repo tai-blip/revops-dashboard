@@ -2413,17 +2413,23 @@ export default function Dashboard() {
         const kMY = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : "$" + Math.round(n / 1e3) + "k");
         const annYTot = annYReps.reduce((t, r) => ({ goal: t.goal + r.goal, ytd: t.ytd + r.ytdTotal, pot: t.pot + r.potTotal, proj: t.proj + r.projection, miss: t.miss + r.yrMissing }), { goal: 0, ytd: 0, pot: 0, proj: 0, miss: 0 });
 
-        // Expected period end = TODAY'S Live ARR + the team's OPEN potential, and it follows the
-        // Quarterly ⇄ Yearly toggle. Closed Won is deliberately NOT stacked on top: those deals
-        // are signed and contract-live, so they already sit inside Live ARR — adding the Potential
-        // column whole would count them twice (worth $266k in Q3 FY26). The yearly side is
-        // already open-only, so both modes now mean the same thing.
-        const projPot = fcastView === "yearly" ? annYTot.pot : openPot(T, false);
+        // Expected period end = TODAY'S Live ARR + the team's Potential, following the toggle.
+        // The components are quoted EXACTLY as the table below shows them, so the tile reconciles
+        // on screen: quarterly Potential is the "Total · incl AM + Davi" row ($1.05M), yearly is
+        // Pot. Early + Pot. Late on the Team row ($3.00M).
+        //
+        // The one adjustment, shown on the tile rather than hidden: the QUARTERLY Potential column
+        // is Closed Won + Early + Late, and those closed deals are signed and contract-live, so
+        // they are already inside Live ARR. Adding the column whole would count them twice, so it
+        // is subtracted as a visible line. The yearly Potential is Early + Late only (YTD is its
+        // own column), so there is nothing to subtract.
         const projBase = F.currentLiveARR;
-        const projEnd = projBase + projPot;
+        const projPot = fcastView === "yearly" ? annYTot.pot : T.potential;
+        const projDouble = fcastView === "yearly" ? 0 : T.closedWon;
+        const projEnd = projBase + projPot - projDouble;
         const projGap = F.annualTarget - projEnd;
         const projPeriod = fcastView === "yearly" ? "Year-End" : `${Q.key} End`;
-        const projPotLabel = fcastView === "yearly" ? "yearly potential" : `${Q.key} potential`;
+        const projPotLabel = fcastView === "yearly" ? "Potential (yearly)" : `Potential (${Q.key})`;
 
         return (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
@@ -2439,10 +2445,14 @@ export default function Dashboard() {
               <div style={{ padding: "14px 18px" }}>
                 <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projEnd >= F.annualTarget ? C.grn : C.coralDk }}>{fmt(projEnd)}</div>
                 <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>
-                  Live ARR {fmt(projBase)} + {fmt(projPot)} {projPotLabel} · vs {fmt(F.annualTarget)} target
+                  Live ARR {fmt(projBase)} + {projPotLabel} {fmt(projPot)}
+                  {projDouble > 0 && <> − {fmt(projDouble)} Closed Won</>}
+                  {" "}· vs {fmt(F.annualTarget)} target
                 </div>
                 <div style={{ fontSize: 11, color: C.t3, marginTop: 3 }}>
-                  Open pipeline only, AE/AM-weighted. Closed Won is not added — it is already inside Live ARR.
+                  {projPot === annYTot.pot && fcastView === "yearly"
+                    ? "Potential = Pot. Early + Pot. Late on the Team row below. YTD is already inside Live ARR."
+                    : "Potential is the Total · incl AM + Davi row below. Its Closed Won is subtracted because those deals are already inside Live ARR."}
                 </div>
               </div>
             </Card>
@@ -2891,7 +2901,7 @@ export default function Dashboard() {
             type Step = { label: string; type: "base" | "inc" | "gap" | "target"; value: number; of?: string; from?: number };
             const steps: Step[] = [
               { label: "Live ARR today", type: "base", value: projBase },
-              { label: `${projPotLabel[0].toUpperCase()}${projPotLabel.slice(1)}`, type: "inc", value: projPot, of: `${pct(potVsQuota)} of quota` },
+              { label: projDouble > 0 ? "Potential, net of Closed Won" : projPotLabel, type: "inc", value: projPot - projDouble, of: `${pct(potVsQuota)} of quota` },
               { label: "Gap to target", type: "gap", value: Math.max(0, projGap), from: projEnd },
               { label: "FY26 target", type: "target", value: F.annualTarget },
             ];
@@ -2928,7 +2938,7 @@ export default function Dashboard() {
 
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginTop: 18 }}>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Live ARR today</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(projBase)}</div></div>
-                    <div><div style={{ fontSize: 11, color: C.t3 }}>Open potential</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.blue }}>{fk(projPot)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>{projPotLabel}, weighted</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>{projPotLabel}</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.blue }}>{fk(projPot - projDouble)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>{projDouble > 0 ? `${fk(projPot)} less ${fk(projDouble)} Closed Won` : "weighted, AE/AM %"}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Expected {projPeriod}</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk }}>{fk(projEnd)}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Annual Target</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(F.annualTarget)}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Gap</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projGap > 0 ? C.red : C.grn }}>{fk(projGap)}</div></div>
@@ -2936,7 +2946,7 @@ export default function Dashboard() {
 
                   <div style={{ background: "#FAEEDA", borderRadius: 12, padding: "14px 16px", marginTop: 16, fontSize: 13.5, color: "#6b5320", lineHeight: 1.55 }}>
                     {projGap > 0 ? (
-                      <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> (Live ARR {fk(projBase)} + {fk(projPot)} open {projPotLabel}) is <b style={{ color: C.coralDk }}>{fk(projGap)}</b> short of the <b>{fk(F.annualTarget)}</b> target.</>
+                      <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> (Live ARR {fk(projBase)} + {fk(projPot)} {projPotLabel.toLowerCase()}{projDouble > 0 ? <> − {fk(projDouble)} Closed Won already live</> : null}) is <b style={{ color: C.coralDk }}>{fk(projGap)}</b> short of the <b>{fk(F.annualTarget)}</b> target.</>
                     ) : (
                       <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> is on track to meet or exceed the <b>{fk(F.annualTarget)}</b> target.</>
                     )}
