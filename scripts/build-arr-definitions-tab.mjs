@@ -55,14 +55,14 @@ async function loadDash() {
 const TIERS = [
   { key: "booked", label: "Pilot", means: "In an active pilot. Not signed yet, so not revenue.",
     rule: "Stage = Trial AND Pilot Start Date is set. ARR >= 0, so $0 pilots are kept." },
-  { key: "contracted", label: "Invoiced", means: "Signed and contract-live, but payment has not started yet (Rip & Replace or billing timing).",
+  { key: "contracted", label: "Contracted", means: "Awaiting Billing — signed and contract-live, but payment has not started yet (Rip & Replace or billing timing).",
     rule: "Stage = Billing or Closed Won, Contract Live Date reached, no Live Paying Date yet, contract not ended, not churned or paused." },
   { key: "live", label: "Billed", means: "Paying. Money is arriving.",
     rule: "Stage = Billing or Closed Won, Live Paying Date reached, contract not ended, not churned or paused." },
 ];
 const ROLLUPS = [
   { key: "liveArr", label: "Live ARR", means: "The whole signed contract-live book, whether or not payment has started. This is the headline ARR figure.",
-    rule: "Invoiced + Billed. Agreed on the Weekly Forecast Call 2026-08-26." },
+    rule: "Contracted + Billed. Agreed on the Weekly Forecast Call 2026-08-26." },
   { key: "bookedPilot", label: "Booked Pilot", means: "The signed book plus what is still in pilot. The widest view.",
     rule: "Live ARR + Pilot." },
 ];
@@ -91,7 +91,7 @@ async function main() {
     rows.push([t.label, t.means, t.rule, money(now[t.key] ?? 0), dealsIn(t.key).length, t.key]);
   }
   blank();
-  rows.push(["Note", "A deal sits in exactly ONE of Pilot / Invoiced / Billed at a time, so the roll-ups never double-count: Live ARR and Booked Pilot are simple sums of the tiers above them."]);
+  rows.push(["Note", "A deal sits in exactly ONE of Pilot / Contracted / Billed at a time, so the roll-ups never double-count: Live ARR and Booked Pilot are simple sums of the tiers above them."]);
   blank();
 
   // ② machine-readable key → value, same shape as the Headline / Targets source tabs
@@ -108,8 +108,8 @@ async function main() {
 
   // ③ the dashboard's monthly table, column for column
   rows.push(["③ MONTHLY — point-in-time ARR in each tier at month-end (same table the dashboard shows)"]);
-  rows.push(["Month", "Pilot", "$ P→Lost", "$ P→Inv", "Invoiced", "· Renewal", "· Exp/New Biz",
-    "$ Inv→Billed", "Billed", "Churn", "Live ARR", "Booked Pilot", "MoM (Live ARR)"]);
+  rows.push(["Month", "Pilot", "$ P→Lost", "$ P→Con", "Contracted", "Contracted Renewal", "Contracted Expansion",
+    "$ Con→Billed", "Billed", "Churn", "Live ARR", "Booked Pilot", "MoM (Live ARR)"]);
   AF.stock.forEach((p, i) => {
     const prev = AF.stock[i - 1];
     rows.push([p.label, money(p.booked), money(p.bToLost), money(p.bToC), money(p.contracted),
@@ -155,7 +155,7 @@ async function main() {
     valueInputOption: "RAW", requestBody: { values: rows.map((r) => (r.length ? r : [""])) } });
 
   console.log(`"${TAB}" written — ${rows.length} rows.`);
-  console.log(`  as of ${now.label}: Pilot $${money(now.booked).toLocaleString()} · Invoiced $${money(now.contracted).toLocaleString()} · Billed $${money(now.live).toLocaleString()}`);
+  console.log(`  as of ${now.label}: Pilot $${money(now.booked).toLocaleString()} · Contracted $${money(now.contracted).toLocaleString()} · Billed $${money(now.live).toLocaleString()}`);
   console.log(`  Live ARR $${money(now.liveArr).toLocaleString()} (${dealsIn("liveArr").length} deals) · Booked Pilot $${money(now.bookedPilot).toLocaleString()} (${all.length} deals)`);
 }
 
