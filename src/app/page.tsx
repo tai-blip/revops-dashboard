@@ -2311,14 +2311,21 @@ export default function Dashboard() {
         // the period — Early is SQL/SAL, which rarely converts in-quarter. Boxed in red in both
         // tables so it is read as the number that decides the forecast, not just another column.
         const LATE_WHY = "SQO + Trial — late-stage, the highest-probability slice of Potential and the part that realistically lands in this period. Early (SQL + SAL) rarely converts in time. Watch this column.";
+        const TdLate = ({ children, bold, last }: { children: ReactNode; bold?: boolean; last?: boolean }) => (
+          <td title={LATE_WHY} style={{ textAlign: "right", padding: "10px 16px 10px 0", cursor: "help",
+            background: C.redBg, borderLeft: `1.5px solid ${C.red}`, borderRight: `1.5px solid ${C.red}`,
+            borderBottom: last ? `1.5px solid ${C.red}` : undefined,
+            fontFamily: "var(--font-dm-mono)", fontSize: 13, fontWeight: bold ? 700 : 400, color: C.red }}>
+            {children}
+          </td>
+        );
         const ThLate = ({ children }: { children: ReactNode }) => (
-          <th style={{ textAlign: "right", padding: "8px 16px 8px 0", whiteSpace: "nowrap" }}>
-            <span title={LATE_WHY} style={{ display: "inline-block", cursor: "help",
-              border: `1.5px solid ${C.red}`, borderRadius: 5, padding: "3px 9px",
-              background: C.redBg, color: C.red,
-              fontSize: 10.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase" }}>
-              {children}
-            </span>
+          <th title={LATE_WHY} style={{ textAlign: "right", padding: "8px 16px 8px 0", whiteSpace: "nowrap",
+            cursor: "help", background: C.redBg,
+            borderLeft: `1.5px solid ${C.red}`, borderRight: `1.5px solid ${C.red}`, borderTop: `1.5px solid ${C.red}`,
+            color: C.red, fontFamily: "var(--font-dm-mono)", fontSize: 10.5, fontWeight: 700,
+            letterSpacing: ".06em", textTransform: "uppercase" }}>
+            {children}
           </th>
         );
 
@@ -2509,7 +2516,7 @@ export default function Dashboard() {
                         </span>
                       </Td>
                       <Td mono color={C.coralDk}>{dnum(r.name, r.name.split(" ")[0], "early", early)}</Td>
-                      <Td mono color={C.purp}>{dnum(r.name, r.name.split(" ")[0], "late", late)}</Td>
+                      <TdLate>{dnum(r.name, r.name.split(" ")[0], "late", late)}</TdLate>
                       <Td mono bold>{fmt(r.projection)}</Td>
                       <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(r.goal > 0 ? r.pctProj : null, r.goal > 0 ? r.projection - r.goal : null)}</td>
                     </tr>
@@ -2521,7 +2528,7 @@ export default function Dashboard() {
                     <Td mono>{fmt(annYTot.goal)}</Td>
                     <Td mono color={C.coralDk}>{fmt(annYTot.ytd)}</Td>
                     <Td mono color={C.coralDk}>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? earlyPot(fr, true) : 0); }, 0))}</Td>
-                    <Td mono color={C.purp}>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? latePot(fr, true) : 0); }, 0))}</Td>
+                    <TdLate bold last>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? latePot(fr, true) : 0); }, 0))}</TdLate>
                     <Td mono bold>{fmt(annYTot.proj)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(annYTot.goal > 0 ? annYTot.proj / annYTot.goal : null, annYTot.goal > 0 ? annYTot.proj - annYTot.goal : null)}</td>
                   </tr>
@@ -2549,7 +2556,7 @@ export default function Dashboard() {
                         </span>
                       </Td>
                       <Td mono color={C.coralDk}>{dnum(r.name, r.short ?? short(r.name), "early", earlyPot(r, false))}</Td>
-                      <Td mono color={C.purp}>{dnum(r.name, r.short ?? short(r.name), "late", latePot(r, false))}</Td>
+                      <TdLate>{dnum(r.name, r.short ?? short(r.name), "late", latePot(r, false))}</TdLate>
                       <Td mono bold>{fmt(qCells(r).pot)}</Td>
                       <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(r).attainP, qCells(r).variance)}</td>
                     </tr>
@@ -2557,13 +2564,13 @@ export default function Dashboard() {
                   <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
                     <Td l bold>AE team</Td>
                     <Td mono>{fmt(F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono>{fmt(F.aeTeam.closedWon)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.aeTeam, false))}</Td><Td mono color={C.purp}>{fmt(latePot(F.aeTeam, false))}</Td><Td mono bold>{fmt(qCells(F.aeTeam).pot)}</Td>
+                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.aeTeam, false))}</Td><TdLate bold>{fmt(latePot(F.aeTeam, false))}</TdLate><Td mono bold>{fmt(qCells(F.aeTeam).pot)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.aeTeam).attainP, qCells(F.aeTeam).variance)}</td>
                   </tr>
                   <tr style={{ background: "#EEF2F8", fontWeight: 700 }}>
                     <Td l bold>Total · incl AM</Td>
                     <Td mono>{fmt(F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono>{fmt(F.totalInclAM.closedWon)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.totalInclAM, false))}</Td><Td mono color={C.purp}>{fmt(latePot(F.totalInclAM, false))}</Td><Td mono bold>{fmt(qCells(F.totalInclAM).pot)}</Td>
+                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.totalInclAM, false))}</Td><TdLate bold last={!hasLead}>{fmt(latePot(F.totalInclAM, false))}</TdLate><Td mono bold>{fmt(qCells(F.totalInclAM).pot)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.totalInclAM).attainP, null)}</td>
                   </tr>
                   {hasLead && (() => {
@@ -2572,7 +2579,7 @@ export default function Dashboard() {
                       <tr style={{ background: "#E4EAF2", fontWeight: 700 }}>
                         <Td l bold>Total · incl AM + Davi</Td>
                         <Td mono>{fmt(G.openPipe)}</Td><Td mono>{fmt(G.quota)}</Td><Td mono>{fmt(G.closedWon)}</Td>
-                        <Td mono color={C.coralDk}>{fmt(earlyPot(G, false))}</Td><Td mono color={C.purp}>{fmt(latePot(G, false))}</Td><Td mono bold>{fmt(qCells(G).pot)}</Td>
+                        <Td mono color={C.coralDk}>{fmt(earlyPot(G, false))}</Td><TdLate bold last>{fmt(latePot(G, false))}</TdLate><Td mono bold>{fmt(qCells(G).pot)}</Td>
                         <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(G).attainP, null)}</td>
                       </tr>
                     );
