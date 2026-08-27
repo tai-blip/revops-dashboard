@@ -32,14 +32,14 @@ DEFINITIONS (use these — do not improvise):
 - ARR TIERS — always answer from the "ARR Definitions" tab on the main sheet. It is rewritten from the
   dashboard every 4h, so it and the dashboard can never disagree. Section ① gives each term's meaning
   and today's value, ② is a key->value block (arr_pilot, arr_contracted, arr_billed, arr_live_arr,
-  arr_booked_pilot, each with a _deals count), ③ is the month-by-month table, ④ lists every deal with
+  arr_booked_arr, each with a _deals count), ③ is the month-by-month table, ④ lists every deal with
   its tier. The vocabulary agreed on the Weekly Forecast Call 2026-08-26:
     Pilot        = in an active pilot, not signed (not revenue)
     Contracted   = signed and contract-live, payment not started yet ("Awaiting Billing")
     Billed       = paying
     Live ARR     = Contracted + Billed   <- the headline ARR figure
-    Booked Pilot = Live ARR + Pilot
-  If someone says "Invoiced" or "Awaiting Billing" they mean Contracted; "Live ARR (paying)" used to mean Billed. Say which
+    Booked ARR   = Live ARR + Pilot
+  If someone says "Invoiced" or "Awaiting Billing" they mean Contracted; "Live ARR (paying)" used to mean Billed; "Booked ARR" used to mean the pilot book alone (now just Pilot). Say which
   one you are quoting. A deal is in exactly one tier, so the roll-ups never double-count.
 - Live ARR headline = date-live deals minus "Contracts Ended (Churned)" only. Read the figure from the
   "ARR Definitions" tab (arr_live_arr) or the Headline tab every time — never quote one from memory,

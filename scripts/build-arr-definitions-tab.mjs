@@ -9,7 +9,7 @@
 //   ①  DEFINITIONS   one row per term: what it means, the rule, today's value, today's deal count
 //   ②  KEY → VALUE   machine-readable block (arr_pilot, arr_invoiced, …) for formulas and Revie
 //   ③  MONTHLY       the dashboard's MoM funnel table, Jan-26 → now, column for column
-//   ④  DEALS TODAY   every deal in Booked Pilot right now with the tier it sits in
+//   ④  DEALS TODAY   every deal in Booked ARR right now with the tier it sits in
 //
 // Vocabulary is the standard agreed on the Weekly Forecast Call, 2026-08-26 (Andrew, Sai,
 // Stephen, Davi, Tai): "live ARR = invoiced ARR + billed ARR, and bookings = live ARR + pilot
@@ -63,8 +63,8 @@ const TIERS = [
 const ROLLUPS = [
   { key: "liveArr", label: "Live ARR", means: "The whole signed contract-live book, whether or not payment has started. This is the headline ARR figure.",
     rule: "Contracted + Billed. Agreed on the Weekly Forecast Call 2026-08-26." },
-  { key: "bookedPilot", label: "Booked Pilot", means: "The signed book plus what is still in pilot. The widest view.",
-    rule: "Live ARR + Pilot." },
+  { key: "bookedPilot", label: "Booked ARR", means: "The signed book plus what is still in pilot. The widest view.",
+    rule: "Live ARR + Pilot. Renamed from \"Booked Pilot\" on 2026-08-27; before that, \"Booked ARR\" meant the pilot book alone." },
 ];
 
 async function main() {
@@ -91,7 +91,7 @@ async function main() {
     rows.push([t.label, t.means, t.rule, money(now[t.key] ?? 0), dealsIn(t.key).length, t.key]);
   }
   blank();
-  rows.push(["Note", "A deal sits in exactly ONE of Pilot / Contracted / Billed at a time, so the roll-ups never double-count: Live ARR and Booked Pilot are simple sums of the tiers above them."]);
+  rows.push(["Note", "A deal sits in exactly ONE of Pilot / Contracted / Billed at a time, so the roll-ups never double-count: Live ARR and Booked ARR are simple sums of the tiers above them."]);
   blank();
 
   // ② machine-readable key → value, same shape as the Headline / Targets source tabs
@@ -109,7 +109,7 @@ async function main() {
   // ③ the dashboard's monthly table, column for column
   rows.push(["③ MONTHLY — point-in-time ARR in each tier at month-end (same table the dashboard shows)"]);
   rows.push(["Month", "Pilot", "$ P→Lost", "$ P→Con", "Contracted", "Contracted Renewal", "Contracted Expansion",
-    "$ Con→Billed", "Billed", "Churn", "Live ARR", "Booked Pilot", "MoM (Live ARR)"]);
+    "$ Con→Billed", "Billed", "Churn", "Live ARR", "Booked ARR", "MoM (Live ARR)"]);
   AF.stock.forEach((p, i) => {
     const prev = AF.stock[i - 1];
     rows.push([p.label, money(p.booked), money(p.bToLost), money(p.bToC), money(p.contracted),
@@ -123,7 +123,7 @@ async function main() {
   const tierOfDeal = new Map();
   for (const t of TIERS) for (const d of dealsIn(t.key)) tierOfDeal.set(d, t.label);
   const all = dealsIn("bookedPilot").sort((a, b) => b.arr - a.arr);
-  rows.push([`④ DEALS TODAY — every deal inside Booked Pilot (${all.length} deals · $${money(now.bookedPilot).toLocaleString()}), tagged with its tier`]);
+  rows.push([`④ DEALS TODAY — every deal inside Booked ARR (${all.length} deals · $${money(now.bookedPilot).toLocaleString()}), tagged with its tier`]);
   rows.push(["Tier", "Deal", "Account", "AE", "AM", "Type", "Stage", "ARR", "Trial", "Contract live", "Live paying", "Ends", "R&R"]);
   for (const d of all) {
     rows.push([tierOfDeal.get(d) ?? "?", d.opp || d.account, d.account, d.owner, d.am, d.type,
@@ -156,7 +156,7 @@ async function main() {
 
   console.log(`"${TAB}" written — ${rows.length} rows.`);
   console.log(`  as of ${now.label}: Pilot $${money(now.booked).toLocaleString()} · Contracted $${money(now.contracted).toLocaleString()} · Billed $${money(now.live).toLocaleString()}`);
-  console.log(`  Live ARR $${money(now.liveArr).toLocaleString()} (${dealsIn("liveArr").length} deals) · Booked Pilot $${money(now.bookedPilot).toLocaleString()} (${all.length} deals)`);
+  console.log(`  Live ARR $${money(now.liveArr).toLocaleString()} (${dealsIn("liveArr").length} deals) · Booked ARR $${money(now.bookedPilot).toLocaleString()} (${all.length} deals)`);
 }
 
 main().catch((e) => { console.error("arr-definitions:", e.message || e); process.exit(1); });
