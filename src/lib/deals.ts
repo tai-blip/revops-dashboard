@@ -3,6 +3,14 @@
 
 type Row = (string | number | boolean | null)[];
 
+// A sheet date cell (serial number, or an ISO-ish string) as a plain "YYYY-MM-DD", or "" when
+// the cell is blank or unparseable. Exported so API routes can read date columns the same way
+// the parsers here do, instead of each growing its own copy.
+export function sheetDateToIso(v: unknown): string {
+  const d = sheetsSerialToDate(v);
+  return d ? d.toISOString().slice(0, 10) : "";
+}
+
 function sheetsSerialToDate(v: unknown): Date | null {
   if (typeof v === "number") {
     return new Date(Date.UTC(1899, 11, 30) + v * 86400000);
