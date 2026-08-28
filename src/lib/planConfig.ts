@@ -60,18 +60,20 @@ export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; q
   { name: "James Burdick", short: "James", quotaQ3: 255000, quotaAnnual: 1000000, am: false },
   { name: "Dorsa Mahmoudnia", short: "Dorsa", quotaQ3: 250000, quotaAnnual: 883200, am: false },
   { name: "Jed Rutstein", short: "Jed", quotaQ3: 250000, quotaAnnual: 750000, am: false },
-  // Jill ramped mid-year — her H2 total quota is $520k, used for both the quarterly
-  // and annual attainment views (per leadership).
-  { name: "Jill Bucci", short: "Jill", quotaQ3: 520000, quotaAnnual: 520000, am: false },
+  // Jill ramped mid-year. $200k is her QUARTERLY number and $520k is the H2 total
+  // (Tai, 2026-08-28) — the quarterly view had been using the H2 figure, overstating her
+  // Q3 quota by $320k. The AE Attainment (Official) sheet had $200k correct all along.
+  { name: "Jill Bucci", short: "Jill", quotaQ3: 200000, quotaAnnual: 520000, am: false },
   { name: "Mathias Berthelemot", short: "Mathias", quotaQ3: 150000, quotaAnnual: 600000, am: true },
   // Davi carries the residual: the other reps' assigned quotas less what the team has already
   // closed (Tai, 2026-08-28). Derived once and FROZEN — a quota recomputed live would fall every
   // time a rep closed something, which would make his attainment move for reasons that are not
   // his. Same figure applies to Q4 per the same rule; revisit at the quarter boundary.
-  //   other reps' Q3 quotas   1,425,000   (James 255k, Dorsa 250k, Jed 250k, Jill 520k, Mathias 150k)
+  //   other reps' Q3 quotas   1,105,000   (James 255k, Dorsa 250k, Jed 250k, Jill 200k, Mathias 150k)
   //   less team Q3 closed won  −274,670   (New Business + Expansion, roster owners, as of 28 Aug)
-  //   = 1,150,330, rounded     1,150,000
-  { name: "David Dubinski", short: "Davi", quotaQ3: 1150000, quotaAnnual: null, am: false, lead: true },
+  //   = 830,330, rounded         830,000
+  // Recomputed 2026-08-28 after Jill's Q3 quota was corrected from $520k to $200k.
+  { name: "David Dubinski", short: "Davi", quotaQ3: 830000, quotaAnnual: null, am: false, lead: true },
 ];
 
 // AEs excluded from the FORECAST tab only (not AE Attainment). Dorsa has no AE/AM %
