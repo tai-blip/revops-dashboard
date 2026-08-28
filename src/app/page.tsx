@@ -943,7 +943,10 @@ export default function Dashboard() {
         ],
       },
       targets: {
-        sentence: `Quarter-to-date the team has attained ${fmt(teamActual)} — ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` New ARR (Net New + Expansion) is ${fmt(newArrNbExp)}, skewing ${nbPct.toFixed(0)}% Net New.` : ""}`,
+        // Spell out the basis. This module reports leadership's OFFICIAL attainment — New Business
+        // only — while the Forecast tab's Closed column counts New Business + Expansion. Two
+        // legitimate numbers, and without the label they read as one number gone stale.
+        sentence: `Quarter-to-date the team has attained ${fmt(teamActual)} on the official basis (New Business only) — ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` New ARR (Net New + Expansion) is ${fmt(newArrNbExp)}, skewing ${nbPct.toFixed(0)}% Net New.` : ""}`,
         stats: [
           { label: "New ARR (current mo)", value: fmt(S.currentMonth?.newARR), sub: `Net New + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
           { label: "Team New ARR Q3", value: fmt(newArrNbExp), sub: `Net New + Expansion · per contract live date · ${qStart}→${qEndExcl}` },
