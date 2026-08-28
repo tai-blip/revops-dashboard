@@ -2479,8 +2479,12 @@ export default function Dashboard() {
         // Closed Won, split by the tier each won deal is in TODAY — Contracted (signed, not yet
         // paying) vs Billed (paying). Same rows the Closed Won cell already counts, so the two
         // always add back to it; only the presentation is new.
-        const cwQ = (owners: string[], tier: "Contracted" | "Billed") =>
-          (data.closedWonFeed ?? []).filter((d) => owners.includes(d.owner) && d.rt === "NB" && d.tier === tier
+        // Closed Won counts New Business AND Expansion (Tai, 2026-08-28). It previously mirrored
+        // the AE Attainment (Official) filter, which is New Business only — that hid wins like
+        // Mathias's $327 Hot Head Burritos expansion, his only 2026 deal.
+        const CW_RT = new Set(["NB", "EXP"]);
+        const cwQ = (owners: string[], tier?: "Contracted" | "Billed") =>
+          (data.closedWonFeed ?? []).filter((d) => owners.includes(d.owner) && CW_RT.has(d.rt) && (!tier || d.tier === tier)
             && d.eld >= `${new Date().getUTCFullYear()}-${String((Number(Q.key.replace(/\D/g, "") || 1) - 1) * 3 + 1).padStart(2, "0")}-01`
             && d.eld < (Number(Q.key.replace(/\D/g, "") || 1) === 4
               ? `${new Date().getUTCFullYear() + 1}-01-01`
@@ -2604,8 +2608,8 @@ export default function Dashboard() {
                       <Td mono color={C.t2}>{r.quota != null && r.quota > 0 ? fmt(r.quota) : "\u2014"}</Td>
                       <Td mono color={r.closedWon > 0 ? C.coralDk : C.t1}>
                         <span style={drillable} title="Click to see the closed deals"
-                          onClick={() => { setFDrill(null); setCwDrill({ owners: [r.name], label: r.short ?? short(r.name), scope: "q", cell: r.closedWon }); }}>
-                          {fmt(r.closedWon)}
+                          onClick={() => { setFDrill(null); setCwDrill({ owners: [r.name], label: r.short ?? short(r.name), scope: "q", cell: cwQ([r.name]) }); }}>
+                          {fmt(cwQ([r.name]))}
                         </span>
                       </Td>
                       <Td mono color={C.blue}>{cwQ([r.name], "Contracted") > 0 ? fmt(cwQ([r.name], "Contracted")) : "—"}</Td>
@@ -2618,7 +2622,7 @@ export default function Dashboard() {
                   ))}
                   <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
                     <Td l bold>AE team</Td>
-                    <Td mono color={C.blue}>{tnum(OWN_AE, "AE team", "open", F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_AE, "AE team", "q", F.aeTeam.closedWon)}</Td>
+                    <Td mono color={C.blue}>{tnum(OWN_AE, "AE team", "open", F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_AE, "AE team", "q", cwQ(OWN_AE))}</Td>
                     <Td mono color={C.blue}>{fmt(cwQ(OWN_AE, "Contracted"))}</Td>
                     <Td mono color={C.grn}>{fmt(cwQ(OWN_AE, "Billed"))}</Td>
                     <Td mono color={C.coralDk}>{tnum(OWN_AE, "AE team", "early", earlyPot(F.aeTeam, false))}</Td><TdLate bold>{tnum(OWN_AE, "AE team", "late", latePot(F.aeTeam, false))}</TdLate><Td mono bold>{fmt(qCells(F.aeTeam).pot)}</Td>
@@ -2626,7 +2630,7 @@ export default function Dashboard() {
                   </tr>
                   <tr style={{ background: "#EEF2F8", fontWeight: 700 }}>
                     <Td l bold>Total · incl AM</Td>
-                    <Td mono color={C.blue}>{tnum(OWN_AM, "incl AM", "open", F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_AM, "incl AM", "q", F.totalInclAM.closedWon)}</Td>
+                    <Td mono color={C.blue}>{tnum(OWN_AM, "incl AM", "open", F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_AM, "incl AM", "q", cwQ(OWN_AM))}</Td>
                     <Td mono color={C.blue}>{fmt(cwQ(OWN_AM, "Contracted"))}</Td>
                     <Td mono color={C.grn}>{fmt(cwQ(OWN_AM, "Billed"))}</Td>
                     <Td mono color={C.coralDk}>{tnum(OWN_AM, "incl AM", "early", earlyPot(F.totalInclAM, false))}</Td><TdLate bold last={!hasLead}>{tnum(OWN_AM, "incl AM", "late", latePot(F.totalInclAM, false))}</TdLate><Td mono bold>{fmt(qCells(F.totalInclAM).pot)}</Td>
@@ -2637,7 +2641,7 @@ export default function Dashboard() {
                     return (
                       <tr style={{ background: "#E4EAF2", fontWeight: 700 }}>
                         <Td l bold>Total · incl AM + Davi</Td>
-                        <Td mono color={C.blue}>{tnum(OWN_ALL, "everyone", "open", G.openPipe)}</Td><Td mono>{fmt(G.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_ALL, "everyone", "q", G.closedWon)}</Td>
+                        <Td mono color={C.blue}>{tnum(OWN_ALL, "everyone", "open", G.openPipe)}</Td><Td mono>{fmt(G.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_ALL, "everyone", "q", cwQ(OWN_ALL))}</Td>
                     <Td mono color={C.blue}>{fmt(cwQ(OWN_ALL, "Contracted"))}</Td>
                     <Td mono color={C.grn}>{fmt(cwQ(OWN_ALL, "Billed"))}</Td>
                         <Td mono color={C.coralDk}>{tnum(OWN_ALL, "everyone", "early", earlyPot(G, false))}</Td><TdLate bold last>{tnum(OWN_ALL, "everyone", "late", latePot(G, false))}</TdLate><Td mono bold>{fmt(qCells(G).pot)}</Td>
@@ -2726,25 +2730,25 @@ export default function Dashboard() {
                   // scopes — so each side filters the way its own source does.
                   const mine = data.closedWonFeed.filter((d) => cwDrill.owners.includes(d.owner));
                   const rows = cwDrill.scope === "q"
-                    ? mine.filter((d) => d.rt === "NB" && inQ(d))
+                    ? mine.filter((d) => (d.rt === "NB" || d.rt === "EXP") && inQ(d))
                     : mine.filter((d) => d.cld.startsWith(yr));
                   // What the official quarterly filter leaves out, so a $0 cell can be read as
                   // "nothing counted" rather than "nothing happened".
                   const excluded = cwDrill.scope === "q"
-                    ? mine.filter((d) => d.rt !== "NB" && inQ(d))
+                    ? mine.filter((d) => d.rt !== "NB" && d.rt !== "EXP" && inQ(d))
                     : [];
                   const exclTotal = excluded.reduce((t, d) => t + d.arr, 0);
                   cwSpec = {
                     title: `closed-won-${cwDrill.label}-${cwDrill.scope}`,
                     chips: [cwDrill.label,
-                      cwDrill.scope === "q" ? `${Q.key} · New Business only` : `FY${yr.slice(2)} · all record types`,
+                      cwDrill.scope === "q" ? `${Q.key} · New Business + Expansion` : `FY${yr.slice(2)} · all record types`,
                       cwDrill.scope === "q" ? "by effective live date" : "by contract live date"],
                     note: (total) => {
                       const tie = Math.abs(total - cwDrill.cell) > 1
                         ? `Heads up: the cell reads ${fmt(cwDrill.cell)} but these deals sum to ${fmt(total)} (Δ ${fmt(Math.abs(total - cwDrill.cell))}) — worth a look.`
                         : `Ties to the cell exactly (${fmt(cwDrill.cell)}).`;
                       const note2 = excluded.length
-                        ? ` Excluded from this column: ${excluded.length} ${excluded.length === 1 ? "deal" : "deals"} worth ${fmt(exclTotal)} that closed in ${Q.key} but ${excluded.length === 1 ? "is not" : "are not"} New Business — the official attainment filter counts New Business only, so ${excluded.length === 1 ? "it does" : "they do"} not appear in Closed Won.`
+                        ? ` Excluded: ${excluded.length} ${excluded.length === 1 ? "deal" : "deals"} worth ${fmt(exclTotal)} that closed in ${Q.key} but ${excluded.length === 1 ? "is" : "are"} neither New Business nor Expansion (renewals and the like).`
                         : "";
                       return tie + note2;
                     },
@@ -2752,7 +2756,7 @@ export default function Dashboard() {
                     amount: (d) => d.arr,
                     amountLabel: "ARR",
                     emptyHint: excluded.length
-                      ? "No New Business closed in this quarter — see the note above for what did close."
+                      ? "Nothing closed in this quarter — see the note above for anything excluded."
                       : "Nothing closed for this AE in this period.",
                     cols: [
                       { label: "Deal", l: true, csv: (d) => d.name, render: (d) => d.name },
