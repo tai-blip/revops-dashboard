@@ -12,3 +12,6 @@ data-snapshots/
 .revie/
 .vercel
 .env*
+
+# TypeScript incremental build cache — machine-specific, and it conflicted on every rebase.
+tsconfig.tsbuildinfo
