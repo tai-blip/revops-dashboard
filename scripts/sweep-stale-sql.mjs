@@ -1,8 +1,12 @@
-// DEAL MOVEMENT SWEEP (Tai, 2026-08-21): IF stage = SQL AND stale > 60 days → move to
-// Closed Lost with reason "Stale > 60 days".
+// DEAL MOVEMENT SWEEP: stale open opps → Closed Lost with reason "Stale > 60 days".
 //
 // Scope: New Business open opps, days-in-stage > 60 (LastStageChangeDate else CreatedDate),
-// StageName = 'SQL', excluding owners Osman Mubarak (out of cohort) and Tai Nguyen (test).
+// excluding owners Osman Mubarak (out of cohort) and Tai Nguyen (test).
+//
+// STAGES (Tai, 2026-08-28 — "the old route"): SQL, SAL and SQO. The first sweep on 2026-08-21
+// was SQL-only (77 deals / $5.95M). SAL and SQO are further down the funnel, so --apply moves
+// them too but the run always prints the per-stage split first and the canary still goes first.
+// Narrow it any time with --stages=SQL or --stages=SQL,SAL.
 //
 // Reason stamping: the official ClosedLostReasons__c is a RESTRICTED picklist that does not
 // (yet) contain "Stale > 60 days" — the script checks at runtime and uses it once the value
@@ -22,6 +26,9 @@
 import { google } from "googleapis";
 
 const APPLY = process.argv.includes("--apply");
+// Which stages this run may move. Default is the full cohort; --stages= narrows it.
+const STAGES = (process.argv.find((a) => a.startsWith("--stages="))?.split("=")[1] ?? "SQL,SAL,SQO")
+  .split(",").map((x) => x.trim().toUpperCase()).filter(Boolean);
 const STALE_DAYS = 60;
 const REASON = "Stale > 60 days";            // exact wording → ClosedLostDetails__c (free text)
 const PICKLIST_REASON = "Stale";             // value Tai added to the restricted ClosedLostReasons__c
@@ -63,7 +70,7 @@ async function main() {
   const owners = EXCLUDE_OWNERS.map((o) => `'${o}'`).join(",");
   const q = `SELECT Id, Name, Account.Name, Owner.Name, StageName, Amount, LastStageChangeDate, CreatedDate
     FROM Opportunity WHERE IsClosed = false AND RecordType.Name = '1.New Business'
-      AND StageName = 'SQL' AND Owner.Name NOT IN (${owners})`.replace(/\s+/g, " ");
+      AND StageName IN (${STAGES.map((x) => `'${x}'`).join(",")}) AND Owner.Name NOT IN (${owners})`.replace(/\s+/g, " ");
   let url = `${instance}/services/data/v${v}/query?q=${encodeURIComponent(q)}`;
   const recs = [];
   while (url) { const j = await fetchJSON(url, { headers: H }, "query"); recs.push(...j.records); url = j.done ? null : `${instance}${j.nextRecordsUrl}`; }
@@ -71,11 +78,19 @@ async function main() {
   const cohort = recs.map((x) => {
     const basis = x.LastStageChangeDate || x.CreatedDate;
     return { id: x.Id, name: x.Account?.Name || x.Name, rep: x.Owner?.Name ?? "?", amt: x.Amount || 0,
-      days: Math.floor((now - Date.parse(basis)) / 86400000) };
+      stage: x.StageName, days: Math.floor((now - Date.parse(basis)) / 86400000) };
   }).filter((d) => d.days > STALE_DAYS).sort((a, b) => a.amt - b.amt); // canary = smallest first
 
   const total = cohort.reduce((s, d) => s + d.amt, 0);
-  console.log(`${APPLY ? "APPLY" : "DRY RUN"} — SQL > ${STALE_DAYS}d cohort: ${cohort.length} deals · $${Math.round(total).toLocaleString()}`);
+  console.log(`${APPLY ? "APPLY" : "DRY RUN"} — ${STAGES.join("/")} > ${STALE_DAYS}d cohort: ${cohort.length} deals · $${Math.round(total).toLocaleString()}`);
+  // Per-stage split BEFORE anything moves. SAL and SQO are later-funnel, so seeing the shape of
+  // what is about to close is the last cheap chance to stop a bad run.
+  const byStage = {};
+  for (const d of cohort) { (byStage[d.stage] ??= { n: 0, amt: 0 }); byStage[d.stage].n++; byStage[d.stage].amt += d.amt; }
+  for (const st of STAGES) {
+    const g = byStage[st] ?? { n: 0, amt: 0 };
+    console.log(`  ${st.padEnd(5)} ${String(g.n).padStart(4)} deals · $${Math.round(g.amt).toLocaleString()}`);
+  }
   console.log(`Reason: ${picklistHasReason ? `ClosedLostReasons__c = "${PICKLIST_REASON}" ✓ + Details = "${REASON}"` : `ClosedLostDetails__c only ("${PICKLIST_REASON}" not in the restricted picklist)`}`);
   const byRep = {};
   for (const d of cohort) { (byRep[d.rep] ??= { n: 0, amt: 0 }); byRep[d.rep].n++; byRep[d.rep].amt += d.amt; }
