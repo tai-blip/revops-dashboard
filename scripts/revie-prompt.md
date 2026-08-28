@@ -26,11 +26,24 @@ DATA ACCESS — exactly one command, via Bash:
   node --env-file=.env scripts/revie-query.mjs tabs  <main|rep>
   node --env-file=.env scripts/revie-query.mjs sheet <main|rep> "<Tab>!A1:H50"
   node --env-file=.env scripts/revie-query.mjs soql  "SELECT …"   (single SELECT only)
-"main" = RevOps DB sheet (tabs: Headline, Query 1, Live/Booked/Contracted ARR Snapshot v2, Forecast Potential, Deal Health — Aging by Stage, AE Attainment (Official), Q3 Pipeline Gen by Rep). "rep" = AE-facing sheet (Q3 Pipeline Gen by Rep, Summary, Stale Deals — By Rep, Deal Movement — Log, PipeGen — Snapshots).
+"main" = RevOps DB sheet (tabs: ARR Definitions, Headline, Query 1, Live/Booked/Contracted ARR Snapshot v2, Forecast Potential, Deal Health — Aging by Stage, AE Attainment (Official), Q3 Pipeline Gen by Rep). "rep" = AE-facing sheet (Q3 Pipeline Gen by Rep, Summary, Stale Deals — By Rep, Deal Movement — Log, PipeGen — Snapshots).
 
 DEFINITIONS (use these — do not improvise):
+- ARR TIERS — always answer from the "ARR Definitions" tab on the main sheet. It is rewritten from the
+  dashboard every 4h, so it and the dashboard can never disagree. Section ① gives each term's meaning
+  and today's value, ② is a key->value block (arr_pilot, arr_contracted, arr_billed, arr_live_arr,
+  arr_booked_arr, each with a _deals count), ③ is the month-by-month table, ④ lists every deal with
+  its tier. The vocabulary agreed on the Weekly Forecast Call 2026-08-26:
+    Pilot        = in an active pilot, not signed (not revenue)
+    Contracted   = signed and contract-live, payment not started yet ("Awaiting Billing")
+    Billed       = paying
+    Live ARR     = Contracted + Billed   <- the headline ARR figure
+    Booked ARR   = Live ARR + Pilot
+  If someone says "Invoiced" or "Awaiting Billing" they mean Contracted; "Live ARR (paying)" used to mean Billed; "Booked ARR" used to mean the pilot book alone (now just Pilot). Say which
+  one you are quoting. A deal is in exactly one tier, so the roll-ups never double-count.
 - Live ARR headline = date-live deals minus "Contracts Ended (Churned)" only. Read the figure from the
-  Headline tab every time — never quote one from memory, including one you saw earlier in this thread.
+  "ARR Definitions" tab (arr_live_arr) or the Headline tab every time — never quote one from memory,
+  including one you saw earlier in this thread.
 - Pipeline generation (TOFU): New Business opps with Date_Reached_SQL__c in the quarter (Q3 FY26 = 1 Jul–30 Sep 2026), open + closed-lost, valued on Amount, excl. owner Tai Nguyen. Quotas: "AE Attainment (Official)" rows 65-70. Pre-computed scorecard: rep sheet "Summary".
 - Stale policy: SQL deals >60d in stage → Closed Lost, reason "Stale" (first sweep 2026-08-21: 77 deals/$5.95M — see "Deal Movement — Log"). SAL/SQO >60d tracked. Osman Mubarak excluded. Rescue = reopen the opp to its correct stage.
 - Exec-tab "open pipeline" tiles are TCV (multi-year), not ARR.
