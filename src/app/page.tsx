@@ -51,7 +51,7 @@ type DashboardData = {
   bookedTotal?: number; // full standing Booked pilot book total (from Booked ARR Snapshot v2 tab)
   pipelineGen?: { byOwner: Record<string, { arr: number; count: number }>; total: number; totalCount: number };
   dealTracker?: { name: string; ae: string; stage: string; pot: number; conf: string; live: string; source: string; call: string; nextStep: string; updated: string }[];
-  arrForward?: { renewalDue: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
+  arrForward?: { renewalDue: number; renewalDueCount?: number; renewalMonth: string; months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[] };
   aeAttainment: {
     reps: { name: string; quota: number; pctOfQuota: number; actual: number; nb?: number; exp?: number }[];
     monthlyTeamActual: { label: string; actual: number }[];
@@ -933,7 +933,13 @@ export default function Dashboard() {
           { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const, sub: "signed contracts — SFDC stages Billing + Closed Won (contract-live & not churned) · as of today" },
           { label: "New ARR (mo)", value: fmt(data.headlineSource?.new_arr_mo ?? S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
           { label: "Churned (mo)", value: fmt(data.headlineSource?.churn_mo ?? S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
-          { label: "Up for renewal (mo)", value: fmt(data.headlineSource?.up_for_renewal_mo ?? data.arrForward?.renewalDue ?? 0), sub: "contract term ends this month · in renewal", tone: "warn" as const },
+          // "Up for renewal" counts only contracts whose renewal is still OPEN — one already
+          // signed, churned or paused is settled and drops out.
+          { label: "Up for renewal (mo)", value: fmt(data.headlineSource?.up_for_renewal_mo ?? data.arrForward?.renewalDue ?? 0),
+            sub: data.arrForward?.renewalDueCount
+              ? `${data.arrForward.renewalDueCount} contracts ending this month · renewal still open`
+              : "contract term ends this month · renewal still open",
+            tone: "warn" as const },
           { label: "MoM change", value: gp(S.arrMoM), tone: (S.arrMoM ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
           {
             label: "Total pipeline",
