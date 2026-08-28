@@ -552,10 +552,23 @@ async function main() {
   // end in (firstOfThisMonth, firstOfNextMonth].
   const firstThis = curYM + "-01";
   const firstNext = (curM === 12 ? `${curY + 1}-01` : `${curY}-${String(curM + 1).padStart(2, "0")}`) + "-01";
-  let renewalDue = 0;
-  for (const x of won) { const e = (x.ContractEndDate__c ?? "").slice(0, 10); if (e && e > firstThis && e <= firstNext) renewalDue += Number(x.AnnualContractValueARR__c ?? 0); }
+  // "Up for renewal" means the renewal is still OPEN. A contract whose renewal has already
+  // been signed, or that churned or paused, is settled — it is no longer up for anything, so it
+  // drops out of the total (Tai, 2026-08-28). Without this the tile counted deals whose renewal
+  // was already done, overstating what the team still has to chase.
+  const RENEWAL_SETTLED = new Set(["Contract Renewed", "Contracts Ended (Churned)", "Contract Paused"]);
+  let renewalDue = 0, renewalDueN = 0, renewalSettled = 0;
+  for (const x of won) {
+    const e = (x.ContractEndDate__c ?? "").slice(0, 10);
+    if (!(e && e > firstThis && e <= firstNext)) continue;
+    const arr = Number(x.AnnualContractValueARR__c ?? 0);
+    if (RENEWAL_SETTLED.has(String(x.Status__c ?? ""))) { renewalSettled += arr; continue; }
+    renewalDue += arr; renewalDueN++;
+  }
+  console.log(`renewal due this month: ${renewalDueN} deals $${Math.round(renewalDue).toLocaleString()} ` +
+    `(excluded $${Math.round(renewalSettled).toLocaleString()} already renewed / churned / paused)`);
   const arrForward = [
-    ["Renewal due (contract end this month)", Math.round(renewalDue), "Current month", curYM, `Updated ${topStamp}`],
+    ["Renewal due (contract end this month)", Math.round(renewalDue), renewalDueN, curYM, `Updated ${topStamp}`],
     ["Month", "YM", "GoLive NB", "GoLive Exp", "GoLive Total"],
     ...fwdList.map((f) => {
       const g = goLive[f.ym] ?? { nb: 0, exp: 0 };

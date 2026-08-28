@@ -301,16 +301,18 @@ export function parseAeAnnualTab(rows: Row[]): { reps: AnnualRep[]; missingYearl
 // "ARR_Forward" tab (written by refresh-arr-from-sfdc.mjs). Forward-looking booked ARR:
 // scheduled go-lives per future month (NB/Exp) + the current-month renewal-due exposure.
 export type ArrForward = {
-  renewalDue: number; renewalMonth: string;
+  renewalDue: number; renewalDueCount: number; renewalMonth: string;
   months: { label: string; ym: string; goLiveNB: number; goLiveExp: number; goLiveTotal: number }[];
 };
 export function parseArrForwardTab(rows: Row[]): ArrForward {
-  const empty: ArrForward = { renewalDue: 0, renewalMonth: "", months: [] };
+  const empty: ArrForward = { renewalDue: 0, renewalDueCount: 0, renewalMonth: "", months: [] };
   if (!rows || rows.length < 2) return empty;
   const renewalDue = Number(rows[0]?.[1] ?? 0) || 0;
+  // How many contracts that total covers — written alongside it so the tile can say "N open".
+  const renewalDueCount = Number(rows[0]?.[2] ?? 0) || 0;
   const renewalMonth = String(rows[0]?.[3] ?? "");
   const headerIdx = rows.findIndex((r) => String(r?.[0] ?? "") === "Month");
-  if (headerIdx === -1) return { renewalDue, renewalMonth, months: [] };
+  if (headerIdx === -1) return { renewalDue, renewalDueCount, renewalMonth, months: [] };
   const months: ArrForward["months"] = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i];
@@ -321,7 +323,7 @@ export function parseArrForwardTab(rows: Row[]): ArrForward {
       goLiveNB: Number(r[2] ?? 0) || 0, goLiveExp: Number(r[3] ?? 0) || 0, goLiveTotal: Number(r[4] ?? 0) || 0,
     });
   }
-  return { renewalDue, renewalMonth, months };
+  return { renewalDue, renewalDueCount, renewalMonth, months };
 }
 
 // "Deal Tracker (DRAFT)" tab (seeded by build-deal-tracker.mjs, edited by the team).
