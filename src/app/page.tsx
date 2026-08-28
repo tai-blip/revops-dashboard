@@ -2483,6 +2483,11 @@ export default function Dashboard() {
         // the AE Attainment (Official) filter, which is New Business only — that hid wins like
         // Mathias's $327 Hot Head Burritos expansion, his only 2026 deal.
         const CW_RT = new Set(["NB", "EXP"]);
+        const cwY = (owners: string[], tier?: "Contracted" | "Billed") =>
+          (data.closedWonFeed ?? [])
+            .filter((d) => owners.includes(d.owner) && CW_RT.has(d.rt) && (!tier || d.tier === tier)
+              && d.cld.startsWith(String(new Date().getUTCFullYear())))
+            .reduce((t, d) => t + d.arr, 0);
         const cwQ = (owners: string[], tier?: "Contracted" | "Billed") =>
           (data.closedWonFeed ?? []).filter((d) => owners.includes(d.owner) && CW_RT.has(d.rt) && (!tier || d.tier === tier)
             && d.eld >= `${new Date().getUTCFullYear()}-${String((Number(Q.key.replace(/\D/g, "") || 1) - 1) * 3 + 1).padStart(2, "0")}-01`
@@ -2554,7 +2559,7 @@ export default function Dashboard() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Annual Goal</Th><Th>YTD (Closed)</Th><Th>Pot. Early (SQL+SAL)</Th><ThLate>Pot. Late (SQO+Trial)</ThLate><Th>Projection</Th><Th>vs Goal</Th>
+                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Annual Goal</Th><Th>YTD (Closed)</Th><Th>· Contracted</Th><Th>· Billed</Th><Th>Pot. Early (SQL+SAL)</Th><ThLate>Pot. Late (SQO+Trial)</ThLate><Th>Projection</Th><Th>vs Goal</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2571,7 +2576,13 @@ export default function Dashboard() {
                           onClick={() => { setFDrill(null); setCwDrill({ owners: [r.name], label: r.name.split(" ")[0], scope: "y", cell: r.ytdTotal }); }}>
                           {fmt(r.ytdTotal)}
                         </span>
+                        {Math.abs(cwY([r.name]) - r.ytdTotal) > 1 && (
+                          <span style={{ color: C.ylw, marginLeft: 4, cursor: "help" }}
+                            title={`The annual tab reports ${fmt(r.ytdTotal)}, but only ${fmt(cwY([r.name]))} of closed ARR has a ${new Date().getUTCFullYear()} contract-live date in the LiveARR pull. The split beside this covers the ${fmt(cwY([r.name]))}; ${fmt(r.ytdTotal - cwY([r.name]))} is unaccounted for.`}>*</span>
+                        )}
                       </Td>
+                      <Td mono color={C.blue}>{cwY([r.name], "Contracted") > 0 ? fmt(cwY([r.name], "Contracted")) : "—"}</Td>
+                      <Td mono color={C.grn}>{cwY([r.name], "Billed") > 0 ? fmt(cwY([r.name], "Billed")) : "—"}</Td>
                       <Td mono color={C.coralDk}>{dnum(r.name, r.name.split(" ")[0], "early", early)}</Td>
                       <TdLate>{dnum(r.name, r.name.split(" ")[0], "late", late)}</TdLate>
                       <Td mono bold>{fmt(r.projection)}</Td>
@@ -2584,6 +2595,8 @@ export default function Dashboard() {
                     <Td mono color={C.blue}>{tnum(OWN_YEAR, "Team", "open", annYReps.reduce((s, r) => s + (fByName[r.name]?.openPipe ?? 0), 0))}</Td>
                     <Td mono>{fmt(annYTot.goal)}</Td>
                     <Td mono color={C.coralDk}>{tcw(OWN_YEAR, "Team", "y", annYTot.ytd)}</Td>
+                    <Td mono color={C.blue}>{fmt(cwY(OWN_YEAR, "Contracted"))}</Td>
+                    <Td mono color={C.grn}>{fmt(cwY(OWN_YEAR, "Billed"))}</Td>
                     <Td mono color={C.coralDk}>{tnum(OWN_YEAR, "Team", "early", annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? earlyPot(fr, true) : 0); }, 0))}</Td>
                     <TdLate bold last>{tnum(OWN_YEAR, "Team", "late", annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? latePot(fr, true) : 0); }, 0))}</TdLate>
                     <Td mono bold>{fmt(annYTot.proj)}</Td>
@@ -2597,7 +2610,7 @@ export default function Dashboard() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed Won</Th><Th>· Contracted</Th><Th>· Billed</Th><Th>Pot. Early (SQL+SAL)</Th><ThLate>Pot. Late (SQO+Trial)</ThLate><Th>Potential</Th><Th>vs Quota</Th>
+                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed</Th><Th>· Contracted</Th><Th>· Billed</Th><Th>Pot. Early (SQL+SAL)</Th><ThLate>Pot. Late (SQO+Trial)</ThLate><Th>Potential</Th><Th>vs Quota</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2739,7 +2752,7 @@ export default function Dashboard() {
                     : [];
                   const exclTotal = excluded.reduce((t, d) => t + d.arr, 0);
                   cwSpec = {
-                    title: `closed-won-${cwDrill.label}-${cwDrill.scope}`,
+                    title: `closed-${cwDrill.label}-${cwDrill.scope}`,
                     chips: [cwDrill.label,
                       cwDrill.scope === "q" ? `${Q.key} · New Business + Expansion` : `FY${yr.slice(2)} · all record types`,
                       cwDrill.scope === "q" ? "by effective live date" : "by contract live date"],
@@ -2778,7 +2791,7 @@ export default function Dashboard() {
             </div>
             <div style={{ fontSize: 11.5, color: C.t3, marginTop: 10 }}>
               Tip: every number on a row opens the deals behind it — <b>Open Pipeline</b>, <b>Pot. Early</b>, <b>Pot. Late</b>,
-              and <b>Closed Won</b> / <b>YTD</b>. Closed Won counts <b>New Business only</b>, on each deal&rsquo;s effective live date;
+              and <b>Closed</b> / <b>YTD</b>. Closed counts <b>New Business + Expansion</b>, on each deal&rsquo;s effective live date;
               the yearly YTD column counts <b>every record type</b> on the contract live date. Click either to see exactly what is in it.
             </div>
           </Card>
