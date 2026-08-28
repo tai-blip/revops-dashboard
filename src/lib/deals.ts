@@ -1028,7 +1028,13 @@ export function computeForecastTab(
   };
   const aeTeam = sum(rows.filter((r) => !r.am && !r.lead));
   const totalInclAM = sum(rows.filter((r) => !r.lead));
-  const totalInclLead = sum(rows);
+  // Davi's quota is the RESIDUAL of the other reps' quotas (see AE_ROSTER), so adding it to the
+  // team total would count the same target twice — once inside the quotas it was derived from,
+  // once as his own line. His pipeline, closed won and potential all roll up; only the quota is
+  // held back, so the team quota stays what leadership assigned (Tai, 2026-08-28).
+  const totalInclLead = { ...sum(rows), quota: sum(rows.filter((r) => !r.lead)).quota };
+  totalInclLead.variance = totalInclLead.potential - totalInclLead.quota;
+  totalInclLead.attainP = totalInclLead.quota ? totalInclLead.potential / totalInclLead.quota : null;
 
   // ── Year-end projection: per-stage weighted contributions ──
   const YE_WR = 0.25; // flat rate kept for the gap-coverage "pipeline needed" math

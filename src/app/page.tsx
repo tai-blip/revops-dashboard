@@ -3214,6 +3214,7 @@ export default function Dashboard() {
                             {sec.rows.filter((row) => !row.parent || funnelOpen[row.parent]).map((row) => {
                               const hasKids = sec.rows.some((r) => r.parent === row.bucket);
                               const open = !!funnelOpen[row.bucket];
+                              const kidCount = sec.rows.filter((r) => r.parent === row.bucket).length;
                               return (
                               <tr key={row.bucket} style={{ borderBottom: `1px solid ${C.s1}`, background: row.total ? C.s2 : undefined }}>
                                 <td style={{ textAlign: "left", padding: "10px 16px 10px 0",
@@ -3225,26 +3226,19 @@ export default function Dashboard() {
                                       cursor: hasKids ? "pointer" : row.hint ? "help" : undefined,
                                       textDecoration: row.hint && !hasKids ? "underline dotted" : undefined,
                                       textDecorationColor: C.bd, textUnderlineOffset: "3px" }}>
-                                    {hasKids
-                                      ? <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                          width: 18, height: 18, marginRight: 8, borderRadius: 4, fontSize: 10, lineHeight: 1,
-                                          border: `1px solid ${open ? row.color : C.bd}`,
-                                          background: open ? row.color : "transparent",
-                                          color: open ? "#fff" : row.color, verticalAlign: "middle" }}>
-                                          {open ? "▾" : "▸"}
-                                        </span>
-                                      : null}
                                     {row.label}
-                                    {row.cross && (
-                                      <span style={{ marginLeft: 7, fontSize: 9.5, fontWeight: 700, color: C.t3,
-                                        border: `1px solid ${C.bd}`, borderRadius: 3, padding: "1px 5px", letterSpacing: ".03em" }}>
-                                        OVERLAPS
-                                      </span>
-                                    )}
+                                    {/* One filled pill, not a bare caret: the control has to look
+                                        pressable or nobody finds the breakdown. */}
                                     {hasKids && (
-                                      <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: C.t3,
-                                        letterSpacing: ".03em", textTransform: "uppercase" }}>
-                                        {open ? "hide split" : "show split"}
+                                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5,
+                                        marginLeft: 10, padding: "3px 9px 3px 7px", borderRadius: 20,
+                                        border: `1.5px solid ${row.color}`,
+                                        background: open ? row.color : `${row.color}1f`,
+                                        color: open ? "#fff" : row.color,
+                                        fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em",
+                                        textTransform: "uppercase", whiteSpace: "nowrap", lineHeight: 1.4 }}>
+                                        <span style={{ fontSize: 9 }}>{open ? "▼" : "▶"}</span>
+                                        {open ? "Hide" : `Show ${kidCount}`}
                                       </span>
                                     )}
                                   </span>
