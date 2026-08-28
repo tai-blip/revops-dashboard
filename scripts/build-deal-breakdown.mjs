@@ -15,7 +15,7 @@ const ID = process.env.GOOGLE_SHEET_ID;
 const TAB = "Deal Breakdown";
 const SF = "https://fun-ruby-7024.my.salesforce.com"; // SF instance base for record links (static)
 const Q = "'Query 1'";
-const R = (c) => `${Q}!$${c}$3:$${c}$2000`; // Query 1 data rows (C=Stage,A=Id,B=Name,J=Owner,D=ARR,G=Created,L=LastStageChange)
+const R = (c) => `${Q}!$${c}$3:$${c}$2000`; // Query 1 data rows (A=Id,B=Name,C=Stage,D=ARR,G=Created,J=Owner,L=LastStageChange,M=Amount,N=AE/AM % quarter,O=AE/AM % year)
 const NB = `${R("C")}<>""`; // non-blank stage = a real open deal
 const AGE_RAW = `TODAY()-DATEVALUE(LEFT(IF(${R("L")}<>"",${R("L")},${R("G")}),10))`;
 const AGE = `IFERROR(${AGE_RAW},"")`;   // for the Age column ("" on bad/blank date)
@@ -24,8 +24,16 @@ const arr = (expr) => `=ARRAYFORMULA(IF(${R("C")}="","",${expr}))`;
 
 async function main() {
   const api = google.sheets({ version: "v4", auth: gAuth });
+  // A blank cell breaks arithmetic inside ARRAYFORMULA (""*1 is #VALUE!), so every number is
+  // coerced first. OR() does not broadcast over a range either — (a)+(b) is the array-safe form.
+  const n = (x) => `IF(ISNUMBER(${x}),${x},0)`;
+  const EARLY = `((${R("C")}="SQL")+(${R("C")}="SAL"))`;
+  // Potential per deal, exactly as the Forecast tab defines it: Early (SQL/SAL) weights the
+  // Amount, Late (SQO/Trial) weights the ARR, and the AE/AM probability is a 0-100 percentage.
+  const pot = (probCol) => `IF(${EARLY},${n(R("M"))},${n(R("D"))})*${n(R(probCol))}/100`;
   const rows = [
-    ["Opp ID", "SFDC Link", "Name", "Owner", "Stage", "ARR", "Age (days)", "Stale (≥90d)"],
+    ["Opp ID", "SFDC Link", "Name", "Owner", "Stage", "ARR", "Age (days)", "Stale (≥90d)",
+     "Amount", "AE/AM % (Q)", "AE/AM % (Year)", "Potential (Q)", "Potential (Year)"],
     [
       arr(R("A")),                                   // Opp ID
       arr(`"${SF}/"&${R("A")}`),                     // SFDC Link (full URL)
@@ -35,13 +43,18 @@ async function main() {
       arr(R("D")),                                   // ARR
       arr(AGE),                                       // Age (days)
       arr(`IF(${AGE0}>=90,"Yes","No")`),             // Stale (≥90d)
+      arr(R("M")),                                   // Amount
+      arr(R("N")),                                   // AE/AM % (quarter)
+      arr(R("O")),                                   // AE/AM % (year)
+      arr(pot("N")),                                 // Potential (Q)
+      arr(pot("O")),                                 // Potential (Year)
     ],
   ];
   const meta = await api.spreadsheets.get({ spreadsheetId: ID, fields: "sheets.properties(sheetId,title)" });
   const ex = meta.data.sheets.find((s) => s.properties.title === TAB);
   const reqs = [];
   if (ex) reqs.push({ deleteSheet: { sheetId: ex.properties.sheetId } });
-  reqs.push({ addSheet: { properties: { title: TAB, gridProperties: { rowCount: 2200, columnCount: 8 } } } });
+  reqs.push({ addSheet: { properties: { title: TAB, gridProperties: { rowCount: 2200, columnCount: 13 } } } });
   await api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: ID, range: `'${TAB}'!A1`, valueInputOption: "USER_ENTERED", requestBody: { values: rows } });
   const back = (await api.spreadsheets.values.get({ spreadsheetId: ID, range: `'${TAB}'!A1:H6`, valueRenderOption: "UNFORMATTED_VALUE" })).data.values ?? [];

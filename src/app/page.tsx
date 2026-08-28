@@ -79,7 +79,7 @@ type DashboardData = {
   };
   dealHealth: { label: string; min: number; max: number; arr: number; count: number }[];
   agingByStage?: { ae: string; stage: string; deals: number; avgAge: number | null; stale: number | null; staleDollar: number | null; avgAcv: number | null; total: boolean }[];
-  dealBreakdown?: { id: string; url: string; name: string; owner: string; stage: string; arr: number; age: number | null; stale: boolean }[];
+  dealBreakdown?: { id: string; url: string; name: string; owner: string; stage: string; arr: number; age: number | null; stale: boolean; amount: number | null; probQ: number | null; probY: number | null; potQ: number; potY: number }[];
   // Signed deals (Billing / Closed Won) whose effective live date falls in the current year —
   // the same rows the "AE Attainment (Official)" formulas sum, so the Closed Won drill-down can
   // tie to the cell. `eld` is Effective_Live_Date (what attainment counts on); `cld` is the raw
@@ -542,7 +542,7 @@ export default function Dashboard() {
   // Forecast tab: which cell's deals to show. Stored as the SELECTION (owner + which stage
   // bucket), never as a copied list, so the panel is always derived from the same rows the
   // number itself came from.
-  const [fDrill, setFDrill] = useState<{ owner: string; label: string; bucket: "open" | "early" | "late"; cell: number } | null>(null);
+  const [fDrill, setFDrill] = useState<{ owners: string[]; label: string; bucket: "open" | "early" | "late"; cell: number } | null>(null);
   // Booked ARR & Cashflow: which month's rows to show. cfDrill = cash-in payments (Cash timing),
   // pcDrill = deals arriving into a tier (Forward ARR forecast).
   const [cfDrill, setCfDrill] = useState<{ ym: string; label: string; kind: "std" | "rr" | "all" } | null>(null);
@@ -551,7 +551,7 @@ export default function Dashboard() {
   const [afDrill, setAfDrill] = useState<{ ym: string; label: string; bucket: string; col: string; cell: number } | null>(null);
   // Forecast tab — Closed Won / YTD click-through. Separate from fDrill because it lists CLOSED
   // deals (from closedWonFeed) rather than open pipeline; the two never show at once.
-  const [cwDrill, setCwDrill] = useState<{ owner: string; label: string; scope: "q" | "y"; cell: number } | null>(null);
+  const [cwDrill, setCwDrill] = useState<{ owners: string[]; label: string; scope: "q" | "y"; cell: number } | null>(null);
   // Which funnel rows have their breakdown expanded. Collapsed by default so the matrix reads
   // as the five headline lines; click "Contracted" to see the renewal / expansion split.
   const [funnelOpen, setFunnelOpen] = useState<Record<string, boolean>>({});
@@ -1351,6 +1351,36 @@ export default function Dashboard() {
               );
             })()}
 
+
+            {/* ARR at a glance — the same five figures the Booked ARR & Cashflow tab defines,
+                surfaced here so the Command tab answers "where is ARR" without a tab switch. */}
+            {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
+              const n = data.arrFunnel.stock[data.arrFunnel.stock.length - 1];
+              const cnt = (b: string) => (n.ids?.[b] ?? []).length;
+              const tiles = [
+                { label: "Pilot", v: n.booked, c: C.gold, sub: "in trial, unsigned", deals: cnt("booked") },
+                { label: "Contracted", v: n.contracted, c: C.blue, sub: "signed, billing not started", deals: cnt("contracted") },
+                { label: "Billed", v: n.live, c: C.grn, sub: "paying", deals: cnt("live") },
+                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed", deals: cnt("liveArr"), hero: true },
+                { label: "Booked ARR", v: n.bookedPilot, c: C.t1, sub: "Live ARR + Pilot", deals: cnt("bookedPilot") },
+              ];
+              return (
+                <Card title="ARR at a glance" sub={`Point-in-time, as of ${n.label} · full detail on the Booked ARR & Cashflow tab`}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10, padding: "14px 20px 18px" }}>
+                    {tiles.map((t) => (
+                      <div key={t.label} style={{ border: `1.5px solid ${t.hero ? t.c : C.bd}`, borderRadius: 10,
+                        padding: "12px 14px", background: t.hero ? C.s2 : "transparent" }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: t.c }}>{t.label}</div>
+                        <div style={{ fontSize: 21, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(t.v)}</div>
+                        <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{t.sub}</div>
+                        <div style={{ fontSize: 10.5, color: C.t3, fontFamily: "var(--font-dm-mono)", marginTop: 1 }}>{t.deals} deals</div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              );
+            })()}
+            <div style={{ height: 16 }} />
 
             <Card
               title="Pipeline Pulse — Week over Week"
@@ -2303,8 +2333,20 @@ export default function Dashboard() {
         const openPot = (r: PotRow, yearly: boolean) => earlyPot(r, yearly) + latePot(r, yearly);
         // Click a forecast number → the deals behind it. A span (not the cell) so the column keeps
         // its colour, and the click stores only the SELECTION — the panel re-derives the rows.
+        // Owner sets behind each total row, so a total opens exactly the deals it adds up.
+        const OWN_AE = F.rows.filter((r) => !r.am && !r.lead).map((r) => r.name);
+        const OWN_AM = F.rows.filter((r) => !r.lead).map((r) => r.name);
+        const OWN_ALL = F.rows.map((r) => r.name);
+        const tnum = (owners: string[], label: string, bucket: "open" | "early" | "late", value: number) => (
+          <span style={drillable} title="Click to see every deal behind this total"
+            onClick={() => { setCwDrill(null); setFDrill({ owners, label, bucket, cell: value }); }}>{fmt(value)}</span>
+        );
+        const tcw = (owners: string[], label: string, scope: "q" | "y", value: number) => (
+          <span style={drillable} title="Click to see every deal behind this total"
+            onClick={() => { setFDrill(null); setCwDrill({ owners, label, scope, cell: value }); }}>{fmt(value)}</span>
+        );
         const dnum = (owner: string, label: string, bucket: "open" | "early" | "late", value: number) => (
-          <span style={drillable} onClick={() => { setCwDrill(null); setFDrill({ owner, label, bucket, cell: value }); }} title="Click to see the deals">{fmt(value)}</span>
+          <span style={drillable} onClick={() => { setCwDrill(null); setFDrill({ owners: [owner], label, bucket, cell: value }); }} title="Click to see the deals">{fmt(value)}</span>
         );
         // Quarterly per-row cells (toggle-aware). Potential = Closed Won + Early + Late.
         // "Pot. Late" (SQO + Trial) is the half of Potential with a real chance of closing in
@@ -2433,6 +2475,7 @@ export default function Dashboard() {
           })
           .sort((a, b) => b.pctProj - a.pctProj);
         const kMY = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : "$" + Math.round(n / 1e3) + "k");
+        const OWN_YEAR = annYReps.map((r) => r.name);
         const annYTot = annYReps.reduce((t, r) => ({ goal: t.goal + r.goal, ytd: t.ytd + r.ytdTotal, pot: t.pot + r.potTotal, proj: t.proj + r.projection, miss: t.miss + r.yrMissing,
             early: t.early + (fByName[r.name] ? earlyPot(fByName[r.name], true) : 0), late: t.late + (fByName[r.name] ? latePot(fByName[r.name], true) : 0) }),
           { goal: 0, ytd: 0, pot: 0, proj: 0, miss: 0, early: 0, late: 0 });
@@ -2511,7 +2554,7 @@ export default function Dashboard() {
                       <Td mono color={C.t2}>{r.goal > 0 ? fmt(r.goal) : "—"}</Td>
                       <Td mono color={r.ytdTotal > 0 ? C.coralDk : C.t1}>
                         <span style={drillable} title="Click to see the closed deals"
-                          onClick={() => { setFDrill(null); setCwDrill({ owner: r.name, label: r.name.split(" ")[0], scope: "y", cell: r.ytdTotal }); }}>
+                          onClick={() => { setFDrill(null); setCwDrill({ owners: [r.name], label: r.name.split(" ")[0], scope: "y", cell: r.ytdTotal }); }}>
                           {fmt(r.ytdTotal)}
                         </span>
                       </Td>
@@ -2524,11 +2567,11 @@ export default function Dashboard() {
                   })}
                   <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
                     <Td l bold>Team</Td>
-                    <Td mono>{fmt(annYReps.reduce((s, r) => s + (fByName[r.name]?.openPipe ?? 0), 0))}</Td>
+                    <Td mono color={C.blue}>{tnum(OWN_YEAR, "Team", "open", annYReps.reduce((s, r) => s + (fByName[r.name]?.openPipe ?? 0), 0))}</Td>
                     <Td mono>{fmt(annYTot.goal)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(annYTot.ytd)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? earlyPot(fr, true) : 0); }, 0))}</Td>
-                    <TdLate bold last>{fmt(annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? latePot(fr, true) : 0); }, 0))}</TdLate>
+                    <Td mono color={C.coralDk}>{tcw(OWN_YEAR, "Team", "y", annYTot.ytd)}</Td>
+                    <Td mono color={C.coralDk}>{tnum(OWN_YEAR, "Team", "early", annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? earlyPot(fr, true) : 0); }, 0))}</Td>
+                    <TdLate bold last>{tnum(OWN_YEAR, "Team", "late", annYReps.reduce((s, r) => { const fr = fByName[r.name]; return s + (fr ? latePot(fr, true) : 0); }, 0))}</TdLate>
                     <Td mono bold>{fmt(annYTot.proj)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(annYTot.goal > 0 ? annYTot.proj / annYTot.goal : null, annYTot.goal > 0 ? annYTot.proj - annYTot.goal : null)}</td>
                   </tr>
@@ -2551,7 +2594,7 @@ export default function Dashboard() {
                       <Td mono color={C.t2}>{r.quota != null && r.quota > 0 ? fmt(r.quota) : "\u2014"}</Td>
                       <Td mono color={r.closedWon > 0 ? C.coralDk : C.t1}>
                         <span style={drillable} title="Click to see the closed deals"
-                          onClick={() => { setFDrill(null); setCwDrill({ owner: r.name, label: r.short ?? short(r.name), scope: "q", cell: r.closedWon }); }}>
+                          onClick={() => { setFDrill(null); setCwDrill({ owners: [r.name], label: r.short ?? short(r.name), scope: "q", cell: r.closedWon }); }}>
                           {fmt(r.closedWon)}
                         </span>
                       </Td>
@@ -2563,14 +2606,14 @@ export default function Dashboard() {
                   ))}
                   <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
                     <Td l bold>AE team</Td>
-                    <Td mono>{fmt(F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono>{fmt(F.aeTeam.closedWon)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.aeTeam, false))}</Td><TdLate bold>{fmt(latePot(F.aeTeam, false))}</TdLate><Td mono bold>{fmt(qCells(F.aeTeam).pot)}</Td>
+                    <Td mono color={C.blue}>{tnum(OWN_AE, "AE team", "open", F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_AE, "AE team", "q", F.aeTeam.closedWon)}</Td>
+                    <Td mono color={C.coralDk}>{tnum(OWN_AE, "AE team", "early", earlyPot(F.aeTeam, false))}</Td><TdLate bold>{tnum(OWN_AE, "AE team", "late", latePot(F.aeTeam, false))}</TdLate><Td mono bold>{fmt(qCells(F.aeTeam).pot)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.aeTeam).attainP, qCells(F.aeTeam).variance)}</td>
                   </tr>
                   <tr style={{ background: "#EEF2F8", fontWeight: 700 }}>
                     <Td l bold>Total · incl AM</Td>
-                    <Td mono>{fmt(F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono>{fmt(F.totalInclAM.closedWon)}</Td>
-                    <Td mono color={C.coralDk}>{fmt(earlyPot(F.totalInclAM, false))}</Td><TdLate bold last={!hasLead}>{fmt(latePot(F.totalInclAM, false))}</TdLate><Td mono bold>{fmt(qCells(F.totalInclAM).pot)}</Td>
+                    <Td mono color={C.blue}>{tnum(OWN_AM, "incl AM", "open", F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_AM, "incl AM", "q", F.totalInclAM.closedWon)}</Td>
+                    <Td mono color={C.coralDk}>{tnum(OWN_AM, "incl AM", "early", earlyPot(F.totalInclAM, false))}</Td><TdLate bold last={!hasLead}>{tnum(OWN_AM, "incl AM", "late", latePot(F.totalInclAM, false))}</TdLate><Td mono bold>{fmt(qCells(F.totalInclAM).pot)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.totalInclAM).attainP, null)}</td>
                   </tr>
                   {hasLead && (() => {
@@ -2578,8 +2621,8 @@ export default function Dashboard() {
                     return (
                       <tr style={{ background: "#E4EAF2", fontWeight: 700 }}>
                         <Td l bold>Total · incl AM + Davi</Td>
-                        <Td mono>{fmt(G.openPipe)}</Td><Td mono>{fmt(G.quota)}</Td><Td mono>{fmt(G.closedWon)}</Td>
-                        <Td mono color={C.coralDk}>{fmt(earlyPot(G, false))}</Td><TdLate bold last>{fmt(latePot(G, false))}</TdLate><Td mono bold>{fmt(qCells(G).pot)}</Td>
+                        <Td mono color={C.blue}>{tnum(OWN_ALL, "everyone", "open", G.openPipe)}</Td><Td mono>{fmt(G.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_ALL, "everyone", "q", G.closedWon)}</Td>
+                        <Td mono color={C.coralDk}>{tnum(OWN_ALL, "everyone", "early", earlyPot(G, false))}</Td><TdLate bold last>{tnum(OWN_ALL, "everyone", "late", latePot(G, false))}</TdLate><Td mono bold>{fmt(qCells(G).pot)}</Td>
                         <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(G).attainP, null)}</td>
                       </tr>
                     );
@@ -2600,10 +2643,11 @@ export default function Dashboard() {
                 // bigger number than the cell it was opened from.
                 const FB_OPEN_EXCLUDE = ["Billing"];
                 let spec: DrillSpec<NonNullable<typeof data.dealBreakdown>[number]> | null = null;
+                const yearly = fcastView === "yearly";
                 if (fDrill && data.dealBreakdown) {
                   const stages = fDrill.bucket === "early" ? FB_EARLY : fDrill.bucket === "late" ? FB_LATE : null;
                   const rows = data.dealBreakdown
-                    .filter((d) => d.owner === fDrill.owner
+                    .filter((d) => fDrill.owners.includes(d.owner)
                       && (stages ? stages.includes(d.stage) : !FB_OPEN_EXCLUDE.includes(d.stage)))
                     .sort((a, b) => b.arr - a.arr);
                   const bucketChip = fDrill.bucket === "open" ? "open pipeline · excl. Billing"
@@ -2614,7 +2658,7 @@ export default function Dashboard() {
                   const note = fDrill.bucket === "open"
                     ? (total: number) => Math.abs(total - fDrill.cell) > Math.max(1000, fDrill.cell * 0.01)
                         ? `Heads up: the cell reads ${fmt(fDrill.cell)} from the Forecasting tab but these deals sum to ${fmt(total)} (Δ ${fmt(Math.abs(total - fDrill.cell))}). Both should be "open opps excluding stage Billing" — worth a look.`
-                        : `Matches the cell (${fmt(fDrill.cell)}): open opps for this AE, excluding stage Billing, same basis as the Forecasting tab formula.`
+                        : `Matches the cell (${fmt(fDrill.cell)}): open opps for ${fDrill.owners.length === 1 ? "this AE" : "these AEs"}, excluding stage Billing, same basis as the Forecasting tab formula.`
                     : (total: number) => `This cell is probability-weighted — Σ(deal value × AE/AM %) = ${fmt(fDrill.cell)}. The deals below show their full unweighted ARR (${fmt(total)}), so they will total more.`;
                   spec = {
                     title: `forecast-${fDrill.label}-${fDrill.bucket}`,
@@ -2631,6 +2675,18 @@ export default function Dashboard() {
                       { label: "Age (d)", mono: true, csv: (d) => d.age ?? "",
                         render: (d) => <span style={{ color: (d.age ?? 0) >= 90 ? C.red : C.t1 }}>{d.age ?? "—"}</span> },
                       { label: "ARR", mono: true, bold: true, csv: (d) => d.arr, render: (d) => fmt(d.arr) },
+                      // Probability and the Potential it produces, on whichever basis the toggle
+                      // is showing. Both come from the Deal Breakdown tab — the % is the rep's own
+                      // AE/AM field, the Potential is the sheet's formula over it.
+                      { label: yearly ? "AE/AM % (Year)" : "AE/AM % (Q)", mono: true,
+                        csv: (d) => (yearly ? d.probY : d.probQ) ?? "",
+                        render: (d) => { const v = yearly ? d.probY : d.probQ;
+                          return v == null ? <span style={{ color: C.ylw }} title="No AE/AM % set on this deal — it contributes nothing to Potential">—</span>
+                                           : <span style={{ color: v === 0 ? C.t3 : C.t1 }}>{v}%</span>; } },
+                      { label: yearly ? "Potential (Year)" : "Potential (Q)", mono: true, bold: true,
+                        csv: (d) => (yearly ? d.potY : d.potQ),
+                        render: (d) => { const v = yearly ? d.potY : d.potQ;
+                          return <span style={{ color: v > 0 ? C.purp : C.t3 }}>{v > 0 ? fmt(v) : "—"}</span>; } },
                     ],
                   };
                 }
@@ -2650,7 +2706,7 @@ export default function Dashboard() {
                   // Effective_Live_Date. Yearly cell = the annual tab: every record type, counted
                   // on the raw Contract Live Date. Same-looking columns, deliberately different
                   // scopes — so each side filters the way its own source does.
-                  const mine = data.closedWonFeed.filter((d) => d.owner === cwDrill.owner);
+                  const mine = data.closedWonFeed.filter((d) => cwDrill.owners.includes(d.owner));
                   const rows = cwDrill.scope === "q"
                     ? mine.filter((d) => d.rt === "NB" && inQ(d))
                     : mine.filter((d) => d.cld.startsWith(yr));
@@ -2990,7 +3046,7 @@ export default function Dashboard() {
               const AF = data.arrFunnel;
               const series = AF.stock;
               const cur = series[series.length - 1] ?? { booked: 0, contracted: 0, live: 0, liveArr: 0 };
-              const maxV = Math.max(1, ...series.map((p) => Math.max(p.booked, p.contracted, p.live, p.liveArr)));
+              const maxV = Math.max(1, ...series.map((p) => Math.max(p.liveArr, p.bookedPilot)));
               const W = 920, H = 240, padL = 58, padR = 16, padT = 16, padB = 30;
               const iw = W - padL - padR, ih = H - padT - padB;
               const xx = (i: number) => padL + (series.length <= 1 ? iw / 2 : (i / (series.length - 1)) * iw);
@@ -3074,6 +3130,36 @@ export default function Dashboard() {
                       {series.map((p, i) => i % every === 0 ? (
                         <text key={i} x={xx(i)} y={H - 10} textAnchor="middle" fontSize={11} fill={C.t3}>{p.label}</text>
                       ) : null)}
+                      {/* Stacked bars behind the lines: Billed + Contracted + Pilot per month, in
+                          the same colours as the rows below. The bars show composition, the Live
+                          ARR line shows the trend. Hover a segment for its exact amount. */}
+                      {series.map((p, i) => {
+                        const bw = Math.max(8, Math.min(34, (iw / series.length) * 0.52));
+                        const x = xx(i) - bw / 2;
+                        let acc = 0;
+                        return (
+                          <g key={`bar-${p.ym}`} opacity={0.5}>
+                            {([
+                              { k: "live", label: "Billed", c: C.grn },
+                              { k: "contracted", label: "Contracted", c: C.blue },
+                              { k: "booked", label: "Pilot", c: C.gold },
+                            ] as const).map((seg) => {
+                              const v = p[seg.k];
+                              if (!(v > 0)) return null;
+                              const y0 = yy(acc), y1 = yy(acc + v);
+                              acc += v;
+                              return (
+                                <rect key={seg.k} x={x} y={y1} width={bw} height={Math.max(0, y0 - y1)} fill={seg.c}>
+                                  <title>{`${p.label} · ${seg.label} ${fmt(v)}`}</title>
+                                </rect>
+                              );
+                            })}
+                            <rect x={x} y={padT} width={bw} height={ih} fill="transparent">
+                              <title>{`${p.label}\nPilot ${fmt(p.booked)}\nContracted ${fmt(p.contracted)}\nBilled ${fmt(p.live)}\nLive ARR ${fmt(p.liveArr)}\nBooked ARR ${fmt(p.bookedPilot)}`}</title>
+                            </rect>
+                          </g>
+                        );
+                      })}
                       {LINES.map((l) => <path key={l.key} d={path(l.key)} fill="none" stroke={l.color} strokeWidth={2.5} strokeLinejoin="round" />)}
                       {LINES.map((l) => <circle key={l.key} cx={xx(series.length - 1)} cy={yy(cur[l.key])} r={3.5} fill={l.color} />)}
                     </svg>
