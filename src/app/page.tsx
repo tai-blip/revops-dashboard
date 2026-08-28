@@ -84,7 +84,7 @@ type DashboardData = {
   // the same rows the "AE Attainment (Official)" formulas sum, so the Closed Won drill-down can
   // tie to the cell. `eld` is Effective_Live_Date (what attainment counts on); `cld` is the raw
   // Contract Live Date, which is NOT always the same day.
-  closedWonFeed?: { name: string; owner: string; stage: string; status: string; arr: number; rt: string; rtRaw: string; eld: string; cld: string }[];
+  closedWonFeed?: { name: string; owner: string; stage: string; status: string; arr: number; rt: string; rtRaw: string; eld: string; cld: string; tier: string }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
   forecast: {
@@ -2476,6 +2476,16 @@ export default function Dashboard() {
           .sort((a, b) => b.pctProj - a.pctProj);
         const kMY = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : "$" + Math.round(n / 1e3) + "k");
         const OWN_YEAR = annYReps.map((r) => r.name);
+        // Closed Won, split by the tier each won deal is in TODAY — Contracted (signed, not yet
+        // paying) vs Billed (paying). Same rows the Closed Won cell already counts, so the two
+        // always add back to it; only the presentation is new.
+        const cwQ = (owners: string[], tier: "Contracted" | "Billed") =>
+          (data.closedWonFeed ?? []).filter((d) => owners.includes(d.owner) && d.rt === "NB" && d.tier === tier
+            && d.eld >= `${new Date().getUTCFullYear()}-${String((Number(Q.key.replace(/\D/g, "") || 1) - 1) * 3 + 1).padStart(2, "0")}-01`
+            && d.eld < (Number(Q.key.replace(/\D/g, "") || 1) === 4
+              ? `${new Date().getUTCFullYear() + 1}-01-01`
+              : `${new Date().getUTCFullYear()}-${String(Number(Q.key.replace(/\D/g, "") || 1) * 3 + 1).padStart(2, "0")}-01`))
+            .reduce((t, d) => t + d.arr, 0);
         const annYTot = annYReps.reduce((t, r) => ({ goal: t.goal + r.goal, ytd: t.ytd + r.ytdTotal, pot: t.pot + r.potTotal, proj: t.proj + r.projection, miss: t.miss + r.yrMissing,
             early: t.early + (fByName[r.name] ? earlyPot(fByName[r.name], true) : 0), late: t.late + (fByName[r.name] ? latePot(fByName[r.name], true) : 0) }),
           { goal: 0, ytd: 0, pot: 0, proj: 0, miss: 0, early: 0, late: 0 });
@@ -2583,7 +2593,7 @@ export default function Dashboard() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed Won</Th><Th>Pot. Early (SQL+SAL)</Th><ThLate>Pot. Late (SQO+Trial)</ThLate><Th>Potential</Th><Th>vs Quota</Th>
+                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed Won</Th><Th>· Contracted</Th><Th>· Billed</Th><Th>Pot. Early (SQL+SAL)</Th><ThLate>Pot. Late (SQO+Trial)</ThLate><Th>Potential</Th><Th>vs Quota</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2598,6 +2608,8 @@ export default function Dashboard() {
                           {fmt(r.closedWon)}
                         </span>
                       </Td>
+                      <Td mono color={C.blue}>{cwQ([r.name], "Contracted") > 0 ? fmt(cwQ([r.name], "Contracted")) : "—"}</Td>
+                      <Td mono color={C.grn}>{cwQ([r.name], "Billed") > 0 ? fmt(cwQ([r.name], "Billed")) : "—"}</Td>
                       <Td mono color={C.coralDk}>{dnum(r.name, r.short ?? short(r.name), "early", earlyPot(r, false))}</Td>
                       <TdLate>{dnum(r.name, r.short ?? short(r.name), "late", latePot(r, false))}</TdLate>
                       <Td mono bold>{fmt(qCells(r).pot)}</Td>
@@ -2607,12 +2619,16 @@ export default function Dashboard() {
                   <tr style={{ borderTop: `2px solid ${C.navy}`, background: C.s2, fontWeight: 700 }}>
                     <Td l bold>AE team</Td>
                     <Td mono color={C.blue}>{tnum(OWN_AE, "AE team", "open", F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_AE, "AE team", "q", F.aeTeam.closedWon)}</Td>
+                    <Td mono color={C.blue}>{fmt(cwQ(OWN_AE, "Contracted"))}</Td>
+                    <Td mono color={C.grn}>{fmt(cwQ(OWN_AE, "Billed"))}</Td>
                     <Td mono color={C.coralDk}>{tnum(OWN_AE, "AE team", "early", earlyPot(F.aeTeam, false))}</Td><TdLate bold>{tnum(OWN_AE, "AE team", "late", latePot(F.aeTeam, false))}</TdLate><Td mono bold>{fmt(qCells(F.aeTeam).pot)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.aeTeam).attainP, qCells(F.aeTeam).variance)}</td>
                   </tr>
                   <tr style={{ background: "#EEF2F8", fontWeight: 700 }}>
                     <Td l bold>Total · incl AM</Td>
                     <Td mono color={C.blue}>{tnum(OWN_AM, "incl AM", "open", F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_AM, "incl AM", "q", F.totalInclAM.closedWon)}</Td>
+                    <Td mono color={C.blue}>{fmt(cwQ(OWN_AM, "Contracted"))}</Td>
+                    <Td mono color={C.grn}>{fmt(cwQ(OWN_AM, "Billed"))}</Td>
                     <Td mono color={C.coralDk}>{tnum(OWN_AM, "incl AM", "early", earlyPot(F.totalInclAM, false))}</Td><TdLate bold last={!hasLead}>{tnum(OWN_AM, "incl AM", "late", latePot(F.totalInclAM, false))}</TdLate><Td mono bold>{fmt(qCells(F.totalInclAM).pot)}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.totalInclAM).attainP, null)}</td>
                   </tr>
@@ -2622,6 +2638,8 @@ export default function Dashboard() {
                       <tr style={{ background: "#E4EAF2", fontWeight: 700 }}>
                         <Td l bold>Total · incl AM + Davi</Td>
                         <Td mono color={C.blue}>{tnum(OWN_ALL, "everyone", "open", G.openPipe)}</Td><Td mono>{fmt(G.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_ALL, "everyone", "q", G.closedWon)}</Td>
+                    <Td mono color={C.blue}>{fmt(cwQ(OWN_ALL, "Contracted"))}</Td>
+                    <Td mono color={C.grn}>{fmt(cwQ(OWN_ALL, "Billed"))}</Td>
                         <Td mono color={C.coralDk}>{tnum(OWN_ALL, "everyone", "early", earlyPot(G, false))}</Td><TdLate bold last>{tnum(OWN_ALL, "everyone", "late", latePot(G, false))}</TdLate><Td mono bold>{fmt(qCells(G).pot)}</Td>
                         <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(G).attainP, null)}</td>
                       </tr>
@@ -2740,7 +2758,8 @@ export default function Dashboard() {
                       { label: "Deal", l: true, csv: (d) => d.name, render: (d) => d.name },
                       { label: "Type", l: true, csv: (d) => d.rtRaw,
                         render: (d) => <Pill tone={d.rt === "NB" ? undefined : d.rt === "EXP" ? "blue" : "warn"}>{d.rtRaw.replace(/^\d+\.\s*/, "") || "—"}</Pill> },
-                      { label: "Stage", l: true, csv: (d) => d.stage, render: (d) => d.stage },
+                      { label: "Tier", l: true, csv: (d) => d.tier,
+                        render: (d) => <Pill tone={d.tier === "Billed" ? "good" : "blue"}>{d.tier}</Pill> },
                       { label: "Status", l: true, csv: (d) => d.status, render: (d) => d.status || "—" },
                       { label: "Effective live", l: true, csv: (d) => d.eld, render: (d) => d.eld || "—" },
                       { label: "Contract live", l: true, csv: (d) => d.cld,
@@ -3047,10 +3066,11 @@ export default function Dashboard() {
               const series = AF.stock;
               const cur = series[series.length - 1] ?? { booked: 0, contracted: 0, live: 0, liveArr: 0 };
               const maxV = Math.max(1, ...series.map((p) => Math.max(p.liveArr, p.bookedPilot)));
-              const W = 920, H = 240, padL = 58, padR = 16, padT = 16, padB = 30;
+              const W = 1160, H = 250, padL = 46, padR = 14, padT = 22, padB = 30;
               const iw = W - padL - padR, ih = H - padT - padB;
-              const xx = (i: number) => padL + (series.length <= 1 ? iw / 2 : (i / (series.length - 1)) * iw);
-              const yy = (v: number) => padT + ih - (v / (maxV * 1.08)) * ih;
+              const band = iw / Math.max(1, series.length);
+              const xx = (i: number) => padL + band * (i + 0.5);
+              const yy = (v: number) => padT + ih - (v / (maxV * 1.16)) * ih;   // headroom for the total above each column
               const LINES = [
                 { key: "booked" as const, label: "Pilot (in trial)", color: C.gold },
                 { key: "contracted" as const, label: "Contracted (signed, not paying)", color: C.blue },
@@ -3112,15 +3132,15 @@ export default function Dashboard() {
                 >
                   <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 2px" }}>
                     <div style={{ display: "flex", gap: 16, marginLeft: "auto", flexWrap: "wrap" }}>
-                      {LINES.map((l) => (
+                      {LINES.filter((l) => l.key !== "liveArr").map((l) => (
                         <span key={l.key} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.t2 }}>
-                          <span style={{ width: 12, height: 3, background: l.color, borderRadius: 2 }} />{l.label} <b style={{ color: l.color, fontFamily: "var(--font-dm-mono)" }}>{fmt(cur[l.key])}</b>
+                          <span style={{ width: 11, height: 11, background: l.color, borderRadius: 2 }} />{l.label} <b style={{ color: l.color, fontFamily: "var(--font-dm-mono)" }}>{fmt(cur[l.key])}</b>
                         </span>
                       ))}
                     </div>
                   </div>
                   <div style={{ padding: "6px 12px 4px", overflowX: "auto" }}>
-                    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: W, display: "block" }}>
+                    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", height: "auto" }}>
                       {ticks.map((t, i) => (
                         <g key={i}>
                           <line x1={padL} y1={yy(t)} x2={W - padR} y2={yy(t)} stroke={C.s1} strokeWidth={1} />
@@ -3134,11 +3154,11 @@ export default function Dashboard() {
                           the same colours as the rows below. The bars show composition, the Live
                           ARR line shows the trend. Hover a segment for its exact amount. */}
                       {series.map((p, i) => {
-                        const bw = Math.max(8, Math.min(34, (iw / series.length) * 0.52));
+                        const bw = Math.min(64, band * 0.62);
                         const x = xx(i) - bw / 2;
                         let acc = 0;
                         return (
-                          <g key={`bar-${p.ym}`} opacity={0.5}>
+                          <g key={`bar-${p.ym}`}>
                             {([
                               { k: "live", label: "Billed", c: C.grn },
                               { k: "contracted", label: "Contracted", c: C.blue },
@@ -3154,15 +3174,16 @@ export default function Dashboard() {
                                 </rect>
                               );
                             })}
+                            {/* Booked ARR tops the stack, so its total labels the column. */}
+                            <text x={xx(i)} y={yy(p.bookedPilot) - 6} textAnchor="middle" fontSize={10.5}
+                              fontFamily="var(--font-dm-mono)" fontWeight={700} fill={C.t1}>{kM(p.bookedPilot)}</text>
                             <rect x={x} y={padT} width={bw} height={ih} fill="transparent">
-                              <title>{`${p.label}\nPilot ${fmt(p.booked)}\nContracted ${fmt(p.contracted)}\nBilled ${fmt(p.live)}\nLive ARR ${fmt(p.liveArr)}\nBooked ARR ${fmt(p.bookedPilot)}`}</title>
+                              <title>{`${p.label}\nPilot ${fmt(p.booked)}\nContracted ${fmt(p.contracted)}\nBilled ${fmt(p.live)}\n———\nLive ARR ${fmt(p.liveArr)}\nBooked ARR ${fmt(p.bookedPilot)}`}</title>
                             </rect>
                           </g>
                         );
                       })}
-                      {LINES.map((l) => <path key={l.key} d={path(l.key)} fill="none" stroke={l.color} strokeWidth={2.5} strokeLinejoin="round" />)}
-                      {LINES.map((l) => <circle key={l.key} cx={xx(series.length - 1)} cy={yy(cur[l.key])} r={3.5} fill={l.color} />)}
-                    </svg>
+                                          </svg>
                   </div>
                   {/* Months run ACROSS; the metrics run DOWN in two blocks — the ARR that adds
                       up to Live ARR, then the pilot book and the movements that feed it, ending

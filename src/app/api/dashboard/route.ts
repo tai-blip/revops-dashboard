@@ -353,6 +353,13 @@ async function buildPayload(): Promise<Payload> {
           rtRaw: rt,
           eld: sheetDateToIso(r[18]),       // Effective_Live_Date — what attainment counts on
           cld: sheetDateToIso(r[5]),        // raw ContractLiveDate, for when the two differ
+          // Which ARR tier the won deal is in today. The LiveARR pull carries no Live Paying
+          // Date column, so this reads Status__c instead — checked against the real field on
+          // 2026-08-28 across all 61 New-Business wins with a 2026 contract-live date: zero
+          // disagreements. If that ever drifts, add Live_Paying_Date__c to the pull as a NEW
+          // trailing column — the attainment formulas address $S by letter, so nothing before
+          // it may shift.
+          tier: /^\[LP\] Live Paying|^Contract Renewed$|^Contract Expanded$/.test(String(r[3] ?? "")) ? "Billed" : "Contracted",
         };
       })
       .sort((a, b) => b.arr - a.arr);
