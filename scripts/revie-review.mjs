@@ -42,10 +42,20 @@ function load() {
     .filter((e) => e && e.t >= cutoff);
 }
 
+// The brief lives in its own file. It used to be a string literal inside revie-socket.mjs and this
+// function scraped it out with a regex — so when it moved, the match silently failed and the
+// reviewer was handed the string "(could not read SYSTEM prompt)" instead. It then spent a night
+// proposing edits to a prompt it had never seen, with nothing in the report to say so.
+//
+// Placeholders are left as {{...}} rather than substituted: the reviewer proposes edits to this
+// file and should see what a human editor sees. Substituting them invites it to suggest replacing
+// {{ADMIN}} with a literal id — drift of exactly the kind the placeholder prevents.
 function currentSystemPrompt() {
-  const src = readFileSync(path.join(REPO, "scripts", "revie-socket.mjs"), "utf-8");
-  const m = src.match(/const SYSTEM = `([\s\S]*?)`;\n/);
-  return m ? m[1] : "(could not read SYSTEM prompt)";
+  const file = path.join(REPO, "scripts", "revie-prompt.md");
+  const text = readFileSync(file, "utf-8").replace(/<!--[\s\S]*?-->/g, "").trim();
+  if (!text) throw new Error(`${file} is empty — refusing to review Revie against no prompt`);
+  return text + "\n\n(Anything in double braces is filled in at runtime by the runner. Leave those " +
+         "as placeholders when proposing edits — do not suggest replacing one with a literal value.)";
 }
 
 function askReviewer(prompt) {
