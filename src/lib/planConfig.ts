@@ -64,7 +64,14 @@ export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; q
   // and annual attainment views (per leadership).
   { name: "Jill Bucci", short: "Jill", quotaQ3: 520000, quotaAnnual: 520000, am: false },
   { name: "Mathias Berthelemot", short: "Mathias", quotaQ3: 150000, quotaAnnual: 600000, am: true },
-  { name: "David Dubinski", short: "Davi", quotaQ3: 0, quotaAnnual: null, am: false, lead: true },
+  // Davi carries the residual: the other reps' assigned quotas less what the team has already
+  // closed (Tai, 2026-08-28). Derived once and FROZEN — a quota recomputed live would fall every
+  // time a rep closed something, which would make his attainment move for reasons that are not
+  // his. Same figure applies to Q4 per the same rule; revisit at the quarter boundary.
+  //   other reps' Q3 quotas   1,425,000   (James 255k, Dorsa 250k, Jed 250k, Jill 520k, Mathias 150k)
+  //   less team Q3 closed won  −274,670   (New Business + Expansion, roster owners, as of 28 Aug)
+  //   = 1,150,330, rounded     1,150,000
+  { name: "David Dubinski", short: "Davi", quotaQ3: 1150000, quotaAnnual: null, am: false, lead: true },
 ];
 
 // AEs excluded from the FORECAST tab only (not AE Attainment). Dorsa has no AE/AM %

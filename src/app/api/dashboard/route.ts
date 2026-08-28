@@ -133,7 +133,7 @@ async function buildPayload(): Promise<Payload> {
         // Deal Breakdown = one row per open deal (SFDC link, name, owner, stage, ARR, age, stale),
         // all formula-driven over Query 1. The dashboard drill-down filters these rows into a panel
         // (+ CSV) when a Deal Health number is clicked. Read-only; no computation in the app.
-        { tab: "Deal Breakdown", range: "A2:H2000" },
+        { tab: "Deal Breakdown", range: "A2:M2000" },
         // LiveARR - SOQL Pull = one row per signed deal (Billing / Closed Won). This is the tab
         // the "AE Attainment (Official)" formulas SUMPRODUCT over, so reading the same rows is
         // what lets the Closed Won drill-down tie to the cell exactly. Note the attainment
@@ -321,6 +321,13 @@ async function buildPayload(): Promise<Payload> {
         arr: r[5] as number,
         age: typeof r[6] === "number" ? (r[6] as number) : null,
         stale: String(r[7] ?? "") === "Yes",
+        // Amount, the AE/AM probability on each basis, and the Potential the sheet derives from
+        // them (Early weights Amount, Late weights ARR — the Forecast tab's own rule).
+        amount: typeof r[8] === "number" ? (r[8] as number) : null,
+        probQ: typeof r[9] === "number" ? (r[9] as number) : null,
+        probY: typeof r[10] === "number" ? (r[10] as number) : null,
+        potQ: typeof r[11] === "number" ? (r[11] as number) : 0,
+        potY: typeof r[12] === "number" ? (r[12] as number) : 0,
       }));
     // Deal-level backing for the Closed Won drill-down, read verbatim from the same tab the
     // official attainment formulas use. Scoped to signed deals whose EFFECTIVE live date falls in
@@ -346,6 +353,13 @@ async function buildPayload(): Promise<Payload> {
           rtRaw: rt,
           eld: sheetDateToIso(r[18]),       // Effective_Live_Date — what attainment counts on
           cld: sheetDateToIso(r[5]),        // raw ContractLiveDate, for when the two differ
+          // Which ARR tier the won deal is in today. The LiveARR pull carries no Live Paying
+          // Date column, so this reads Status__c instead — checked against the real field on
+          // 2026-08-28 across all 61 New-Business wins with a 2026 contract-live date: zero
+          // disagreements. If that ever drifts, add Live_Paying_Date__c to the pull as a NEW
+          // trailing column — the attainment formulas address $S by letter, so nothing before
+          // it may shift.
+          tier: /^\[LP\] Live Paying|^Contract Renewed$|^Contract Expanded$/.test(String(r[3] ?? "")) ? "Billed" : "Contracted",
         };
       })
       .sort((a, b) => b.arr - a.arr);

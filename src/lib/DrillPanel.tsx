@@ -34,6 +34,9 @@ export type DrillSpec<T> = {
   // so is the point of a drill-down; a silent mismatch is what destroys trust in one.
   // Given the panel's own row total, so callers never re-sum the rows themselves.
   note?: string | ((total: number) => string);
+  // Which sheet tab these rows came from. Shown on every panel: a drill-down that cannot be
+  // traced back to a tab is just another number to take on trust.
+  source?: string;
 };
 
 const chipStyle = {
@@ -107,6 +110,11 @@ export function DrillPanel<T>({ spec, onClear }: { spec: DrillSpec<T> | null; on
         <div style={{ fontSize: 11.5, color: C.t2, background: C.s2, border: `1px solid ${C.bd}`,
           borderRadius: 8, padding: "7px 11px", marginBottom: 10, lineHeight: 1.5 }}>
           {note}
+        </div>
+      )}
+      {spec.source && (
+        <div style={{ fontSize: 11, color: C.t3, fontFamily: "var(--font-dm-mono)", marginBottom: 8 }}>
+          source · {spec.source}
         </div>
       )}
       {spec.rows.length === 0 ? (
