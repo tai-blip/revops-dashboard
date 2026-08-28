@@ -1258,6 +1258,44 @@ export default function Dashboard() {
               <TabHeader label="Command" sentence={tabSummaries.command.sentence} stats={tabSummaries.command.stats} />
             )}
 
+            {/* ARR at a glance — the same five figures the Booked ARR & Cashflow tab defines,
+                surfaced here so the Command tab answers "where is ARR" without a tab switch. */}
+            {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
+              const n = data.arrFunnel.stock[data.arrFunnel.stock.length - 1];
+              const cnt = (b: string) => (n.ids?.[b] ?? []).length;
+              const tiles = [
+                { label: "Pilot", v: n.booked, c: C.gold, sub: "in trial, unsigned", deals: cnt("booked") },
+                { label: "Contracted", v: n.contracted, c: C.blue, sub: "signed, billing not started", deals: cnt("contracted") },
+                { label: "Billed", v: n.live, c: C.grn, sub: "paying", deals: cnt("live") },
+                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed", deals: cnt("liveArr"), hero: true },
+                { label: "Booked ARR", v: n.bookedPilot, c: C.t1, sub: "Live ARR + Pilot", deals: cnt("bookedPilot") },
+              ];
+              return (
+                <Card title="ARR at a glance" sub={`Point-in-time, as of ${n.label} · full detail on the Booked ARR & Cashflow tab`}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10, padding: "14px 20px 18px" }}>
+                    {tiles.map((t) => (
+                      // Straight through to the tab that defines these, so "where does this come
+                      // from" is one click rather than a hunt through the tab bar.
+                      <div key={t.label} onClick={() => setTab("cashflow")} role="link" tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setTab("cashflow"); }}
+                        title="Open Booked ARR & Cashflow for the full breakdown"
+                        style={{ border: `1.5px solid ${t.hero ? t.c : C.bd}`, borderRadius: 10,
+                        padding: "12px 14px", background: t.hero ? C.s2 : "transparent", cursor: "pointer" }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: t.c }}>{t.label}</div>
+                        <div style={{ fontSize: 21, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(t.v)}</div>
+                        <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{t.sub}</div>
+                        <div style={{ fontSize: 10.5, color: C.t3, fontFamily: "var(--font-dm-mono)", marginTop: 1 }}>
+                          {t.deals} deals <span style={{ color: t.c, fontWeight: 700 }}>→</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              );
+            })()}
+            <div style={{ height: 16 }} />
+
+
             {pathToPlan && (() => {
               const P = pathToPlan;
               // whole-k / M formatter matching the card design (no decimal on k)
@@ -1352,41 +1390,6 @@ export default function Dashboard() {
             })()}
 
 
-            {/* ARR at a glance — the same five figures the Booked ARR & Cashflow tab defines,
-                surfaced here so the Command tab answers "where is ARR" without a tab switch. */}
-            {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
-              const n = data.arrFunnel.stock[data.arrFunnel.stock.length - 1];
-              const cnt = (b: string) => (n.ids?.[b] ?? []).length;
-              const tiles = [
-                { label: "Pilot", v: n.booked, c: C.gold, sub: "in trial, unsigned", deals: cnt("booked") },
-                { label: "Contracted", v: n.contracted, c: C.blue, sub: "signed, billing not started", deals: cnt("contracted") },
-                { label: "Billed", v: n.live, c: C.grn, sub: "paying", deals: cnt("live") },
-                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed", deals: cnt("liveArr"), hero: true },
-                { label: "Booked ARR", v: n.bookedPilot, c: C.t1, sub: "Live ARR + Pilot", deals: cnt("bookedPilot") },
-              ];
-              return (
-                <Card title="ARR at a glance" sub={`Point-in-time, as of ${n.label} · full detail on the Booked ARR & Cashflow tab`}>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 10, padding: "14px 20px 18px" }}>
-                    {tiles.map((t) => (
-                      // Straight through to the tab that defines these, so "where does this come
-                      // from" is one click rather than a hunt through the tab bar.
-                      <div key={t.label} onClick={() => setTab("cashflow")} role="link" tabIndex={0}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setTab("cashflow"); }}
-                        title="Open Booked ARR & Cashflow for the full breakdown"
-                        style={{ border: `1.5px solid ${t.hero ? t.c : C.bd}`, borderRadius: 10,
-                        padding: "12px 14px", background: t.hero ? C.s2 : "transparent", cursor: "pointer" }}>
-                        <div style={{ fontSize: 11.5, fontWeight: 700, color: t.c }}>{t.label}</div>
-                        <div style={{ fontSize: 21, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(t.v)}</div>
-                        <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{t.sub}</div>
-                        <div style={{ fontSize: 10.5, color: C.t3, fontFamily: "var(--font-dm-mono)", marginTop: 1 }}>
-                          {t.deals} deals <span style={{ color: t.c, fontWeight: 700 }}>→</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              );
-            })()}
             <div style={{ height: 16 }} />
 
             <Card
