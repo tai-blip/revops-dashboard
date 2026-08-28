@@ -3172,10 +3172,23 @@ export default function Dashboard() {
                               if (!(v > 0)) return null;
                               const y0 = yy(acc), y1 = yy(acc + v);
                               acc += v;
+                              const h = Math.max(0, y0 - y1);
                               return (
-                                <rect key={seg.k} x={x} y={y1} width={bw} height={Math.max(0, y0 - y1)} fill={seg.c}>
-                                  <title>{`${p.label} · ${seg.label} ${fmt(v)}`}</title>
-                                </rect>
+                                <g key={seg.k}>
+                                  <rect x={x} y={y1} width={bw} height={h} fill={seg.c}>
+                                    <title>{`${p.label} · ${seg.label} ${fmt(v)}`}</title>
+                                  </rect>
+                                  {/* Label the segment in place, but only when it is tall enough to
+                                      hold the text — a squeezed label overflowing into its neighbour
+                                      reads as belonging to the wrong tier. */}
+                                  {h >= 15 && (
+                                    <text x={xx(i)} y={y1 + h / 2 + 3.5} textAnchor="middle" fontSize={9.5}
+                                      fontFamily="var(--font-dm-mono)" fontWeight={700} fill="#fff"
+                                      style={{ pointerEvents: "none" }}>
+                                      {kM(v)}
+                                    </text>
+                                  )}
+                                </g>
                               );
                             })}
                             {/* Booked ARR tops the stack, so its total labels the column. */}
