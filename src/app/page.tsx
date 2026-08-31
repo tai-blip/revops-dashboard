@@ -202,12 +202,12 @@ const TABS = [
   ["forecast", "Forecast"],
   ["cashflow", "Booked ARR & Cashflow"],
   ["deals", "Deal Tracker"],
+  ["efficiency", "Sales Efficiency"],
   ["health", "Deal Health"],
   ["attainment", "AE Attainment"],
   ["acv", "ACV & Deal Size"],
   ["paymentmix", "Payment Mix"],
   ["productarr", "Product ARR"],
-  ["efficiency", "Sales Efficiency"],
 ] as const;
 
 // Is a Pipeline-WoW MoM month label (e.g. "Jul-26") inside Q3 FY26 (Jul–Sep 2026)?
