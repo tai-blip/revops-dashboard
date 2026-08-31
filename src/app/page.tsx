@@ -88,9 +88,10 @@ type DashboardData = {
   // the same rows the "AE Attainment (Official)" formulas sum, so the Closed Won drill-down can
   // tie to the cell. `eld` is Effective_Live_Date (what attainment counts on); `cld` is the raw
   // Contract Live Date, which is NOT always the same day.
-  // Average days per stage for New Business wins, one row per region x quarter x metric.
-  // Written to the "Sales Cycle" tab from Salesforce; the dashboard only pivots it.
-  salesCycle?: { region: string; quarter: string; key: string; label: string; avg: number | null; n: number; segment: string }[];
+  // Average days per stage for New Business deals, cohorted by the quarter they reached
+  // Billing, one row per region x quarter x metric. Written to the "Sales Cycle" tab from
+  // Salesforce; the dashboard only pivots it.
+  salesCycle?: { region: string; quarter: string; key: string; label: string; avg: number | null; n: number; segment: string; median: number | null }[];
   closedWonFeed?: { name: string; owner: string; stage: string; status: string; arr: number; rt: string; rtRaw: string; eld: string; cld: string; tier: string }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
@@ -4597,20 +4598,18 @@ export default function Dashboard() {
               // Segment split, collapsed by default — same control as the ARR funnel.
               const SEGS = ["Small", "Mid Market", "Enterprise", "Mega Enterprise"];
               const ROWS = [
-                { key: "won", label: "Total Deals Won", unit: "", bold: true, after: false,
-                  note: "New Business deals won in the quarter, pinned by close date. The cohort every row below is measured on." },
+                { key: "won", label: "Deals Reaching Billing", unit: "", bold: true, after: false,
+                  note: "New Business deals that reached Billing in the quarter. The cohort every row below is measured on. Cohorted on the billing stamp rather than the close date, which is unreliable on these records." },
                 { key: "cycle", label: "Total Sales Cycle", unit: "d", bold: true, after: false,
-                  note: "Close date minus the SQL date, averaged over the cohort." },
+                  note: "The billing date minus the SQL date, averaged over the cohort. Hover a cell for the median." },
                 { key: "sql", label: "SQL", unit: "d", bold: false, after: false, note: "Average days from reaching SQL to reaching SAL." },
                 { key: "sal", label: "SAL", unit: "d", bold: false, after: false, note: "Average days from reaching SAL to reaching SQO." },
                 { key: "sqo", label: "SQO", unit: "d", bold: false, after: false, note: "Average days from reaching SQO to reaching Trial." },
                 { key: "pilot", label: "Pilot", unit: "d", bold: false, after: false, note: "Average days from reaching Trial to reaching Billing." },
-                { key: "postBilling", label: "Post-close → Billing", unit: "d", bold: false, after: true,
-                  note: "NOT part of the sales cycle. On 55% of wins the Billing stamp lands after the close date — billing happens once the deal is won. Shown because the wait still matters." },
               ];
               return (
               <Card title="Sales Cycle — quarter over quarter"
-                sub="Average days per stage for NEW BUSINESS deals won in each quarter. Renewals and expansions never pass through SQL, so they are out of scope. Live from Salesforce.">
+                sub="Average days per stage for NEW BUSINESS deals, cohorted by the quarter they reached Billing. Renewals and expansions never pass through SQL, so they are out of scope. Live from Salesforce.">
                 <div style={{ display: "flex", gap: 8, padding: "12px 20px 6px", flexWrap: "wrap" }}>
                   {SC_REGIONS.map((r) => (
                     <button key={r} onClick={() => setScRegion(r)}
@@ -4658,7 +4657,7 @@ export default function Dashboard() {
                             if (!c || c.avg == null) return <Td key={q.q} mono color={C.t3}>—</Td>;
                             const thin = row.key !== "won" && c.n < 8;
                             return (
-                              <td key={q.q} title={row.key === "won" ? undefined : `${c.n} deal${c.n === 1 ? "" : "s"} in this average`}
+                              <td key={q.q} title={row.key === "won" ? undefined : `${c.n} deal${c.n === 1 ? "" : "s"} in this average${c.median != null ? ` · median ${c.median}d` : ""}`}
                                 style={{ textAlign: "right", padding: "10px 16px 10px 0", fontFamily: "var(--font-dm-mono)",
                                   fontSize: 13, fontWeight: row.bold ? 700 : 400, whiteSpace: "nowrap",
                                   color: row.after ? C.t2 : thin ? C.ylw : C.t1 }}>
@@ -4677,7 +4676,7 @@ export default function Dashboard() {
                               if (!c || c.avg == null) return <Td key={q.q} mono color={C.t3}>—</Td>;
                               const thin = row.key !== "won" && c.n < 8;
                               return (
-                                <td key={q.q} title={`${c.n} deal${c.n === 1 ? "" : "s"}`}
+                                <td key={q.q} title={`${c.n} deal${c.n === 1 ? "" : "s"}${c.median != null ? ` · median ${c.median}d` : ""}`}
                                   style={{ textAlign: "right", padding: "8px 16px 8px 0", fontFamily: "var(--font-dm-mono)",
                                     fontSize: 12.5, whiteSpace: "nowrap", color: thin ? C.ylw : C.t2 }}>
                                   {c.avg}{row.unit}
@@ -4694,8 +4693,11 @@ export default function Dashboard() {
                 </div>
                 <div style={{ padding: "0 20px 18px", fontSize: 11.5, color: C.t3 }}>
                   The small number after each average is how many deals it covers — amber under 8.
-                  SQL + SAL + SQO + Pilot decompose the total cycle; Post-close → Billing sits below the rule
-                  because it happens after the win, not on the way to it.
+                  Hover any cell for the median, the fairer read on a thin quarter: six Capriotti’s line items
+                  reaching Billing on one day after an 812-day wait pull the Q3’26 mean from 163 to 385.
+                  SQL + SAL + SQO + Pilot decompose the total cycle. Cohort and cycle-end are both the Billing
+                  stamp — Close Date is not used, because 1,034 opportunities share a 2025-01-01 migration
+                  placeholder and many deals bill well before their opportunity is closed out.
                 </div>
               </Card>
               );

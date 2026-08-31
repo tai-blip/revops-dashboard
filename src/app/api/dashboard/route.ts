@@ -139,10 +139,11 @@ async function buildPayload(): Promise<Payload> {
         // what lets the Closed Won drill-down tie to the cell exactly. Note the attainment
         // formula keys on col S "Effective_Live_Date", NOT the raw ContractLiveDate in col F.
         { tab: "LiveARR - SOQL Pull", range: "A2:S2000" },
-        // Sales Cycle = average days per stage for New Business wins, one row per
-        // region x quarter x metric. Written by scripts/build-sales-cycle-tab.mjs from
-        // Salesforce; the dashboard pivots it for display and computes nothing.
-        { tab: "Sales Cycle", range: "A5:G800" },
+        // Sales Cycle = average days per stage for New Business deals, cohorted by the quarter
+        // they reached Billing, one row per region x quarter x metric. Written by
+        // scripts/build-sales-cycle-tab.mjs from Salesforce; the dashboard pivots it and
+        // computes nothing. Col H carries the median alongside the mean in col E.
+        { tab: "Sales Cycle", range: "A5:H800" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -449,6 +450,7 @@ async function buildPayload(): Promise<Payload> {
           avg: typeof r[4] === "number" ? (r[4] as number) : null,
           n: typeof r[5] === "number" ? (r[5] as number) : 0,
           segment: String(r[6] ?? ""),   // "" = the all-segments row
+          median: typeof r[7] === "number" ? (r[7] as number) : null,
         })),
       pipelineGen,
       dealTracker,

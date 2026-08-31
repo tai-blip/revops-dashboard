@@ -73,8 +73,9 @@ export const SE_BUILD = {
 //   docs.google.com/spreadsheets/d/1FA4b7pa_KTJi78puhpz8KIpDSNO6KJy_AFoLeKYTBA8
 // The NUMBERS are computed from Salesforce instead, by scripts/build-sales-cycle-tab.mjs into the
 // "Sales Cycle" sheet tab, which the dashboard reads. Only the labels and quarter windows live
-// here. Segment sub-rows are NOT built: MerchantSegment__c is set on 14 of 137 New Business wins,
-// so a per-segment average would be three or four deals wide.
+// here. Segment sub-rows ARE built, off Merchant_Segment__c (the string field, populated on every
+// deal in the cohort) — not the near-identical MerchantSegment__c picklist, which is only on 10%.
+// Quarters below label the window a deal REACHED BILLING in, not the one it closed in.
 export const SC_REGIONS = ["Total", "North America", "International"] as const;
 export const SC_QUARTERS = [
   { q: "Q1'25", range: "Jan 2 – Apr 1" },
