@@ -4626,16 +4626,30 @@ export default function Dashboard() {
                   ))}
                 </div>
                 <div style={{ overflowX: "auto", padding: "4px 20px 12px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
                     <thead>
-                      <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                        <th style={{ textAlign: "left", padding: "8px 16px 8px 0", minWidth: 190 }} />
+                      <tr>
+                        <th style={{ textAlign: "left", padding: "8px 16px 4px 0", minWidth: 190 }} />
                         {SC_QUARTERS.map((q) => (
-                          <th key={q.q} style={{ textAlign: "right", padding: "8px 16px 8px 0", whiteSpace: "nowrap" }}>
+                          <th key={q.q} colSpan={2} style={{ textAlign: "right", padding: "8px 16px 4px 0", whiteSpace: "nowrap" }}>
                             <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 10.5, letterSpacing: ".08em",
                               textTransform: "uppercase", color: C.t3 }}>{q.q}</div>
                             <div style={{ fontSize: 10, color: C.t3, fontWeight: 400 }}>{q.range}</div>
                           </th>
+                        ))}
+                      </tr>
+                      {/* Mean and median side by side. On a thin quarter they diverge hard — six
+                          Capriotti's line items reaching Billing on one day put Q3'26 at 385 mean
+                          against a 163 median — and a reader should see that without hovering. */}
+                      <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <th />
+                        {SC_QUARTERS.map((q) => (
+                          <Fragment key={q.q}>
+                            <th style={{ textAlign: "right", padding: "0 8px 7px 0", fontSize: 9.5, fontWeight: 700,
+                              letterSpacing: ".05em", textTransform: "uppercase", color: C.t3 }}>avg</th>
+                            <th style={{ textAlign: "right", padding: "0 16px 7px 0", fontSize: 9.5, fontWeight: 700,
+                              letterSpacing: ".05em", textTransform: "uppercase", color: C.t3 }}>med</th>
+                          </Fragment>
                         ))}
                       </tr>
                     </thead>
@@ -4661,18 +4675,37 @@ export default function Dashboard() {
                           </td>
                           {SC_QUARTERS.map((q) => {
                             const c = cell(q.q, row.key);
-                            if (!c || c.avg == null) return <Td key={q.q} mono color={C.t3}>—</Td>;
-                            const thin = row.key !== "won" && c.n < 8;
-                            return (
-                              <td key={q.q} title={row.key === "won" ? "Click to see these deals" : `${c.n} deal${c.n === 1 ? "" : "s"} in this average${c.median != null ? ` · median ${c.median}d` : ""}`}
+                            // The deal count is one number, not an average — it spans both sub-columns.
+                            if (row.key === "won") return (
+                              <td key={q.q} colSpan={2} title={c && Number(c.avg) > 0 ? "Click to see these deals" : undefined}
                                 style={{ textAlign: "right", padding: "10px 16px 10px 0", fontFamily: "var(--font-dm-mono)",
-                                  fontSize: 13, fontWeight: row.bold ? 700 : 400, whiteSpace: "nowrap",
-                                  color: row.after ? C.t2 : thin ? C.ylw : C.t1 }}>
-                                {row.key === "won" && Number(c.avg) > 0
-                                  ? <span style={drillable} onClick={() => setScDrill({ quarter: q.q, segment: "", cell: Number(c.avg) })}>{c.avg}</span>
-                                  : <>{c.avg}{row.unit}</>}
-                                {row.key !== "won" && <span style={{ fontSize: 10, color: C.t3 }}> ·{c.n}</span>}
+                                  fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", color: C.t1 }}>
+                                {!c || c.avg == null ? <span style={{ color: C.t3 }}>—</span>
+                                  : Number(c.avg) > 0
+                                    ? <span style={drillable} onClick={() => setScDrill({ quarter: q.q, segment: "", cell: Number(c.avg) })}>{c.avg}</span>
+                                    : c.avg}
                               </td>
+                            );
+                            if (!c || c.avg == null) return (
+                              <Fragment key={q.q}>
+                                <Td mono color={C.t3}>—</Td><Td mono color={C.t3}>—</Td>
+                              </Fragment>
+                            );
+                            const thin = c.n < 8;
+                            const cellSty = (padR: number) => ({ textAlign: "right" as const, padding: `10px ${padR}px 10px 0`,
+                              fontFamily: "var(--font-dm-mono)", fontSize: 13, fontWeight: row.bold ? 700 : 400,
+                              whiteSpace: "nowrap" as const, color: thin ? C.ylw : C.t1 });
+                            return (
+                              <Fragment key={q.q}>
+                                <td title={`${c.n} deal${c.n === 1 ? "" : "s"} in this average`} style={cellSty(8)}>
+                                  {c.avg}{row.unit}
+                                </td>
+                                <td title={c.median != null ? `median of the same ${c.n} deal${c.n === 1 ? "" : "s"}` : undefined}
+                                  style={{ ...cellSty(16), fontWeight: 400, color: thin ? C.ylw : C.t2 }}>
+                                  {c.median == null ? "—" : <>{c.median}{row.unit}</>}
+                                  <span style={{ fontSize: 10, color: C.t3 }}> ·{c.n}</span>
+                                </td>
+                              </Fragment>
                             );
                           })}
                         </tr>
@@ -4682,17 +4715,32 @@ export default function Dashboard() {
                               fontSize: 12.5, color: C.t2 }}>{seg}</td>
                             {SC_QUARTERS.map((q) => {
                               const c = cell(q.q, row.key, seg);
-                              if (!c || c.avg == null) return <Td key={q.q} mono color={C.t3}>—</Td>;
-                              const thin = row.key !== "won" && c.n < 8;
-                              return (
-                                <td key={q.q} title={row.key === "won" ? `Click to see the ${seg} deals` : `${c.n} deal${c.n === 1 ? "" : "s"}${c.median != null ? ` · median ${c.median}d` : ""}`}
+                              if (row.key === "won") return (
+                                <td key={q.q} colSpan={2} title={c && Number(c.avg) > 0 ? `Click to see the ${seg} deals` : undefined}
                                   style={{ textAlign: "right", padding: "8px 16px 8px 0", fontFamily: "var(--font-dm-mono)",
-                                    fontSize: 12.5, whiteSpace: "nowrap", color: thin ? C.ylw : C.t2 }}>
-                                  {row.key === "won" && Number(c.avg) > 0
-                                    ? <span style={drillable} onClick={() => setScDrill({ quarter: q.q, segment: seg, cell: Number(c.avg) })}>{c.avg}</span>
-                                    : <>{c.avg}{row.unit}</>}
-                                  {row.key !== "won" && <span style={{ fontSize: 10, color: C.t3 }}> ·{c.n}</span>}
+                                    fontSize: 12.5, whiteSpace: "nowrap", color: C.t2 }}>
+                                  {!c || c.avg == null ? <span style={{ color: C.t3 }}>—</span>
+                                    : Number(c.avg) > 0
+                                      ? <span style={drillable} onClick={() => setScDrill({ quarter: q.q, segment: seg, cell: Number(c.avg) })}>{c.avg}</span>
+                                      : c.avg}
                                 </td>
+                              );
+                              if (!c || c.avg == null) return (
+                                <Fragment key={q.q}><Td mono color={C.t3}>—</Td><Td mono color={C.t3}>—</Td></Fragment>
+                              );
+                              const thin = c.n < 8;
+                              const base = { textAlign: "right" as const, fontFamily: "var(--font-dm-mono)",
+                                fontSize: 12.5, whiteSpace: "nowrap" as const, color: thin ? C.ylw : C.t2 };
+                              return (
+                                <Fragment key={q.q}>
+                                  <td title={`${c.n} deal${c.n === 1 ? "" : "s"} in this average`}
+                                    style={{ ...base, padding: "8px 8px 8px 0" }}>{c.avg}{row.unit}</td>
+                                  <td title={c.median != null ? `median of the same ${c.n} deal${c.n === 1 ? "" : "s"}` : undefined}
+                                    style={{ ...base, padding: "8px 16px 8px 0" }}>
+                                    {c.median == null ? "—" : <>{c.median}{row.unit}</>}
+                                    <span style={{ fontSize: 10, color: C.t3 }}> ·{c.n}</span>
+                                  </td>
+                                </Fragment>
                               );
                             })}
                           </tr>
@@ -4743,8 +4791,9 @@ export default function Dashboard() {
                 <div style={{ padding: "0 20px 18px", fontSize: 11.5, color: C.t3 }}>
                   Click any deal count to see the deals behind it — it follows the region toggle.
                   The small number after each average is how many deals it covers — amber under 8.
-                  Hover any cell for the median, the fairer read on a thin quarter: six Capriotti’s line items
-                  reaching Billing on one day after an 812-day wait pull the Q3’26 mean from 163 to 385.
+                  <b>avg</b> is the mean, <b>med</b> the median — read the median on a thin quarter. Six
+                  Capriotti’s line items reaching Billing on one day after an 812-day wait pull Q3’26 to a
+                  385-day mean against a 163-day median.
                   SQL + SAL + SQO + Pilot decompose the total cycle. Cohort and cycle-end are both the Billing
                   stamp — Close Date is not used, because 1,034 opportunities share a 2025-01-01 migration
                   placeholder and many deals bill well before their opportunity is closed out.
