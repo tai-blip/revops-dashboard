@@ -92,6 +92,11 @@ type DashboardData = {
   // Billing, one row per region x quarter x metric. Written to the "Sales Cycle" tab from
   // Salesforce; the dashboard only pivots it.
   salesCycle?: { region: string; quarter: string; key: string; label: string; avg: number | null; n: number; segment: string; median: number | null }[];
+  // The deals behind every count in salesCycle, from the same tab's "② DEALS" block. Each deal
+  // appears twice: once under "Total" and once under its own region, matching the region toggle.
+  salesCycleDeals?: { region: string; quarter: string; segment: string; deal: string; account: string;
+    owner: string; stage: string; arr: number; sql: string; sal: string; sqo: string; trial: string;
+    billing: string; cycleDays: number | null }[];
   closedWonFeed?: { name: string; owner: string; stage: string; status: string; arr: number; rt: string; rtRaw: string; eld: string; cld: string; tier: string }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
@@ -566,6 +571,8 @@ export default function Dashboard() {
   const [funnelOpen, setFunnelOpen] = useState<Record<string, boolean>>({});
   // Sales Efficiency · Sales Cycle — which region the table is showing.
   const [scRegion, setScRegion] = useState<(typeof SC_REGIONS)[number]>("Total");
+  // Sales Cycle click-through: which quarter x segment cell's deals to list. segment "" = all.
+  const [scDrill, setScDrill] = useState<{ quarter: string; segment: string; cell: number } | null>(null);
   // Which Sales Cycle rows have their segment split open.
   const [scOpen, setScOpen] = useState<Record<string, boolean>>({});
   const [pcDrill, setPcDrill] = useState<{ ym: string; label: string } | null>(null);
@@ -4657,11 +4664,13 @@ export default function Dashboard() {
                             if (!c || c.avg == null) return <Td key={q.q} mono color={C.t3}>—</Td>;
                             const thin = row.key !== "won" && c.n < 8;
                             return (
-                              <td key={q.q} title={row.key === "won" ? undefined : `${c.n} deal${c.n === 1 ? "" : "s"} in this average${c.median != null ? ` · median ${c.median}d` : ""}`}
+                              <td key={q.q} title={row.key === "won" ? "Click to see these deals" : `${c.n} deal${c.n === 1 ? "" : "s"} in this average${c.median != null ? ` · median ${c.median}d` : ""}`}
                                 style={{ textAlign: "right", padding: "10px 16px 10px 0", fontFamily: "var(--font-dm-mono)",
                                   fontSize: 13, fontWeight: row.bold ? 700 : 400, whiteSpace: "nowrap",
                                   color: row.after ? C.t2 : thin ? C.ylw : C.t1 }}>
-                                {c.avg}{row.unit}
+                                {row.key === "won" && Number(c.avg) > 0
+                                  ? <span style={drillable} onClick={() => setScDrill({ quarter: q.q, segment: "", cell: Number(c.avg) })}>{c.avg}</span>
+                                  : <>{c.avg}{row.unit}</>}
                                 {row.key !== "won" && <span style={{ fontSize: 10, color: C.t3 }}> ·{c.n}</span>}
                               </td>
                             );
@@ -4676,10 +4685,12 @@ export default function Dashboard() {
                               if (!c || c.avg == null) return <Td key={q.q} mono color={C.t3}>—</Td>;
                               const thin = row.key !== "won" && c.n < 8;
                               return (
-                                <td key={q.q} title={`${c.n} deal${c.n === 1 ? "" : "s"}${c.median != null ? ` · median ${c.median}d` : ""}`}
+                                <td key={q.q} title={row.key === "won" ? `Click to see the ${seg} deals` : `${c.n} deal${c.n === 1 ? "" : "s"}${c.median != null ? ` · median ${c.median}d` : ""}`}
                                   style={{ textAlign: "right", padding: "8px 16px 8px 0", fontFamily: "var(--font-dm-mono)",
                                     fontSize: 12.5, whiteSpace: "nowrap", color: thin ? C.ylw : C.t2 }}>
-                                  {c.avg}{row.unit}
+                                  {row.key === "won" && Number(c.avg) > 0
+                                    ? <span style={drillable} onClick={() => setScDrill({ quarter: q.q, segment: seg, cell: Number(c.avg) })}>{c.avg}</span>
+                                    : <>{c.avg}{row.unit}</>}
                                   {row.key !== "won" && <span style={{ fontSize: 10, color: C.t3 }}> ·{c.n}</span>}
                                 </td>
                               );
@@ -4691,7 +4702,46 @@ export default function Dashboard() {
                     </tbody>
                   </table>
                 </div>
+                {/* Click-through on the deal counts. Rows come straight from the tab's ② DEALS
+                    block, filtered by the same region toggle / quarter / segment the reader
+                    clicked, so the panel can never disagree with the number above it. */}
+                {(() => {
+                  if (!scDrill) return null;
+                  const rows = (data.salesCycleDeals ?? []).filter((d) =>
+                    d.region === scRegion && d.quarter === scDrill.quarter
+                    && (scDrill.segment === "" || d.segment === scDrill.segment));
+                  const spec: DrillSpec<NonNullable<typeof data.salesCycleDeals>[number]> = {
+                    title: `sales-cycle-${scRegion}-${scDrill.quarter}-${scDrill.segment || "all-segments"}`,
+                    chips: [scRegion, scDrill.quarter, scDrill.segment || "all segments", "reached Billing"],
+                    rows,
+                    amount: (d) => d.arr,
+                    amountLabel: "ARR",
+                    source: "Sales Cycle tab, ② DEALS block",
+                    emptyHint: "No deals reached Billing in this quarter for this segment.",
+                    note: (total) => rows.length === scDrill.cell
+                      ? `All ${rows.length} deal${rows.length === 1 ? "" : "s"} behind this count, worth ${fmt(total)} of ARR. Cycle days run from the SQL stamp to the Billing stamp; blank where the deal has no SQL date or the stamps run backwards.`
+                      : `Heads up: the cell reads ${scDrill.cell} but ${rows.length} deal rows came back. Both should be the same cohort — worth a look.`,
+                    cols: [
+                      { label: "Deal", l: true, render: (d) => d.deal || d.account, csv: (d) => d.deal || d.account },
+                      { label: "Account", l: true, render: (d) => d.account, csv: (d) => d.account },
+                      { label: "Owner", l: true, render: (d) => d.owner, csv: (d) => d.owner },
+                      { label: "Segment", l: true, render: (d) => d.segment || "—", csv: (d) => d.segment },
+                      { label: "Stage", l: true, render: (d) => d.stage, csv: (d) => d.stage },
+                      { label: "ARR", mono: true, bold: true, render: (d) => fmt(d.arr), csv: (d) => d.arr },
+                      { label: "SQL", mono: true, render: (d) => d.sql || "—", csv: (d) => d.sql },
+                      { label: "Trial", mono: true, render: (d) => d.trial || "—", csv: (d) => d.trial },
+                      { label: "Billing", mono: true, render: (d) => d.billing || "—", csv: (d) => d.billing },
+                      { label: "Cycle", mono: true, render: (d) => (d.cycleDays == null ? "—" : `${d.cycleDays}d`), csv: (d) => d.cycleDays ?? "" },
+                    ],
+                  };
+                  return (
+                    <div style={{ padding: "0 20px 8px" }}>
+                      <DrillPanel spec={spec} onClear={() => setScDrill(null)} />
+                    </div>
+                  );
+                })()}
                 <div style={{ padding: "0 20px 18px", fontSize: 11.5, color: C.t3 }}>
+                  Click any deal count to see the deals behind it — it follows the region toggle.
                   The small number after each average is how many deals it covers — amber under 8.
                   Hover any cell for the median, the fairer read on a thin quarter: six Capriotti’s line items
                   reaching Billing on one day after an 812-day wait pull the Q3’26 mean from 163 to 385.

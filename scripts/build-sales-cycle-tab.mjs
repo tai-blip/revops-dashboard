@@ -32,8 +32,9 @@
 // differ by a few days because each average is taken over the deals that carry both of its own
 // stamps, and three deals in the cohort have no SQL date.
 //
-// Written long-format (one row per region × quarter × metric) so the dashboard can pivot it
-// for display without computing anything. Every row carries its sample size: an average over
+// Two blocks. ① METRICS is long-format (one row per region × quarter × metric × segment) so the
+// dashboard can pivot it for display without computing anything. ② DEALS lists the deals behind
+// every count, so clicking a number on the dashboard shows its evidence rather than re-deriving it. Every row carries its sample size: an average over
 // four deals is not the same claim as an average over thirty, and the reader should see which.
 // A MEDIAN is written alongside the mean — six Capriotti's line items all reached billing on the
 // same day after an 812-day wait, which alone drags the Q3'26 mean from 163 to 385.
@@ -76,7 +77,8 @@ async function main() {
   const v = process.env.SF_API_VERSION || "59.0";
   // Stage filter, not IsWon: Salesforce does not flag "Billing" as won, but those deals are
   // contract-live and the dashboard's ARR funnel already counts them. Same definition here.
-  const q = `SELECT Id, CloseDate, StageName, Region__c, Merchant_Segment__c, Account.Merchant_Segment__c,
+  const q = `SELECT Id, Name, Account.Name, Owner.Name, CloseDate, StageName, Region__c,
+    Merchant_Segment__c, Account.Merchant_Segment__c, convertCurrency(AnnualContractValueARR__c),
     Date_Reached_SQL__c, Date_Reached_SAL__c, Date_Reached_SQO__c,
     Date_Reached_Trial__c, Date_Reached_Billing__c FROM Opportunity
     WHERE RecordType.Name = '1.New Business' AND StageName IN ('Closed Won', 'Billing')
@@ -94,6 +96,7 @@ async function main() {
   rows.push([`Auto-written by scripts/build-sales-cycle-tab.mjs. NEW BUSINESS only — renewals and expansions never pass through SQL. Cohort pinned to the quarter the deal REACHED BILLING, and the cycle ends there: Close Date is unreliable on these records (1,034 opps share the 2025-01-01 migration placeholder, and 47 of 137 wins were already billing before their close date).`]);
   rows.push([`Last updated`, new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC"]);
   rows.push([]);
+  rows.push(["\u2460 METRICS", "(one row per region \u00d7 quarter \u00d7 metric \u00d7 segment; blank segment = all segments)"]);
   rows.push(["region", "quarter", "metric_key", "metric", "avg_days", "n", "segment", "median_days"]);
   // avg + median over a pool, skipping rows where the stamps run backwards
   const statOf = (pool, from, to) => {
@@ -122,6 +125,29 @@ async function main() {
     }
   }
 
+  // \u2461 DEAL LEVEL — the deals behind every count above, so clicking a number on the dashboard
+  // shows the evidence without the UI re-deriving anything. One row per deal per region it belongs
+  // to ("Total" plus its own region), because the dashboard filters on the region toggle directly.
+  rows.push([]);
+  rows.push([`\u2461 DEALS \u2014 every deal behind the counts above, one row per region it appears under`]);
+  rows.push(["region", "quarter", "segment", "deal", "account", "owner", "stage", "arr",
+    "sql_date", "sal_date", "sqo_date", "trial_date", "billing_date", "cycle_days"]);
+  const dealRows = [];
+  for (const r of recs) {
+    const qn = qOf(r.Date_Reached_Billing__c);
+    if (!qn) continue;
+    const cyc = r.Date_Reached_SQL__c ? days(r.Date_Reached_SQL__c, r.Date_Reached_Billing__c) : "";
+    const base = [qn, segOf(r), r.Name ?? "", r.Account?.Name ?? "", r.Owner?.Name ?? "", r.StageName ?? "",
+      Math.round(r.AnnualContractValueARR__c ?? 0), r.Date_Reached_SQL__c ?? "", r.Date_Reached_SAL__c ?? "",
+      r.Date_Reached_SQO__c ?? "", r.Date_Reached_Trial__c ?? "", r.Date_Reached_Billing__c ?? "",
+      cyc === "" || cyc < 0 ? "" : cyc];
+    dealRows.push(["Total", ...base]);
+    dealRows.push([regionOf(r), ...base]);
+  }
+  // Biggest first, so a drill-down opens on the deals that move the number.
+  dealRows.sort((a, b) => (b[7] || 0) - (a[7] || 0));
+  rows.push(...dealRows);
+
   const auth = new google.auth.JWT({ email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
     key: Buffer.from(process.env.GOOGLE_PRIVATE_KEY_B64, "base64").toString("utf-8"),
     scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
@@ -131,7 +157,7 @@ async function main() {
   const ex = meta.data.sheets.find((s) => s.properties.title === TAB);
   const reqs = [];
   if (ex) reqs.push({ deleteSheet: { sheetId: ex.properties.sheetId } });
-  reqs.push({ addSheet: { properties: { title: TAB, gridProperties: { rowCount: rows.length + 40, columnCount: 8 } } } });
+  reqs.push({ addSheet: { properties: { title: TAB, gridProperties: { rowCount: rows.length + 40, columnCount: 14 } } } });
   await api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: ID, range: `'${TAB}'!A1`, valueInputOption: "RAW",
     requestBody: { values: rows.map((r) => (r.length ? r : [""])) } });
@@ -143,5 +169,6 @@ async function main() {
   const ds = tot.map((r) => days(r.Date_Reached_SQL__c, r.Date_Reached_Billing__c)).sort((a, b) => a - b);
   console.log(`  overall cycle, SQL -> billing: mean ${Math.round(ds.reduce((s, x) => s + x, 0) / ds.length)}d, median ${ds[Math.floor(ds.length / 2)]}d over ${tot.length} deals`);
   console.log(`  ${recs.length - tot.length} deals have no SQL stamp and are absent from the total-cycle average.`);
+  console.log(`  deal block: ${dealRows.length} rows (each deal listed under "Total" and its own region).`);
 }
 main().catch((e) => { console.error(e.message || e); process.exit(1); });

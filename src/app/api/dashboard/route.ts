@@ -140,10 +140,12 @@ async function buildPayload(): Promise<Payload> {
         // formula keys on col S "Effective_Live_Date", NOT the raw ContractLiveDate in col F.
         { tab: "LiveARR - SOQL Pull", range: "A2:S2000" },
         // Sales Cycle = average days per stage for New Business deals, cohorted by the quarter
-        // they reached Billing, one row per region x quarter x metric. Written by
-        // scripts/build-sales-cycle-tab.mjs from Salesforce; the dashboard pivots it and
-        // computes nothing. Col H carries the median alongside the mean in col E.
-        { tab: "Sales Cycle", range: "A5:H800" },
+        // they reached Billing. Written by scripts/build-sales-cycle-tab.mjs from Salesforce; the
+        // dashboard pivots it and computes nothing. Two blocks in one tab: the metric rows
+        // (region x quarter x metric x segment, median in col H beside the mean in col E), then a
+        // "(2) DEALS" marker and the deal-level rows the counts are built from, which back the
+        // click-through. Range covers both.
+        { tab: "Sales Cycle", range: "A5:N2000" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -426,6 +428,16 @@ async function buildPayload(): Promise<Payload> {
       coverageByOwner[d.owner] = (coverageByOwner[d.owner] ?? 0) + d.arr;
     }
 
+    // "Sales Cycle" is two stacked blocks in one tab. Everything before the "② DEALS" marker
+    // row is the metric grid; everything after its column header is deal-level. Split on the
+    // marker, not a fixed offset, so adding a metric row cannot shift the deal parsing.
+    const scRows = salesCycleRows ?? [];
+    const scMarker = scRows.findIndex((r) => String(r?.[0] ?? "").startsWith("② DEALS"));
+    const scMetricRows = (scMarker === -1 ? scRows : scRows.slice(0, scMarker))
+      .filter((r) => String(r?.[0] ?? "") && String(r[0]) !== "region" && !String(r[0]).startsWith("①"));
+    const scDealRows = (scMarker === -1 ? [] : scRows.slice(scMarker + 1))
+      .filter((r) => String(r?.[0] ?? "") && String(r[0]) !== "region");
+
     return {
       updatedAt: new Date().toISOString(),
       arr,
@@ -443,15 +455,23 @@ async function buildPayload(): Promise<Payload> {
       agingByStage,
       dealBreakdown,
       closedWonFeed,
-      salesCycle: (salesCycleRows ?? [])
-        .filter((r) => String(r?.[0] ?? "") && String(r[0]) !== "region")
-        .map((r) => ({
-          region: String(r[0]), quarter: String(r[1]), key: String(r[2]), label: String(r[3]),
-          avg: typeof r[4] === "number" ? (r[4] as number) : null,
-          n: typeof r[5] === "number" ? (r[5] as number) : 0,
-          segment: String(r[6] ?? ""),   // "" = the all-segments row
-          median: typeof r[7] === "number" ? (r[7] as number) : null,
-        })),
+      // The tab holds two blocks back to back; split on the "(2) DEALS" marker in col A rather
+      // than on a row offset, so inserting a metric row cannot silently shift the deal parsing.
+      salesCycle: scMetricRows.map((r) => ({
+        region: String(r[0]), quarter: String(r[1]), key: String(r[2]), label: String(r[3]),
+        avg: typeof r[4] === "number" ? (r[4] as number) : null,
+        n: typeof r[5] === "number" ? (r[5] as number) : 0,
+        segment: String(r[6] ?? ""),   // "" = the all-segments row
+        median: typeof r[7] === "number" ? (r[7] as number) : null,
+      })),
+      salesCycleDeals: scDealRows.map((r) => ({
+        region: String(r[0]), quarter: String(r[1]), segment: String(r[2] ?? ""),
+        deal: String(r[3] ?? ""), account: String(r[4] ?? ""), owner: String(r[5] ?? ""),
+        stage: String(r[6] ?? ""), arr: typeof r[7] === "number" ? (r[7] as number) : 0,
+        sql: String(r[8] ?? ""), sal: String(r[9] ?? ""), sqo: String(r[10] ?? ""),
+        trial: String(r[11] ?? ""), billing: String(r[12] ?? ""),
+        cycleDays: typeof r[13] === "number" ? (r[13] as number) : null,
+      })),
       pipelineGen,
       dealTracker,
       topBooked,
