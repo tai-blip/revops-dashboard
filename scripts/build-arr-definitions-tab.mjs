@@ -26,7 +26,11 @@ import { google } from "googleapis";
 import fs from "node:fs";
 
 const TAB = "ARR Definitions";
-const API = (process.env.DASH_API_URL || "http://localhost:3000").replace(/\/+$/, "") + "/api/dashboard";
+// Localhost is a sensible default at a developer's keyboard and never right on a CI runner,
+// where nothing is listening on :3000. Falling back to it there cost three retries and a red
+// nightly build with "fetch failed" as the only clue. In CI, say what is actually missing.
+const API_ORIGIN = process.env.DASH_API_URL || (process.env.CI ? "" : "http://localhost:3000");
+const API = API_ORIGIN.replace(/\/+$/, "") + "/api/dashboard";
 
 const gAuth = new google.auth.JWT({
   email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -35,6 +39,11 @@ const gAuth = new google.auth.JWT({
 });
 
 async function loadDash() {
+  if (!API_ORIGIN) {
+    throw new Error("DASH_API_URL is not set. On CI it must be the deployed dashboard origin "
+      + "(repo variable), and CRON_TOKEN must match the CRON_TOKEN env var on Vercel — see src/proxy.ts. "
+      + "Locally, leave it unset to use http://localhost:3000, or point it at your dev server.");
+  }
   try { if (fs.existsSync("/tmp/dash.json")) return JSON.parse(fs.readFileSync("/tmp/dash.json", "utf-8")); } catch {}
   const headers = process.env.CRON_TOKEN ? { "x-cron-token": process.env.CRON_TOKEN } : {};
   let last;
