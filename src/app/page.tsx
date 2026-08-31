@@ -6,6 +6,10 @@ import { DrillPanel, drillable, type DrillSpec } from "@/lib/DrillPanel";
 import { ArrChart } from "@/lib/ArrChart";
 import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
+import {
+  SE_BENCH, SE_BY_QUARTER, SE_BY_FY, SE_T12M, SE_MONTHS, SE_MAGIC_MONTHLY, SE_CAC_MONTHLY,
+  SE_BUILD, SC_REGIONS, SC_QUARTERS, SC_SEGMENTS, SC_ROWS,
+} from "@/lib/salesEfficiency";
 import { ArrMovementChart } from "@/lib/ArrMovementChart";
 import { GroupedBarChart } from "@/lib/GroupedBarChart";
 import { StackedBarChart } from "@/lib/StackedBarChart";
@@ -200,6 +204,7 @@ const TABS = [
   ["acv", "ACV & Deal Size"],
   ["paymentmix", "Payment Mix"],
   ["productarr", "Product ARR"],
+  ["efficiency", "Sales Efficiency"],
 ] as const;
 
 // Is a Pipeline-WoW MoM month label (e.g. "Jul-26") inside Q3 FY26 (Jul–Sep 2026)?
@@ -555,6 +560,8 @@ export default function Dashboard() {
   // Which funnel rows have their breakdown expanded. Collapsed by default so the matrix reads
   // as the five headline lines; click "Contracted" to see the renewal / expansion split.
   const [funnelOpen, setFunnelOpen] = useState<Record<string, boolean>>({});
+  // Sales Efficiency · Sales Cycle — which region the table is showing.
+  const [scRegion, setScRegion] = useState<(typeof SC_REGIONS)[number]>("Total");
   const [pcDrill, setPcDrill] = useState<{ ym: string; label: string } | null>(null);
   const AGING_EXPLICIT = ["SQL", "SAL", "SQO", "Trial", "Proposal", "Pending Signature", "Expansion Lead"];
   const clk = { cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: "3px" } as const;
@@ -1277,7 +1284,7 @@ export default function Dashboard() {
                 { label: "Contracted", v: n.contracted, c: C.blue, sub: "signed, billing not started", deals: cnt("contracted") },
                 { label: "Billed", v: n.live, c: C.grn, sub: "paying", deals: cnt("live") },
                 { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed", deals: cnt("liveArr"), hero: true },
-                { label: "Booked ARR", v: n.bookedPilot, c: C.t1, sub: "Live ARR + Pilot", deals: cnt("bookedPilot") },
+                { label: "Booking", v: n.bookedPilot, c: C.t1, sub: "Live ARR + Pilot", deals: cnt("bookedPilot") },
               ];
               return (
                 <Card title="ARR at a glance" sub={`Point-in-time, as of ${n.label} · full detail on the Booked ARR & Cashflow tab`}>
@@ -2192,7 +2199,7 @@ export default function Dashboard() {
                           <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{quota != null && quota > 0 ? kM(quota) : "\u2014"}</div>
                         </div>
                         <div>
-                          {label("Booked ARR")}
+                          {label("Booking")}
                           <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk, marginTop: 3 }}>{kM(cwTotal)}</div>
                           <div style={{ fontSize: 11.5, color: C.t3, marginTop: 2 }}>NB {kM(cw.nb)} · Exp {kM(cw.exp)}</div>
                         </div>
@@ -3156,7 +3163,7 @@ export default function Dashboard() {
                 },
                 {
                   title: "Pilot, and what moves",
-                  sub: "Live ARR + Pilot = Booked ARR",
+                  sub: "Live ARR + Pilot = Booking",
                   rows: [
                     { bucket: "booked", label: "Pilot", color: C.gold, get: (p) => p.booked },
                     { bucket: "bToLost", label: "Pilot → Lost", color: C.red, get: (p) => p.bToLost, sign: "−",
@@ -3165,7 +3172,7 @@ export default function Dashboard() {
                       parent: "booked", hint: "Pilots that signed and went contract-live this month" },
                     { bucket: "cToL", label: "Contracted → Billed", color: C.grn, get: (p) => p.cToL, sign: "+" },
                     { bucket: "churn", label: "Churn", color: C.red, get: (p) => p.churn, sign: "−" },
-                    { bucket: "bookedPilot", label: "Booked ARR", color: C.gold, get: (p) => p.bookedPilot, total: true,
+                    { bucket: "bookedPilot", label: "Booking", color: C.gold, get: (p) => p.bookedPilot, total: true,
                       hint: "Live ARR + Pilot — the widest view. Note: before 27 Aug 2026 \"Booked ARR\" meant the pilot book alone, which is now just Pilot." },
                   ],
                 },
@@ -3173,7 +3180,7 @@ export default function Dashboard() {
               return (
                 <Card
                   title="ARR Funnel — Pilot → Contracted → Billed (MoM · Jan-26 → now)"
-                  sub="Point-in-time ARR in each tier at month-end. Pilot = in trial. Contracted = signed and contract-live but payment has not started (R&R / billing timing). Billed = paying. Live ARR = Contracted + Billed, the whole signed contract-live book and the figure the Command tab headline reports. Booked ARR = Live ARR + Pilot. Churn excluded throughout."
+                  sub="Point-in-time ARR in each tier at month-end. Pilot = in trial. Contracted = signed and contract-live but payment has not started (R&R / billing timing). Billed = paying. Live ARR = Contracted + Billed, the whole signed contract-live book and the figure the Command tab headline reports. Booking = Live ARR + Pilot. Churn excluded throughout."
                   accent={C.navy}
                 >
                   <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "14px 20px 2px" }}>
@@ -3233,11 +3240,11 @@ export default function Dashboard() {
                                 </g>
                               );
                             })}
-                            {/* Booked ARR tops the stack, so its total labels the column. */}
+                            {/* Booking tops the stack, so its total labels the column. */}
                             <text x={xx(i)} y={yy(p.bookedPilot) - 6} textAnchor="middle" fontSize={10.5}
                               fontFamily="var(--font-dm-mono)" fontWeight={700} fill={C.t1}>{kM(p.bookedPilot)}</text>
                             <rect x={x} y={padT} width={bw} height={ih} fill="transparent">
-                              <title>{`${p.label}\nPilot ${fmt(p.booked)}\nContracted ${fmt(p.contracted)}\nBilled ${fmt(p.live)}\n———\nLive ARR ${fmt(p.liveArr)}\nBooked ARR ${fmt(p.bookedPilot)}`}</title>
+                              <title>{`${p.label}\nPilot ${fmt(p.booked)}\nContracted ${fmt(p.contracted)}\nBilled ${fmt(p.live)}\n———\nLive ARR ${fmt(p.liveArr)}\nBooking ${fmt(p.bookedPilot)}`}</title>
                             </rect>
                           </g>
                         );
@@ -3246,7 +3253,7 @@ export default function Dashboard() {
                   </div>
                   {/* Months run ACROSS; the metrics run DOWN in two blocks — the ARR that adds
                       up to Live ARR, then the pilot book and the movements that feed it, ending
-                      at Booked ARR. Every cell still opens its deals. */}
+                      at Booking. Every cell still opens its deals. */}
                   <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
                       <thead>
@@ -4417,6 +4424,220 @@ export default function Dashboard() {
               </div>
             </Card>
           </div>
+        </div>
+        );
+      })()}
+
+      {/* ── Sales Efficiency — slides 5 & 6 of the QBR deck, plus the Sales Cycle table.
+          Figures are HARDCODED in src/lib/salesEfficiency.ts until the investor model is
+          wired up; swapping that file for a source tab needs no change here. ── */}
+      {tab === "efficiency" && (() => {
+        const okMagic = (v: number) => v >= SE_BENCH.magic;
+        const okCac = (v: number) => v <= SE_BENCH.cacMonths;
+
+        // One bar chart per ratio. Bars are coloured against the benchmark and the benchmark
+        // itself is drawn as a dashed rule, so "are we above the line" is answered by looking.
+        const BarSet = ({ title, vals, labels, bench, benchLabel, good, fmtV }: {
+          title: string; vals: number[]; labels: string[]; bench: number; benchLabel: string;
+          good: (v: number) => boolean; fmtV: (v: number) => string;
+        }) => {
+          const W = 720, H = 210, padL = 8, padR = 8, padT = 26, padB = 26;
+          const iw = W - padL - padR, ih = H - padT - padB;
+          const maxV = Math.max(bench, ...vals) * 1.2;
+          const yy = (v: number) => padT + ih - (v / maxV) * ih;
+          const band = iw / vals.length;
+          return (
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.t2, marginBottom: 2 }}>{title}</div>
+              <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", height: "auto" }}>
+                <line x1={padL} y1={yy(bench)} x2={W - padR} y2={yy(bench)} stroke={C.t3} strokeWidth={1} strokeDasharray="5 4" />
+                <text x={padL + 2} y={yy(bench) - 6} textAnchor="start" fontSize={11} fill={C.t3} fontStyle="italic">{benchLabel}</text>
+                {vals.map((v, i) => {
+                  const bw = Math.min(58, band * 0.56), x = padL + band * (i + 0.5) - bw / 2;
+                  const c = good(v) ? C.grn : C.red;
+                  return (
+                    <g key={labels[i]}>
+                      <rect x={x} y={yy(v)} width={bw} height={Math.max(0, ih + padT - yy(v))} fill={c} rx={2}>
+                        <title>{`${labels[i]} · ${fmtV(v)}`}</title>
+                      </rect>
+                      <text x={padL + band * (i + 0.5)} y={yy(v) - 7} textAnchor="middle" fontSize={12}
+                        fontFamily="var(--font-dm-mono)" fontWeight={700} fill={c}>{fmtV(v)}</text>
+                      <text x={padL + band * (i + 0.5)} y={H - 8} textAnchor="middle" fontSize={11} fill={C.t3}>{labels[i]}</text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          );
+        };
+
+        // Rolling monthly view: the smooth TTM line plus the jumpy 3-month one.
+        const LineSet = ({ title, ttm, m3, bench, benchLabel, unit }: {
+          title: string; ttm: number[]; m3: number[]; bench: number; benchLabel: string; unit: string;
+        }) => {
+          const W = 720, H = 210, padL = 34, padR = 12, padT = 18, padB = 26;
+          const iw = W - padL - padR, ih = H - padT - padB;
+          const maxV = Math.max(bench, ...ttm, ...m3) * 1.15;
+          const yy = (v: number) => padT + ih - (v / maxV) * ih;
+          const xx = (i: number) => padL + (i / (SE_MONTHS.length - 1)) * iw;
+          const path = (a: number[]) => a.map((v, i) => `${i ? "L" : "M"}${xx(i).toFixed(1)} ${yy(v).toFixed(1)}`).join(" ");
+          return (
+            <div>
+              <div style={{ display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap", marginBottom: 2 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: C.t2 }}>{title}</span>
+                <span style={{ fontSize: 11.5, color: C.navy }}>▬ TTM (12-mo)</span>
+                <span style={{ fontSize: 11.5, color: C.ylw }}>▬ 3-month</span>
+              </div>
+              <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", height: "auto" }}>
+                <line x1={padL} y1={yy(bench)} x2={W - padR} y2={yy(bench)} stroke={C.t3} strokeWidth={1} strokeDasharray="5 4" />
+                <text x={padL + 2} y={yy(bench) - 6} textAnchor="start" fontSize={11} fill={C.t3} fontStyle="italic">{benchLabel}</text>
+                <path d={path(m3)} fill="none" stroke={C.ylw} strokeWidth={1.8} strokeLinejoin="round" opacity={0.85} />
+                <path d={path(ttm)} fill="none" stroke={C.navy} strokeWidth={2.6} strokeLinejoin="round" />
+                {ttm.map((v, i) => (
+                  <g key={i}>
+                    <circle cx={xx(i)} cy={yy(v)} r={2.6} fill={C.navy}><title>{`${SE_MONTHS[i]} · TTM ${v}${unit} · 3-mo ${m3[i]}${unit}`}</title></circle>
+                    <text x={xx(i)} y={H - 8} textAnchor="middle" fontSize={10.5} fill={C.t3}>{SE_MONTHS[i]}</text>
+                  </g>
+                ))}
+                <text x={padL - 6} y={yy(ttm[ttm.length - 1]) + 4} textAnchor="end" fontSize={10.5}
+                  fontFamily="var(--font-dm-mono)" fill={C.navy}>{ttm[ttm.length - 1]}{unit}</text>
+              </svg>
+            </div>
+          );
+        };
+
+        const Grid = ({ cols, rows }: { cols: string[]; rows: { label: string; values: string[] }[] }) => (
+          <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                <Th l>Metric</Th>{cols.map((c) => <Th key={c}>{c}</Th>)}
+              </tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.label} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                    <Td l bold>{r.label}</Td>
+                    {r.values.map((v, i) => <Td key={i} mono>{v}</Td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+
+        return (
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+          <div style={{ background: C.ylwBg, border: `1px solid ${C.ylw}`, borderRadius: 10,
+            padding: "10px 14px", marginBottom: 16, fontSize: 12.5, color: C.t1 }}>
+            ⚠️ <b>Static figures.</b> Transcribed from the US Sales QBR deck (Investor Summary, through Jun-26).
+            These do not refresh — they are placeholders until the investor model is wired to the Sheet.
+            Benchmarks are set to <b>Magic Number ≥ {SE_BENCH.magic.toFixed(2)}</b> and <b>CAC payback ≤ {SE_BENCH.cacMonths} months</b>.
+          </div>
+
+          {/* ── Module 1 — slide 5 ── */}
+          <Card title="Sales Efficiency — quarterly & fiscal year"
+            sub="Magic Number = Net-New ARR ÷ S&M (the quarterly view lags one period). CAC Payback = S&M ÷ (Net-New ARR × Gross Margin) × 12.">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, padding: "16px 20px 4px" }}>
+              <BarSet title="Magic Number — by quarter" vals={SE_BY_QUARTER.map((x) => x.magic)}
+                labels={SE_BY_QUARTER.map((x) => x.q)} bench={SE_BENCH.magic}
+                benchLabel={`benchmark ${SE_BENCH.magic.toFixed(2)}`} good={okMagic} fmtV={(v) => v.toFixed(2)} />
+              <BarSet title="CAC Payback (months) — by quarter" vals={SE_BY_QUARTER.map((x) => x.cac)}
+                labels={SE_BY_QUARTER.map((x) => x.q)} bench={SE_BENCH.cacMonths}
+                benchLabel={`benchmark ${SE_BENCH.cacMonths} mo`} good={okCac} fmtV={(v) => String(v)} />
+            </div>
+            <div style={{ padding: "0 20px 6px", fontSize: 12.5, color: C.t2 }}>
+              Q4&rsquo;25&ndash;Q1&rsquo;26 ran hyper-efficient (1.6×). Q2&rsquo;26&rsquo;s 0.48 reflects front-loaded S&amp;M ahead of Q3 bookings, and payback moves with it.
+            </div>
+            <div style={{ padding: "10px 20px 0", fontSize: 11, fontWeight: 700, letterSpacing: ".05em",
+              textTransform: "uppercase", color: C.t3 }}>By fiscal year</div>
+            <Grid cols={SE_BY_FY.cols} rows={SE_BY_FY.rows} />
+          </Card>
+
+          <div style={{ height: 16 }} />
+
+          {/* ── Module 2 — slide 6 ── */}
+          <Card title="Magic Number & CAC Payback — trailing twelve months"
+            sub="The TTM line is the one to steer by; the 3-month line swings with enterprise-deal timing.">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))",
+              gap: 10, padding: "14px 20px 6px" }}>
+              {SE_T12M.map((t) => (
+                <div key={t.label} style={{ border: `1px solid ${C.bd}`, borderRadius: 10, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: C.t3 }}>{t.label}</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.navy, marginTop: 3 }}>{t.value}</div>
+                  <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{t.sub}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, padding: "10px 20px 4px" }}>
+              <LineSet title="Magic Number — monthly (rolling)" ttm={SE_MAGIC_MONTHLY.ttm} m3={SE_MAGIC_MONTHLY.m3}
+                bench={SE_BENCH.magic} benchLabel={`benchmark ${SE_BENCH.magic.toFixed(2)}`} unit="" />
+              <LineSet title="CAC Payback (mo) — monthly (rolling)" ttm={SE_CAC_MONTHLY.ttm} m3={SE_CAC_MONTHLY.m3}
+                bench={SE_BENCH.cacMonths} benchLabel={`benchmark ${SE_BENCH.cacMonths} mo`} unit=" mo" />
+            </div>
+            <div style={{ padding: "0 20px 6px", fontSize: 12.5, color: C.t2 }}>
+              TTM efficiency has climbed all year to 0.94 &mdash; still under the {SE_BENCH.magic.toFixed(2)} line.
+              TTM payback compressed from ~27 to 17.5 months as ARR outpaced spend.
+            </div>
+            <div style={{ padding: "10px 20px 0", fontSize: 11, fontWeight: 700, letterSpacing: ".05em",
+              textTransform: "uppercase", color: C.t3 }}>The build — by quarter</div>
+            <Grid cols={SE_BUILD.cols} rows={SE_BUILD.rows} />
+          </Card>
+
+          <div style={{ height: 16 }} />
+
+          {/* ── Module 3 — Sales Cycle ── */}
+          <Card title="Sales Cycle — quarter over quarter"
+            sub="Days in each stage for the deals WON in that quarter. Structure per the Sales Cycle workbook; that sheet has no values in it yet, so every cell is a placeholder.">
+            <div style={{ display: "flex", gap: 8, padding: "12px 20px 6px", flexWrap: "wrap" }}>
+              {SC_REGIONS.map((r) => (
+                <button key={r} onClick={() => setScRegion(r)}
+                  style={{ cursor: "pointer", border: `1px solid ${scRegion === r ? C.navy : C.bd}`,
+                    background: scRegion === r ? C.navy : "transparent", color: scRegion === r ? "#fff" : C.t2,
+                    borderRadius: 10, padding: "6px 13px", fontSize: 12.5, fontWeight: 700 }}>{r}</button>
+              ))}
+            </div>
+            <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                    <th style={{ textAlign: "left", padding: "8px 16px 8px 0", minWidth: 190 }} />
+                    {SC_QUARTERS.map((q) => (
+                      <th key={q.q} style={{ textAlign: "right", padding: "8px 16px 8px 0", whiteSpace: "nowrap" }}>
+                        <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 10.5, letterSpacing: ".08em",
+                          textTransform: "uppercase", color: C.t3 }}>{q.q}</div>
+                        <div style={{ fontSize: 10, color: C.t3, fontWeight: 400 }}>{q.range}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {SC_ROWS.map((row) => (
+                    <Fragment key={row.key}>
+                      <tr style={{ borderBottom: `1px solid ${C.s1}` }}>
+                        <td style={{ textAlign: "left", padding: "10px 16px 10px 0", whiteSpace: "nowrap" }}>
+                          <span title={row.note} style={{ fontWeight: 700, color: C.t1, cursor: "help",
+                            textDecoration: "underline dotted", textDecorationColor: C.bd, textUnderlineOffset: "3px" }}>
+                            {row.label}
+                          </span>
+                        </td>
+                        {SC_QUARTERS.map((q) => <Td key={q.q} mono color={C.t3}>—</Td>)}
+                      </tr>
+                      {row.segmented && SC_SEGMENTS.map((seg) => (
+                        <tr key={row.key + seg} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <td style={{ textAlign: "left", padding: "8px 16px 8px 22px", whiteSpace: "nowrap",
+                            fontSize: 12.5, color: C.t2 }}>{seg}</td>
+                          {SC_QUARTERS.map((q) => <Td key={q.q} mono color={C.t3}>—</Td>)}
+                        </tr>
+                      ))}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: "0 20px 18px", fontSize: 11.5, color: C.t3 }}>
+              Region toggle shown for {scRegion}. Source workbook defines the rows, quarters and regions but carries no figures yet —
+              once it is populated this table reads it directly.
+            </div>
+          </Card>
         </div>
         );
       })()}
