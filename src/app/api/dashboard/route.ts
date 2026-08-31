@@ -89,7 +89,7 @@ async function buildPayload(): Promise<Payload> {
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
     // NOTE: order here MUST match the destructured variables below.
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows, liveArrPullRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows, liveArrPullRows, salesCycleRows] =
       await getSheetValuesBatch([
         { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
@@ -139,6 +139,10 @@ async function buildPayload(): Promise<Payload> {
         // what lets the Closed Won drill-down tie to the cell exactly. Note the attainment
         // formula keys on col S "Effective_Live_Date", NOT the raw ContractLiveDate in col F.
         { tab: "LiveARR - SOQL Pull", range: "A2:S2000" },
+        // Sales Cycle = average days per stage for New Business wins, one row per
+        // region x quarter x metric. Written by scripts/build-sales-cycle-tab.mjs from
+        // Salesforce; the dashboard pivots it for display and computes nothing.
+        { tab: "Sales Cycle", range: "A5:F200" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -438,6 +442,13 @@ async function buildPayload(): Promise<Payload> {
       agingByStage,
       dealBreakdown,
       closedWonFeed,
+      salesCycle: (salesCycleRows ?? [])
+        .filter((r) => String(r?.[0] ?? "") && String(r[0]) !== "region")
+        .map((r) => ({
+          region: String(r[0]), quarter: String(r[1]), key: String(r[2]), label: String(r[3]),
+          avg: typeof r[4] === "number" ? (r[4] as number) : null,
+          n: typeof r[5] === "number" ? (r[5] as number) : 0,
+        })),
       pipelineGen,
       dealTracker,
       topBooked,

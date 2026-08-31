@@ -50,6 +50,13 @@ jobs:
       - name: Deal Tracker snapshot (replace)
         if: always()
         run: node scripts/build-deal-tracker.mjs
+      - name: Sales Cycle (SFDC → Sheet)
+        if: always()
+        # Average days per stage for New Business wins, per region and quarter. Feeds module 3
+        # of the Sales Efficiency tab. Reads Salesforce directly, so it does not depend on the
+        # dashboard API being up.
+        run: node scripts/build-sales-cycle-tab.mjs
+
       - name: ARR Definitions tab (mirror of the dashboard funnel)
         if: always()
         # Writes the "ARR Definitions" tab from the deployed dashboard API, so the Sheet always

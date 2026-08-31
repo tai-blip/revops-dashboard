@@ -69,11 +69,12 @@ export const SE_BUILD = {
 };
 
 // ── Module 3 · Sales Cycle ────────────────────────────────────────────────────────────────
-// Shape taken from the Sales Cycle workbook's first tab:
+// Shape taken from the Sales Cycle workbook's first tab (which is a skeleton — no values in it):
 //   docs.google.com/spreadsheets/d/1FA4b7pa_KTJi78puhpz8KIpDSNO6KJy_AFoLeKYTBA8
-// That sheet is a SKELETON — the rows, quarters and region toggle are defined but every cell
-// is empty. So the table below is the structure with no numbers in it yet; once the sheet is
-// populated this becomes a straight read.
+// The NUMBERS are computed from Salesforce instead, by scripts/build-sales-cycle-tab.mjs into the
+// "Sales Cycle" sheet tab, which the dashboard reads. Only the labels and quarter windows live
+// here. Segment sub-rows are NOT built: MerchantSegment__c is set on 14 of 137 New Business wins,
+// so a per-segment average would be three or four deals wide.
 export const SC_REGIONS = ["Total", "North America", "International"] as const;
 export const SC_QUARTERS = [
   { q: "Q1'25", range: "Jan 2 – Apr 1" },
@@ -83,16 +84,4 @@ export const SC_QUARTERS = [
   { q: "Q1'26", range: "Jan 2 – Apr 1" },
   { q: "Q2'26", range: "Apr 2 – Jul 1" },
   { q: "Q3'26 YTD", range: "Jul 2 – Oct 1" },
-];
-export const SC_SEGMENTS = ["SMB", "Mid Market", "Enterprise", "Mega-enterprise"] as const;
-export const SC_ROWS: { key: string; label: string; note: string; segmented: boolean }[] = [
-  { key: "won", label: "Total Deals Won", segmented: false,
-    note: "The starting cohort — every deal won in the quarter. Everything below is measured on these deals." },
-  { key: "cycle", label: "Total Sales Cycle", segmented: true,
-    note: "Days from first touch to Closed Won, averaged over the cohort." },
-  { key: "sql", label: "SQL", segmented: true, note: "Average days the won deals spent in SQL." },
-  { key: "sal", label: "SAL", segmented: true, note: "Average days the won deals spent in SAL." },
-  { key: "sqo", label: "SQO", segmented: true, note: "Average days the won deals spent in SQO." },
-  { key: "pilot", label: "Pilot", segmented: true, note: "Average days the won deals spent in Trial." },
-  { key: "billing", label: "Billing", segmented: true, note: "Average days the won deals spent in Billing." },
 ];

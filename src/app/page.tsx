@@ -8,7 +8,7 @@ import { BarTrendChart } from "@/lib/BarTrendChart";
 import { LineTrendChart } from "@/lib/LineTrendChart";
 import {
   SE_BENCH, SE_BY_QUARTER, SE_BY_FY, SE_T12M, SE_MONTHS, SE_MAGIC_MONTHLY, SE_CAC_MONTHLY,
-  SE_BUILD, SC_REGIONS, SC_QUARTERS, SC_SEGMENTS, SC_ROWS,
+  SE_BUILD, SC_REGIONS, SC_QUARTERS,
 } from "@/lib/salesEfficiency";
 import { ArrMovementChart } from "@/lib/ArrMovementChart";
 import { GroupedBarChart } from "@/lib/GroupedBarChart";
@@ -88,6 +88,9 @@ type DashboardData = {
   // the same rows the "AE Attainment (Official)" formulas sum, so the Closed Won drill-down can
   // tie to the cell. `eld` is Effective_Live_Date (what attainment counts on); `cld` is the raw
   // Contract Live Date, which is NOT always the same day.
+  // Average days per stage for New Business wins, one row per region x quarter x metric.
+  // Written to the "Sales Cycle" tab from Salesforce; the dashboard only pivots it.
+  salesCycle?: { region: string; quarter: string; key: string; label: string; avg: number | null; n: number }[];
   closedWonFeed?: { name: string; owner: string; stage: string; status: string; arr: number; rt: string; rtRaw: string; eld: string; cld: string; tier: string }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
@@ -4584,60 +4587,84 @@ export default function Dashboard() {
 
           <div style={{ height: 16 }} />
 
-          {/* ── Module 3 — Sales Cycle ── */}
-          <Card title="Sales Cycle — quarter over quarter"
-            sub="Days in each stage for the deals WON in that quarter. Structure per the Sales Cycle workbook; that sheet has no values in it yet, so every cell is a placeholder.">
-            <div style={{ display: "flex", gap: 8, padding: "12px 20px 6px", flexWrap: "wrap" }}>
-              {SC_REGIONS.map((r) => (
-                <button key={r} onClick={() => setScRegion(r)}
-                  style={{ cursor: "pointer", border: `1px solid ${scRegion === r ? C.navy : C.bd}`,
-                    background: scRegion === r ? C.navy : "transparent", color: scRegion === r ? "#fff" : C.t2,
-                    borderRadius: 10, padding: "6px 13px", fontSize: 12.5, fontWeight: 700 }}>{r}</button>
-              ))}
-            </div>
-            <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
-                <thead>
-                  <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <th style={{ textAlign: "left", padding: "8px 16px 8px 0", minWidth: 190 }} />
-                    {SC_QUARTERS.map((q) => (
-                      <th key={q.q} style={{ textAlign: "right", padding: "8px 16px 8px 0", whiteSpace: "nowrap" }}>
-                        <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 10.5, letterSpacing: ".08em",
-                          textTransform: "uppercase", color: C.t3 }}>{q.q}</div>
-                        <div style={{ fontSize: 10, color: C.t3, fontWeight: 400 }}>{q.range}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {SC_ROWS.map((row) => (
-                    <Fragment key={row.key}>
-                      <tr style={{ borderBottom: `1px solid ${C.s1}` }}>
-                        <td style={{ textAlign: "left", padding: "10px 16px 10px 0", whiteSpace: "nowrap" }}>
-                          <span title={row.note} style={{ fontWeight: 700, color: C.t1, cursor: "help",
-                            textDecoration: "underline dotted", textDecorationColor: C.bd, textUnderlineOffset: "3px" }}>
-                            {row.label}
-                          </span>
-                        </td>
-                        {SC_QUARTERS.map((q) => <Td key={q.q} mono color={C.t3}>—</Td>)}
+            {/* ── Module 3 — Sales Cycle, live from the "Sales Cycle" sheet tab ── */}
+            {(() => {
+              const SC = data.salesCycle ?? [];
+              const cell = (q: string, key: string) => SC.find((r) => r.region === scRegion && r.quarter === q && r.key === key);
+              const ROWS = [
+                { key: "won", label: "Total Deals Won", unit: "", bold: true, after: false,
+                  note: "New Business deals won in the quarter, pinned by close date. The cohort every row below is measured on." },
+                { key: "cycle", label: "Total Sales Cycle", unit: "d", bold: true, after: false,
+                  note: "Close date minus the SQL date, averaged over the cohort." },
+                { key: "sql", label: "SQL", unit: "d", bold: false, after: false, note: "Average days from reaching SQL to reaching SAL." },
+                { key: "sal", label: "SAL", unit: "d", bold: false, after: false, note: "Average days from reaching SAL to reaching SQO." },
+                { key: "sqo", label: "SQO", unit: "d", bold: false, after: false, note: "Average days from reaching SQO to reaching Trial." },
+                { key: "pilot", label: "Pilot", unit: "d", bold: false, after: false, note: "Average days from reaching Trial to reaching Billing." },
+                { key: "postBilling", label: "Post-close → Billing", unit: "d", bold: false, after: true,
+                  note: "NOT part of the sales cycle. On 55% of wins the Billing stamp lands after the close date — billing happens once the deal is won. Shown because the wait still matters." },
+              ];
+              return (
+              <Card title="Sales Cycle — quarter over quarter"
+                sub="Average days per stage for NEW BUSINESS deals won in each quarter. Renewals and expansions never pass through SQL, so they are out of scope. Live from Salesforce.">
+                <div style={{ display: "flex", gap: 8, padding: "12px 20px 6px", flexWrap: "wrap" }}>
+                  {SC_REGIONS.map((r) => (
+                    <button key={r} onClick={() => setScRegion(r)}
+                      style={{ cursor: "pointer", border: `1px solid ${scRegion === r ? C.navy : C.bd}`,
+                        background: scRegion === r ? C.navy : "transparent", color: scRegion === r ? "#fff" : C.t2,
+                        borderRadius: 10, padding: "6px 13px", fontSize: 12.5, fontWeight: 700 }}>{r}</button>
+                  ))}
+                </div>
+                <div style={{ overflowX: "auto", padding: "4px 20px 12px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        <th style={{ textAlign: "left", padding: "8px 16px 8px 0", minWidth: 190 }} />
+                        {SC_QUARTERS.map((q) => (
+                          <th key={q.q} style={{ textAlign: "right", padding: "8px 16px 8px 0", whiteSpace: "nowrap" }}>
+                            <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 10.5, letterSpacing: ".08em",
+                              textTransform: "uppercase", color: C.t3 }}>{q.q}</div>
+                            <div style={{ fontSize: 10, color: C.t3, fontWeight: 400 }}>{q.range}</div>
+                          </th>
+                        ))}
                       </tr>
-                      {row.segmented && SC_SEGMENTS.map((seg) => (
-                        <tr key={row.key + seg} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                          <td style={{ textAlign: "left", padding: "8px 16px 8px 22px", whiteSpace: "nowrap",
-                            fontSize: 12.5, color: C.t2 }}>{seg}</td>
-                          {SC_QUARTERS.map((q) => <Td key={q.q} mono color={C.t3}>—</Td>)}
+                    </thead>
+                    <tbody>
+                      {ROWS.map((row) => (
+                        <tr key={row.key} style={{ borderBottom: `1px solid ${C.s1}`,
+                          borderTop: row.after ? `2px solid ${C.bd}` : undefined,
+                          background: row.key === "cycle" ? C.s2 : undefined }}>
+                          <td style={{ textAlign: "left", padding: "10px 16px 10px 0", whiteSpace: "nowrap" }}>
+                            <span title={row.note} style={{ fontWeight: row.bold ? 700 : 600, cursor: "help",
+                              color: row.after ? C.t2 : C.t1, textDecoration: "underline dotted",
+                              textDecorationColor: C.bd, textUnderlineOffset: "3px" }}>{row.label}</span>
+                          </td>
+                          {SC_QUARTERS.map((q) => {
+                            const c = cell(q.q, row.key);
+                            if (!c || c.avg == null) return <Td key={q.q} mono color={C.t3}>—</Td>;
+                            const thin = row.key !== "won" && c.n < 8;
+                            return (
+                              <td key={q.q} title={row.key === "won" ? undefined : `${c.n} deal${c.n === 1 ? "" : "s"} in this average`}
+                                style={{ textAlign: "right", padding: "10px 16px 10px 0", fontFamily: "var(--font-dm-mono)",
+                                  fontSize: 13, fontWeight: row.bold ? 700 : 400, whiteSpace: "nowrap",
+                                  color: row.after ? C.t2 : thin ? C.ylw : C.t1 }}>
+                                {c.avg}{row.unit}
+                                {row.key !== "won" && <span style={{ fontSize: 10, color: C.t3 }}> ·{c.n}</span>}
+                              </td>
+                            );
+                          })}
                         </tr>
                       ))}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ padding: "0 20px 18px", fontSize: 11.5, color: C.t3 }}>
-              Region toggle shown for {scRegion}. Source workbook defines the rows, quarters and regions but carries no figures yet —
-              once it is populated this table reads it directly.
-            </div>
-          </Card>
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ padding: "0 20px 18px", fontSize: 11.5, color: C.t3 }}>
+                  The small number after each average is how many deals it covers — amber under 8.
+                  SQL + SAL + SQO + Pilot decompose the total cycle; Post-close → Billing sits below the rule
+                  because it happens after the win, not on the way to it.
+                </div>
+              </Card>
+              );
+            })()}
         </div>
         );
       })()}
