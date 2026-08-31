@@ -90,7 +90,7 @@ type DashboardData = {
   // Contract Live Date, which is NOT always the same day.
   // Average days per stage for New Business wins, one row per region x quarter x metric.
   // Written to the "Sales Cycle" tab from Salesforce; the dashboard only pivots it.
-  salesCycle?: { region: string; quarter: string; key: string; label: string; avg: number | null; n: number }[];
+  salesCycle?: { region: string; quarter: string; key: string; label: string; avg: number | null; n: number; segment: string }[];
   closedWonFeed?: { name: string; owner: string; stage: string; status: string; arr: number; rt: string; rtRaw: string; eld: string; cld: string; tier: string }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
@@ -565,6 +565,8 @@ export default function Dashboard() {
   const [funnelOpen, setFunnelOpen] = useState<Record<string, boolean>>({});
   // Sales Efficiency · Sales Cycle — which region the table is showing.
   const [scRegion, setScRegion] = useState<(typeof SC_REGIONS)[number]>("Total");
+  // Which Sales Cycle rows have their segment split open.
+  const [scOpen, setScOpen] = useState<Record<string, boolean>>({});
   const [pcDrill, setPcDrill] = useState<{ ym: string; label: string } | null>(null);
   const AGING_EXPLICIT = ["SQL", "SAL", "SQO", "Trial", "Proposal", "Pending Signature", "Expansion Lead"];
   const clk = { cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: "3px" } as const;
@@ -4590,7 +4592,10 @@ export default function Dashboard() {
             {/* ── Module 3 — Sales Cycle, live from the "Sales Cycle" sheet tab ── */}
             {(() => {
               const SC = data.salesCycle ?? [];
-              const cell = (q: string, key: string) => SC.find((r) => r.region === scRegion && r.quarter === q && r.key === key);
+              const cell = (q: string, key: string, seg = "") =>
+                SC.find((r) => r.region === scRegion && r.quarter === q && r.key === key && r.segment === seg);
+              // Segment split, collapsed by default — same control as the ARR funnel.
+              const SEGS = ["Small", "Mid Market", "Enterprise", "Mega Enterprise"];
               const ROWS = [
                 { key: "won", label: "Total Deals Won", unit: "", bold: true, after: false,
                   note: "New Business deals won in the quarter, pinned by close date. The cohort every row below is measured on." },
@@ -4630,13 +4635,23 @@ export default function Dashboard() {
                     </thead>
                     <tbody>
                       {ROWS.map((row) => (
-                        <tr key={row.key} style={{ borderBottom: `1px solid ${C.s1}`,
+                        <Fragment key={row.key}>
+                        <tr style={{ borderBottom: `1px solid ${C.s1}`,
                           borderTop: row.after ? `2px solid ${C.bd}` : undefined,
                           background: row.key === "cycle" ? C.s2 : undefined }}>
                           <td style={{ textAlign: "left", padding: "10px 16px 10px 0", whiteSpace: "nowrap" }}>
                             <span title={row.note} style={{ fontWeight: row.bold ? 700 : 600, cursor: "help",
                               color: row.after ? C.t2 : C.t1, textDecoration: "underline dotted",
                               textDecorationColor: C.bd, textUnderlineOffset: "3px" }}>{row.label}</span>
+                            <span onClick={() => setScOpen((o) => ({ ...o, [row.key]: !o[row.key] }))}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 5, marginLeft: 10,
+                                padding: "2px 8px 2px 6px", borderRadius: 20, cursor: "pointer",
+                                border: `1.5px solid ${C.navy}`, background: scOpen[row.key] ? C.navy : `${C.navy}1f`,
+                                color: scOpen[row.key] ? "#fff" : C.navy, fontSize: 9.5, fontWeight: 800,
+                                letterSpacing: ".04em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                              <span style={{ fontSize: 8 }}>{scOpen[row.key] ? "▼" : "▶"}</span>
+                              {scOpen[row.key] ? "Hide" : "Show 4"}
+                            </span>
                           </td>
                           {SC_QUARTERS.map((q) => {
                             const c = cell(q.q, row.key);
@@ -4653,6 +4668,26 @@ export default function Dashboard() {
                             );
                           })}
                         </tr>
+                        {scOpen[row.key] && SEGS.map((seg) => (
+                          <tr key={row.key + seg} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                            <td style={{ textAlign: "left", padding: "8px 16px 8px 24px", whiteSpace: "nowrap",
+                              fontSize: 12.5, color: C.t2 }}>{seg}</td>
+                            {SC_QUARTERS.map((q) => {
+                              const c = cell(q.q, row.key, seg);
+                              if (!c || c.avg == null) return <Td key={q.q} mono color={C.t3}>—</Td>;
+                              const thin = row.key !== "won" && c.n < 8;
+                              return (
+                                <td key={q.q} title={`${c.n} deal${c.n === 1 ? "" : "s"}`}
+                                  style={{ textAlign: "right", padding: "8px 16px 8px 0", fontFamily: "var(--font-dm-mono)",
+                                    fontSize: 12.5, whiteSpace: "nowrap", color: thin ? C.ylw : C.t2 }}>
+                                  {c.avg}{row.unit}
+                                  {row.key !== "won" && <span style={{ fontSize: 10, color: C.t3 }}> ·{c.n}</span>}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>

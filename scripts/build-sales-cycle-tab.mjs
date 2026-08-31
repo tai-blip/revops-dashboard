@@ -45,11 +45,25 @@ const METRICS = [
 const POST_CLOSE = ["postBilling", "Post-close → Billing", "CloseDate", "Date_Reached_Billing__c"];
 const days = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
 
+// Segment. Merchant_Segment__c (the STRING field) is populated on 137/137 New Business wins —
+// note the near-identical picklist MerchantSegment__c is only on 10% and is NOT the one to use.
+// Five raw values collapse to four buckets (Tai, 2026-08-31): Medium sits with Mid-Market.
+const SEGMENTS = ["Small", "Mid Market", "Enterprise", "Mega Enterprise"];
+const segOf = (r) => {
+  const raw = String(r.Merchant_Segment__c || r.Account?.Merchant_Segment__c || "").trim().toLowerCase();
+  if (raw === "small") return "Small";
+  if (raw === "medium" || raw === "mid-market" || raw === "mid market") return "Mid Market";
+  if (raw === "enterprise") return "Enterprise";
+  if (raw.startsWith("mega")) return "Mega Enterprise";
+  return "";
+};
+
 async function main() {
   const body = new URLSearchParams({ grant_type: "client_credentials", client_id: process.env.SF_CLIENT_ID, client_secret: process.env.SF_CLIENT_SECRET });
   const t = await (await fetch(`${process.env.SF_LOGIN_URL}/services/oauth2/token`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body })).json();
   const v = process.env.SF_API_VERSION || "59.0";
-  const q = `SELECT Id, CloseDate, Region__c, Date_Reached_SQL__c, Date_Reached_SAL__c, Date_Reached_SQO__c,
+  const q = `SELECT Id, CloseDate, Region__c, Merchant_Segment__c, Account.Merchant_Segment__c,
+    Date_Reached_SQL__c, Date_Reached_SAL__c, Date_Reached_SQO__c,
     Date_Reached_Trial__c, Date_Reached_Billing__c FROM Opportunity
     WHERE IsWon = true AND RecordType.Name = '1.New Business'
       AND CloseDate >= 2025-01-02 AND CloseDate <= 2026-10-01`.replace(/\s+/g, " ");
@@ -66,19 +80,29 @@ async function main() {
   rows.push([`Auto-written by scripts/build-sales-cycle-tab.mjs. NEW BUSINESS only — renewals and expansions never pass through SQL. Cohort pinned to the quarter by Close Date; the cycle ends on Close Date because Date_Reached_Closed_Won__c is only on 69% of these deals.`]);
   rows.push([`Last updated`, new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC"]);
   rows.push([]);
-  rows.push(["region", "quarter", "metric_key", "metric", "avg_days", "n"]);
+  rows.push(["region", "quarter", "metric_key", "metric", "avg_days", "n", "segment"]);
+  // avg over a pool, skipping rows where the stamps run backwards
+  const avgOf = (pool, from, to) => {
+    const vals = pool.filter((r) => r[from] && r[to]).map((r) => days(r[from], r[to]))
+      .filter((d) => { if (d < 0) { negatives++; return false; } return true; });
+    return [vals.length ? Math.round(vals.reduce((s2, x) => s2 + x, 0) / vals.length) : "", vals.length];
+  };
 
   for (const region of ["Total", "North America", "International"]) {
     for (const [qn] of QS) {
       const pool = recs.filter((r) => qOf(r.CloseDate) === qn && (region === "Total" || regionOf(r) === region));
-      rows.push([region, qn, "won", "Total Deals Won", pool.length, pool.length]);
+      rows.push([region, qn, "won", "Total Deals Won", pool.length, pool.length, ""]);
+      for (const seg of SEGMENTS) {
+        const sp = pool.filter((r) => segOf(r) === seg);
+        rows.push([region, qn, "won", "Total Deals Won", sp.length, sp.length, seg]);
+      }
       for (const [key, label, from, to] of [...METRICS, POST_CLOSE]) {
-        const vals = pool
-          .filter((r) => r[from] && r[to])
-          .map((r) => days(r[from], r[to]))
-          .filter((d) => { if (d < 0) { negatives++; return false; } return true; });   // out-of-order stamps are data errors, not negative durations
-        rows.push([region, qn, key, label,
-          vals.length ? Math.round(vals.reduce((s, x) => s + x, 0) / vals.length) : "", vals.length]);
+        const [a, n2] = avgOf(pool, from, to);
+        rows.push([region, qn, key, label, a, n2, ""]);
+        for (const seg of SEGMENTS) {
+          const [sa, sn] = avgOf(pool.filter((r) => segOf(r) === seg), from, to);
+          rows.push([region, qn, key, label, sa, sn, seg]);
+        }
       }
     }
   }
@@ -92,7 +116,7 @@ async function main() {
   const ex = meta.data.sheets.find((s) => s.properties.title === TAB);
   const reqs = [];
   if (ex) reqs.push({ deleteSheet: { sheetId: ex.properties.sheetId } });
-  reqs.push({ addSheet: { properties: { title: TAB, gridProperties: { rowCount: rows.length + 40, columnCount: 6 } } } });
+  reqs.push({ addSheet: { properties: { title: TAB, gridProperties: { rowCount: rows.length + 40, columnCount: 7 } } } });
   await api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: reqs } });
   await api.spreadsheets.values.update({ spreadsheetId: ID, range: `'${TAB}'!A1`, valueInputOption: "RAW",
     requestBody: { values: rows.map((r) => (r.length ? r : [""])) } });

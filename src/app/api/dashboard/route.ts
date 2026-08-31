@@ -142,7 +142,7 @@ async function buildPayload(): Promise<Payload> {
         // Sales Cycle = average days per stage for New Business wins, one row per
         // region x quarter x metric. Written by scripts/build-sales-cycle-tab.mjs from
         // Salesforce; the dashboard pivots it for display and computes nothing.
-        { tab: "Sales Cycle", range: "A5:F200" },
+        { tab: "Sales Cycle", range: "A5:G800" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -448,6 +448,7 @@ async function buildPayload(): Promise<Payload> {
           region: String(r[0]), quarter: String(r[1]), key: String(r[2]), label: String(r[3]),
           avg: typeof r[4] === "number" ? (r[4] as number) : null,
           n: typeof r[5] === "number" ? (r[5] as number) : 0,
+          segment: String(r[6] ?? ""),   // "" = the all-segments row
         })),
       pipelineGen,
       dealTracker,
