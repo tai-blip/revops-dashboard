@@ -4,9 +4,16 @@
 // through SQL, so including them produced a fake 74% "missing data" gap. On New Business the
 // stage stamps are 98–100% complete and the metric is real.
 //
-// Cohort is pinned to the quarter by CLOSE DATE. The end of the cycle is also CloseDate, not
-// Date_Reached_Closed_Won__c — that stamp is only on 69% of New Business wins, and using it
-// would silently drop a third of the cohort.
+// Cohort is pinned to the quarter by CLOSE DATE, and the cycle ends there (Tai, 2026-08-31).
+//
+// We tried Date_Reached_Closed_Won__c — the literal "reached Closed Won" stamp — and reverted.
+// The Salesforce automation that sets it STOPPED FIRING around April 2026: every New Business
+// deal closed since is missing it (23 of 23), while the earlier stage stamps still fire. Test -
+// ABC reproduces it. Using that field would leave the current quarters blank, which is the
+// opposite of useful. On deals carrying both dates the two agree to within a day (116 vs 115),
+// so CloseDate costs nothing and covers 137/137.
+//
+// Revisit once the flow is fixed and the 42 gaps are backfilled.
 //
 //   Total sales cycle = CloseDate − Date_Reached_SQL__c
 //   SQL     = Date_Reached_SAL__c     − Date_Reached_SQL__c
@@ -64,7 +71,7 @@ async function main() {
   const v = process.env.SF_API_VERSION || "59.0";
   const q = `SELECT Id, CloseDate, Region__c, Merchant_Segment__c, Account.Merchant_Segment__c,
     Date_Reached_SQL__c, Date_Reached_SAL__c, Date_Reached_SQO__c,
-    Date_Reached_Trial__c, Date_Reached_Billing__c FROM Opportunity
+    Date_Reached_Trial__c, Date_Reached_Billing__c, Date_Reached_Closed_Won__c FROM Opportunity
     WHERE IsWon = true AND RecordType.Name = '1.New Business'
       AND CloseDate >= 2025-01-02 AND CloseDate <= 2026-10-01`.replace(/\s+/g, " ");
   let url = `${t.instance_url}/services/data/v${v}/query?q=${encodeURIComponent(q)}`;
@@ -125,6 +132,8 @@ async function main() {
   if (negatives) console.log(`  ${negatives} stage gaps were negative (stamps out of order) and were excluded.`);
   const tot = recs.filter((r) => r.Date_Reached_SQL__c);
   const avg = Math.round(tot.reduce((s, r) => s + days(r.Date_Reached_SQL__c, r.CloseDate), 0) / tot.length);
-  console.log(`  overall average cycle, SQL -> close: ${avg} days over ${tot.length} deals`);
+  console.log(`  overall cycle, SQL -> close date: ${avg} days over ${tot.length} deals`);
+  const noStamp = recs.length - recs.filter((r) => r.Date_Reached_Closed_Won__c).length;
+  console.log(`  FYI ${noStamp} of ${recs.length} have no Date_Reached_Closed_Won__c — the SFDC automation stopped firing ~Apr 2026.`);
 }
 main().catch((e) => { console.error(e.message || e); process.exit(1); });
