@@ -159,6 +159,11 @@ async function main() {
     ["key", "value", "feeds"],
     ["live_arr", `=${A}!$W$1`, "Exec: Live ARR (as of today)"],
     ["gap_to_10m", `=10000000-${A}!$W$1`, "Exec: gap to $10M milestone"],
+    // The month TODAY() resolves to in the SPREADSHEET's timezone. Published so the dashboard and
+    // the numbers gate label and compare against the same month this tab computed against, instead
+    // of each deriving "now" from its own clock — which is how the tiles ended up showing
+    // September's figures under an August label.
+    ["as_of_month", `=TEXT(TODAY(),"YYYY-MM")`, "The month the (mo) tiles are computed for"],
     ["new_arr_mo", `=${newArrMoF}`, "Exec: New ARR (current month)"],
     ["churn_mo", `=${churnMoF}`, "Exec: Churned (current month)"],
     ["up_for_renewal_mo", `=${renewalF}`, "Exec: up for renewal this month"],

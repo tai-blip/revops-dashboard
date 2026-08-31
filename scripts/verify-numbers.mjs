@@ -137,9 +137,28 @@ function algebra(check, shown, expected, { fmt = usd, tolAbs = 1, fix } = {}) {
   else add("FAIL", check, detail, fix);
 }
 
+// "Aug 2026" — the label format ARR_MoM_Rebuild writes in col A.
+const monthName = (y, m) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", year: "numeric" })
+  .format(new Date(Date.UTC(y, m, 15)));
+
 async function main() {
   const now = new Date();
-  const y = now.getUTCFullYear(), m = now.getUTCMonth();
+
+  // Which month is "this month"? It has to be the month the SPREADSHEET is in, because that is
+  // the month the dashboard is showing: the Headline tab matches on EOMONTH(TODAY(),0) and
+  // TODAY() resolves in the spreadsheet's timezone (Asia/Saigon, UTC+7). Checking UTC instead
+  // meant that for seven hours at every month boundary the gate compared the sheet's September
+  // against Salesforce's August and reported a $344k regression that did not exist. One clock,
+  // and it is the sheet's. Falls back to UTC only if the lookup fails.
+  let y = now.getUTCFullYear(), m = now.getUTCMonth(), clock = "UTC";
+  try {
+    const meta = await retry("sheets.get timeZone", () => sheets.spreadsheets.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID, fields: "properties.timeZone" }));
+    const tz = meta.data.properties?.timeZone || "UTC";
+    const [ys, ms] = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit" })
+      .format(now).split("-");
+    y = Number(ys); m = Number(ms) - 1; clock = tz;
+  } catch { /* keep UTC */ }
 
   const [sf, sheetRes] = await Promise.all([
     sfLogin(),
@@ -167,21 +186,14 @@ async function main() {
   // midnight — seven hours, once a month — no row matches and new_arr_mo / churn_mo are blank BY
   // DESIGN (blank, not 0: see the note in scripts/build-headline-tab.mjs). Without this the gate
   // reads that as a broken formula and fails the nightly build every month-start.
-  let curMonthRowExists = true, sheetMonthLabel = "";
-  try {
-    const meta = await retry("sheets.get timeZone", () => sheets.spreadsheets.get({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID, fields: "properties.timeZone" }));
-    const tz = meta.data.properties?.timeZone || "UTC";
-    sheetMonthLabel = new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", year: "numeric" }).format(now);
-    const labels = (momMonthRows ?? []).map((r) => String(r?.[0] ?? "").trim());
-    curMonthRowExists = labels.includes(sheetMonthLabel);
-  } catch { /* if we cannot tell, assume the row exists so a real breakage still fails loudly */ }
+  const sheetMonthLabel = monthName(y, m);
+  const curMonthRowExists = (momMonthRows ?? []).some((r) => String(r?.[0] ?? "").trim() === sheetMonthLabel);
   // Keys that are legitimately absent during that window, and only then.
   const BLANK_OK = curMonthRowExists ? new Set() : new Set(["new_arr_mo", "churn_mo"]);
 
   console.log(`\nNumbers regression gate — ${iso(now)}`);
   console.log(`Source pull: ${banner || "(no timestamp banner)"}`);
-  console.log(`Headline keys: ${Object.keys(H).length} · Targets keys: ${Object.keys(T).length}\n`);
+  console.log(`Headline keys: ${Object.keys(H).length} · Targets keys: ${Object.keys(T).length} · month basis: ${monthName(y, m)} (${clock})\n`);
 
   // ════════════════════════════════════════════════════════════════════════════
   // A. SFDC CROSS-CHECKS — independent SOQL recompute of each headline metric.

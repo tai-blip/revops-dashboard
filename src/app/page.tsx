@@ -97,6 +97,8 @@ type DashboardData = {
   salesCycleDeals?: { region: string; quarter: string; segment: string; deal: string; account: string;
     owner: string; stage: string; arr: number; sql: string; sal: string; sqo: string; trial: string;
     billing: string; cycleDays: number | null }[];
+  // "YYYY-MM" the Headline tab computed its (mo) tiles for, in the spreadsheet's timezone.
+  asOfMonth?: string | null;
   closedWonFeed?: { name: string; owner: string; stage: string; status: string; arr: number; rt: string; rtRaw: string; eld: string; cld: string; tier: string }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
@@ -708,7 +710,11 @@ export default function Dashboard() {
     // The current calendar month's Rule A value is a month-END projection (subtracts the
     // month's upcoming term-ends, so it reads as a drop). Anchor the current-month point on
     // the true as-of-today Live ARR so the chart endpoint matches the headline ($5.79M).
-    const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+    // Prefer the month the Headline tab computed against (spreadsheet timezone). Deriving it from
+    // the browser/server UTC clock instead put September's figures under an August label for the
+    // seven hours each month when the two clocks disagree.
+    const nowKey = data.asOfMonth
+      ?? `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
     const ci = pts.findIndex((p) => p.label === nowKey);
     if (ci >= 0 && data.liveArrToday != null) {
       const prev = pts[ci - 1];
@@ -780,7 +786,11 @@ export default function Dashboard() {
     // "Current month" = the row matching today's YYYY-MM, else the latest row that
     // isn't in the future. Fixes New/Churned ARR showing a future month (e.g. Sep)
     // with near-zero data instead of the actual current month.
-    const nowKey = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+    // Prefer the month the Headline tab computed against (spreadsheet timezone). Deriving it from
+    // the browser/server UTC clock instead put September's figures under an August label for the
+    // seven hours each month when the two clocks disagree.
+    const nowKey = data.asOfMonth
+      ?? `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
     const notFuture = months.filter((m) => m.label <= nowKey);
     // Use the LAST COMPLETE month — the current calendar month is in progress, and Rule A
     // projects its month-end active ARR (subtracting upcoming churn), so on the 1st it
