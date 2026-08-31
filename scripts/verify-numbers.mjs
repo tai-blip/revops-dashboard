@@ -149,16 +149,35 @@ async function main() {
         "Headline!A1:E240",
         "Targets!A1:C120",
         "ARR_MoM_Rebuild!V1:W1",
+        "ARR_MoM_Rebuild!A1:A400",            // month labels ("Aug 2026") — is the current one written yet?
         "'Open pipeline - SOQL pull'!A1:A1",   // banner carries the pull timestamp
       ],
       valueRenderOption: "UNFORMATTED_VALUE",
     })),
   ]);
-  const [headRows, targetRows, w1Rows, bannerRows] = sheetRes.data.valueRanges.map((v) => v.values || []);
+  const [headRows, targetRows, w1Rows, momMonthRows, bannerRows] = sheetRes.data.valueRanges.map((v) => v.values || []);
   const H = parseKeyValue(headRows);
   const T = parseKeyValue(targetRows);
   const w1 = typeof w1Rows?.[0]?.[1] === "number" ? w1Rows[0][1] : null;
   const banner = String(bannerRows?.[0]?.[0] ?? "").replace(/\s+/g, " ").trim();
+
+  // Does ARR_MoM_Rebuild carry a row for the month the SHEET thinks it is? The Headline formulas
+  // MATCH on EOMONTH(TODAY(),0), and TODAY() resolves in the spreadsheet's own timezone, while the
+  // row is appended by a refresh bounded on getUTCMonth(). Between sheet-local midnight and UTC
+  // midnight — seven hours, once a month — no row matches and new_arr_mo / churn_mo are blank BY
+  // DESIGN (blank, not 0: see the note in scripts/build-headline-tab.mjs). Without this the gate
+  // reads that as a broken formula and fails the nightly build every month-start.
+  let curMonthRowExists = true, sheetMonthLabel = "";
+  try {
+    const meta = await retry("sheets.get timeZone", () => sheets.spreadsheets.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID, fields: "properties.timeZone" }));
+    const tz = meta.data.properties?.timeZone || "UTC";
+    sheetMonthLabel = new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", year: "numeric" }).format(now);
+    const labels = (momMonthRows ?? []).map((r) => String(r?.[0] ?? "").trim());
+    curMonthRowExists = labels.includes(sheetMonthLabel);
+  } catch { /* if we cannot tell, assume the row exists so a real breakage still fails loudly */ }
+  // Keys that are legitimately absent during that window, and only then.
+  const BLANK_OK = curMonthRowExists ? new Set() : new Set(["new_arr_mo", "churn_mo"]);
 
   console.log(`\nNumbers regression gate — ${iso(now)}`);
   console.log(`Source pull: ${banner || "(no timestamp banner)"}`);
@@ -314,7 +333,11 @@ async function main() {
       const DRIFT_PCT = 0.10; // flag a >10% move in any single metric for a human to eyeball
       for (const [group, cur] of [["headline", H], ["targets", T]]) {
         const prev = base[group] ?? {};
-        const gone = Object.keys(prev).filter((k) => !(k in cur));
+        const goneAll = Object.keys(prev).filter((k) => !(k in cur));
+        const expectedBlank = goneAll.filter((k) => BLANK_OK.has(k));
+        const gone = goneAll.filter((k) => !BLANK_OK.has(k));
+        if (expectedBlank.length) add("INFO", `Baseline: ${group} keys blank at the month boundary`,
+          `${expectedBlank.join(", ")} — ARR_MoM_Rebuild has no "${sheetMonthLabel}" row yet, so these read blank rather than a false $0. Clears on the first refresh after 00:00 UTC.`);
         const fresh = Object.keys(cur).filter((k) => !(k in prev));
         if (gone.length) add("FAIL", `Baseline: ${group} keys vanished`, gone.join(", "),
           "A tile reading a removed key renders blank — restore it or update the dashboard.");
