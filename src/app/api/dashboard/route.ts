@@ -163,6 +163,13 @@ async function buildPayload(): Promise<Payload> {
       return out;
     };
     const headlineSource = parseKeyValue(headlineRows);
+    // parseKeyValue only keeps numeric cells; as_of_month is a "YYYY-MM" string, so pull it out
+    // separately. It is the month the Headline tab's TODAY() resolved to, in the spreadsheet's
+    // timezone — the dashboard labels its "(mo)" tiles from this so the label and the figure
+    // always describe the same month.
+    const headlineAsOfMonth = (headlineRows ?? [])
+      .find((r) => String(r?.[0] ?? "").trim() === "as_of_month")?.[1];
+    const asOfMonth = /^\d{4}-\d{2}$/.test(String(headlineAsOfMonth ?? "")) ? String(headlineAsOfMonth) : null;
     // Headline ARR-trend table (section ①: ym | active | new_arr | churn | mom) — the source the
     // Command ARR chart is drawn from. Parsed as rows so editing an 'active' cell moves the chart.
     const headlineTrend: { ym: string; active: number; newARR: number; churn: number; mom: number }[] = [];
@@ -493,6 +500,7 @@ async function buildPayload(): Promise<Payload> {
       agingByStage,
       dealBreakdown,
       closedWonFeed,
+      asOfMonth,
       // The tab holds two blocks back to back; split on the "(2) DEALS" marker in col A rather
       // than on a row offset, so inserting a metric row cannot silently shift the deal parsing.
       salesCycle: scMetricRows.map((r) => ({
