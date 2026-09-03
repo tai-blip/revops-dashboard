@@ -97,6 +97,14 @@ type DashboardData = {
   salesCycleDeals?: { region: string; quarter: string; segment: string; deal: string; account: string;
     owner: string; stage: string; arr: number; sql: string; sal: string; sqo: string; trial: string;
     billing: string; cycleDays: number | null }[];
+  // Funnel Conversion tab, from the sheet's four blocks. Rows are untyped bags keyed by the
+  // sheet's own column names — the source tab owns the schema, the dashboard just reads it.
+  funnel?: {
+    meta: Record<string, string | number>;
+    cohort: Record<string, string | number | null>[];
+    flow: Record<string, string | number | null>[];
+    opps: Record<string, string | number | null>[];
+  } | null;
   closedWonFeed?: { name: string; owner: string; stage: string; status: string; arr: number; rt: string; rtRaw: string; eld: string; cld: string; tier: string }[];
   rankedDeals: { name: string; owner: string; stage: string; arr: number; ageDays: number | null }[];
   trendEvents: { date: string; owner: string; arr: number; type: "created" | "closedWon" | "closedLost" }[];
@@ -209,6 +217,7 @@ const TABS = [
   ["cashflow", "Booked ARR & Cashflow"],
   ["deals", "Deal Tracker"],
   ["efficiency", "Sales Efficiency"],
+  ["funnel", "Funnel Conversion"],
   ["health", "Deal Health"],
   ["attainment", "AE Attainment"],
   ["acv", "ACV & Deal Size"],
@@ -571,6 +580,12 @@ export default function Dashboard() {
   const [funnelOpen, setFunnelOpen] = useState<Record<string, boolean>>({});
   // Sales Efficiency · Sales Cycle — which region the table is showing.
   const [scRegion, setScRegion] = useState<(typeof SC_REGIONS)[number]>("Total");
+  // Funnel Conversion filters (brief §1): Region · Segment · Grain · Measure.
+  const [fcRegion, setFcRegion] = useState("Total");
+  const [fcSeg, setFcSeg] = useState("Total");
+  const [fcGrain, setFcGrain] = useState<"Quarter" | "Month">("Quarter");
+  const [fcMeasure, setFcMeasure] = useState<"#" | "$">("#");
+  const [fcDefs, setFcDefs] = useState(false);
   // Sales Cycle click-through: which quarter x segment cell's deals to list. segment "" = all.
   const [scDrill, setScDrill] = useState<{ quarter: string; segment: string; cell: number } | null>(null);
   // Which Sales Cycle rows have their segment split open.
@@ -4753,6 +4768,348 @@ export default function Dashboard() {
               );
             })()}
         </div>
+        );
+      })()}
+
+      {/* ── Funnel Conversion — New Business SQL → Closed Won by cohort ──────────────────
+          Built to the Sales Ops handover brief v3. Every number is read from the "Funnel
+          Conversion" sheet tab, which precomputes all 360 region × segment × period slices;
+          the filters below select a ROW, they never combine rates. That is deliberate: §3 of
+          the brief forbids averaging rates, and a lookup cannot average anything. */}
+      {tab === "funnel" && (() => {
+        const F = data.funnel;
+        if (!F || !F.cohort.length) return (
+          <Card title="Funnel Conversion" sub="The source tab has not been written yet.">
+            <div style={{ padding: "26px 20px", color: C.t3, fontSize: 14 }}>
+              Run <code style={{ fontFamily: "var(--font-dm-mono)" }}>node --env-file=.env scripts/build-funnel-conversion-tab.mjs</code> to build the “Funnel Conversion” tab, then reload.
+            </div>
+          </Card>
+        );
+        const num = (v: unknown) => (typeof v === "number" ? v : v === "" || v == null ? null : Number(v));
+        const $ = fcMeasure === "$";
+        // Pick the one precomputed row for this period × region × segment.
+        const row = (period: string) => F.cohort.find((r) =>
+          String(r.period) === period && String(r.region) === fcRegion && String(r.segment) === fcSeg);
+        const periods = [...new Set(F.cohort.filter((r) => String(r.grain) === fcGrain).map((r) => String(r.period)))];
+        const bench = row("Matured benchmark");
+        // Measure-aware accessors: the sheet holds the # and $ variants side by side.
+        const cnt = (r: typeof bench, stage: string) => num(r?.[$ ? `usd_${stage}` : `n_${stage}`]);
+        const rate = (r: typeof bench, key: string) => num(r?.[$ ? `rate_usd_${key}` : `rate_${key}`]);
+        const cum = (r: typeof bench, key: string) => num(r?.[$ ? `cum_usd_SQL_${key}` : `cum_SQL_${key}`]);
+        const show = (v: number | null) => (v == null ? "—" : $ ? fmt(v) : v.toLocaleString());
+        const pctTxt = (v: number | null) => (v == null ? "—" : `${Math.round(v * 100)}%`);
+        const STAGES = ["SQL", "SAL", "SQO", "Trial", "Billing", "CW"] as const;
+        const RATES: [string, string, string][] = [
+          ["SQL_SAL", "SQL→SAL", "Of SQLs that were decided, the share that reached SAL"],
+          ["SAL_SQO", "SAL→SQO", "Of SALs that were decided, the share that reached SQO"],
+          ["SQO_Trial", "SQO→Trial", "Of SQOs that were decided, the share that started a pilot"],
+          ["Trial_Billing", "Trial→Billing", "Pilot win rate — pilots that went to contract"],
+          ["Billing_CW", "Billing→CW", "Signed contracts that went live"],
+        ];
+        // Colour scales are fixed per the brief (§6.4) so cohorts stay comparable week to week.
+        const heat = (v: number | null, lo: number, hi: number) => {
+          if (v == null) return { background: "transparent", color: C.t3 };
+          const t = Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+          return { background: `color-mix(in srgb, ${C.grn} ${Math.round(t * 62)}%, transparent)`,
+            color: t > 0.62 ? "#0b3b28" : C.t1, fontWeight: t > 0.62 ? 700 : 500 };
+        };
+        const opps = F.opps.filter((o) =>
+          (fcRegion === "Total" || String(o.region) === fcRegion) &&
+          (fcSeg === "Total" || String(o.segment) === fcSeg));
+
+        const pill = (on: boolean) => ({
+          cursor: "pointer", border: `1px solid ${on ? C.navy : C.bd}`,
+          background: on ? C.navy : "transparent", color: on ? "#fff" : C.t2,
+          borderRadius: 10, padding: "6px 13px", fontSize: 12.5, fontWeight: 700,
+        });
+
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* 1 · filter bar */}
+            <Card title="Funnel Conversion — New Business"
+              sub={`SQL → Closed Won by the sales-cycle quarter a deal became SQL. Rates count DECIDED deals only: reached ÷ (reached + lost on the way). Open deals never sit in a denominator — they have their own column. As of ${F.meta.as_of ?? "—"}.`}>
+              <div style={{ display: "flex", gap: 18, padding: "14px 20px 16px", flexWrap: "wrap", alignItems: "center" }}>
+                {([["Region", ["Total", "North America", "International"], fcRegion, setFcRegion],
+                   ["Segment", ["Total", "SMB", "Mid-Market", "Enterprise", "Mega Enterprise"], fcSeg, setFcSeg],
+                   ["Grain", ["Quarter", "Month"], fcGrain, setFcGrain],
+                   ["Measure", ["#", "$"], fcMeasure, setFcMeasure]] as const).map(([label, opts, cur, set]) => (
+                  <div key={label} style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "var(--font-dm-mono)", fontSize: 10, letterSpacing: ".08em",
+                      textTransform: "uppercase", color: C.t3 }}>{label}</span>
+                    {opts.map((o) => (
+                      <button key={o} onClick={() => (set as (v: string) => void)(o)} style={pill(cur === o)}>{o}</button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            {/* 2 · KPI tiles on the matured benchmark */}
+            <Card title="Matured benchmark"
+              sub={`Cohorts that entered between ${F.meta.benchmark_from ?? ""} and ${F.meta.benchmark_to ?? ""} — old enough (${F.meta.maturity_months ?? 6}+ months) that their outcome is largely settled. The fairest read on how the funnel actually converts.`}>
+              <div style={{ display: "grid", gap: 1, background: C.bd, padding: "0 20px 18px",
+                gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" }}>
+                {[...RATES.map(([k, lab]) => ({ lab, v: rate(bench, k) })),
+                  { lab: "SQL→CW", v: cum(bench, "CW") }].map((t) => (
+                  <div key={t.lab} style={{ background: C.card, padding: "13px 15px" }}>
+                    <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 10, letterSpacing: ".07em",
+                      textTransform: "uppercase", color: C.t3 }}>{t.lab}</div>
+                    <div style={{ fontFamily: "var(--font-dm-mono)", fontSize: 25, fontWeight: 700,
+                      color: C.t1, lineHeight: 1.15 }}>{pctTxt(t.v)}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: "0 20px 16px", fontSize: 11.5, color: C.t3 }}>
+                {show(cnt(bench, "SQL"))} SQL · {show(cnt(bench, "CW"))} won · {show(num(bench?.[$ ? "usd_Lost" : "n_Lost"]))} lost · {show(num(bench?.[$ ? "usd_Open" : "n_Open"]))} still open (excluded from every rate above).
+              </div>
+            </Card>
+
+            {/* 3 · funnel table, with the plain-English definition row */}
+            <Card title={`Funnel by cohort — ${fcGrain.toLowerCase()}`}
+              sub={`${fcRegion} · ${fcSeg} · ${$ ? "ARR" : "deal count"}. Read a row left to right: how many entered, how far they got, and what share of the decided ones converted at each step.`}>
+              <div style={{ overflowX: "auto", padding: "4px 20px 12px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      {["Cohort", "Matured", "Status", ...STAGES.map((x) => (x === "CW" ? "Closed Won" : x)),
+                        "Lost", "Open", ...RATES.map(([, l]) => l), "SQL→SQO", "SQL→Trial", "SQL→CW"].map((h, i) => (
+                        <th key={h} style={{ textAlign: i === 0 ? "left" : "right", padding: "9px 12px 3px 0",
+                          fontFamily: "var(--font-dm-mono)", fontSize: 10, letterSpacing: ".06em",
+                          textTransform: "uppercase", color: C.t3, whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      {["the quarter they became SQL", "months since it closed", "settled or still moving",
+                        "entered the funnel", "qualified by an AE", "opportunity created", "pilot started",
+                        "contract signed", "live and paying", "decided against us", "still undecided",
+                        ...RATES.map(([, , def]) => def),
+                        "reached SQO, of decided", "started a pilot, of decided", "won, of decided"].map((dfn, i) => (
+                        <th key={i} style={{ textAlign: i === 0 ? "left" : "right", padding: "0 12px 8px 0",
+                          fontSize: 9.5, fontWeight: 400, color: C.t3, whiteSpace: "normal",
+                          minWidth: i === 0 ? 92 : 62, maxWidth: 108, lineHeight: 1.3 }}>{dfn}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...periods, "Matured benchmark"].map((p) => {
+                      const r = row(p);
+                      if (!r) return null;
+                      const isBench = p === "Matured benchmark";
+                      const maturing = String(r.status) !== "Matured";
+                      return (
+                        <tr key={p} style={{ borderBottom: `1px solid ${C.s1}`,
+                          borderTop: isBench ? `2px solid ${C.bd}` : undefined,
+                          background: isBench ? C.s2 : undefined }}>
+                          <td style={{ textAlign: "left", padding: "9px 12px 9px 0", whiteSpace: "nowrap",
+                            fontWeight: isBench ? 700 : 600, fontSize: 13,
+                            color: maturing && !isBench ? C.t3 : C.t1,
+                            fontStyle: maturing && !isBench ? "italic" : undefined }}>{p}</td>
+                          <td style={{ textAlign: "right", padding: "9px 12px 9px 0", fontFamily: "var(--font-dm-mono)",
+                            fontSize: 12, color: C.t3 }}>{(num(r.months_matured) ?? 0) < 0 ? "—" : String(r.months_matured ?? "")}</td>
+                          <td style={{ textAlign: "right", padding: "9px 12px 9px 0", fontSize: 11,
+                            color: maturing ? C.ylw : C.t3 }}>{(num(r.months_matured) ?? 0) < 0 ? "In progress" : String(r.status ?? "")}</td>
+                          {STAGES.map((sg) => (
+                            <td key={sg} style={{ textAlign: "right", padding: "9px 12px 9px 0",
+                              fontFamily: "var(--font-dm-mono)", fontSize: 12.5,
+                              fontWeight: sg === "SQL" || sg === "CW" ? 700 : 400, color: C.t1 }}>{show(cnt(r, sg))}</td>
+                          ))}
+                          <td style={{ textAlign: "right", padding: "9px 12px 9px 0", fontFamily: "var(--font-dm-mono)",
+                            fontSize: 12.5, color: C.red }}>{show(num(r[$ ? "usd_Lost" : "n_Lost"]))}</td>
+                          <td style={{ textAlign: "right", padding: "9px 12px 9px 0", fontFamily: "var(--font-dm-mono)",
+                            fontSize: 12.5, color: C.t3 }}>{show(num(r[$ ? "usd_Open" : "n_Open"]))}</td>
+                          {RATES.map(([k]) => (
+                            <td key={k} style={{ textAlign: "right", padding: "9px 12px 9px 0",
+                              fontFamily: "var(--font-dm-mono)", fontSize: 12.5, ...heat(rate(r, k), 0.4, 1) }}>{pctTxt(rate(r, k))}</td>
+                          ))}
+                          {(["SQO", "Trial", "CW"] as const).map((k) => (
+                            <td key={k} style={{ textAlign: "right", padding: "9px 12px 9px 0",
+                              fontFamily: "var(--font-dm-mono)", fontSize: 12.5,
+                              fontWeight: k === "CW" ? 700 : 400,
+                              ...(k === "CW" ? heat(cum(r, k), 0, 0.5) : {}) }}>{pctTxt(cum(r, k))}</td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ padding: "0 20px 18px", fontSize: 11.5, color: C.t3 }}>
+                Cohorts still maturing are greyed and italic — their rates will move as open deals decide.
+                Colour scales are fixed (40–100% on stage rates, 0–50% on SQL→CW) so a cohort means the same thing week to week.
+              </div>
+            </Card>
+
+            {/* 6 · segment × region grid over the benchmark window */}
+            <Card title="Segment × Region — matured benchmark"
+              sub="Where the funnel actually converts. Same decided-deals rule; each cell is computed from its own deals, not blended from the rows around it.">
+              <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      {["Segment", "Region", "SQL", "Closed Won", "Lost", "Open", "SQL→CW", "Pilot win", "Avg won ARR"].map((h, i) => (
+                        <th key={h} style={{ textAlign: i < 2 ? "left" : "right", padding: "9px 14px 9px 0",
+                          fontFamily: "var(--font-dm-mono)", fontSize: 10, letterSpacing: ".06em",
+                          textTransform: "uppercase", color: C.t3, whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {["SMB", "Mid-Market", "Enterprise", "Mega Enterprise"].flatMap((sg) =>
+                      ["Total", "North America", "International"].map((rg) => {
+                        const r = F.cohort.find((x) => String(x.period) === "Matured benchmark"
+                          && String(x.region) === rg && String(x.segment) === sg);
+                        if (!r) return null;
+                        const nCW = num(r.n_CW) ?? 0, usdCW = num(r.usd_CW) ?? 0;
+                        const isTot = rg === "Total";
+                        return (
+                          <tr key={sg + rg} style={{ borderBottom: `1px solid ${C.s1}`, background: isTot ? C.s2 : undefined }}>
+                            <td style={{ textAlign: "left", padding: "8px 14px 8px 0", fontWeight: isTot ? 700 : 500,
+                              fontSize: 13, color: isTot ? C.t1 : C.t3 }}>{isTot ? sg : ""}</td>
+                            <td style={{ textAlign: "left", padding: "8px 14px 8px 0", fontSize: 12.5, color: C.t2 }}>{rg}</td>
+                            {[num(r.n_SQL), nCW, num(r.n_Lost), num(r.n_Open)].map((v, i) => (
+                              <td key={i} style={{ textAlign: "right", padding: "8px 14px 8px 0",
+                                fontFamily: "var(--font-dm-mono)", fontSize: 12.5, color: C.t1 }}>{v ?? 0}</td>
+                            ))}
+                            <td style={{ textAlign: "right", padding: "8px 14px 8px 0", fontFamily: "var(--font-dm-mono)",
+                              fontSize: 12.5, ...heat(num(r.cum_SQL_CW), 0, 0.5) }}>{pctTxt(num(r.cum_SQL_CW))}</td>
+                            <td style={{ textAlign: "right", padding: "8px 14px 8px 0", fontFamily: "var(--font-dm-mono)",
+                              fontSize: 12.5, ...heat(num(r.rate_Trial_Billing), 0.4, 1) }}>{pctTxt(num(r.rate_Trial_Billing))}</td>
+                            <td style={{ textAlign: "right", padding: "8px 14px 8px 0", fontFamily: "var(--font-dm-mono)",
+                              fontSize: 12.5, color: C.t2 }}>{nCW ? fmt(usdCW / nCW) : "—"}</td>
+                          </tr>
+                        );
+                      }))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            {/* 7 · where deals die + 8 · open pipeline ageing */}
+            <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))" }}>
+              <Card title="Where deals die" sub={`The furthest stage a lost deal reached, ${fcRegion} · ${fcSeg}.`}>
+                <div style={{ padding: "6px 20px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+                  {(() => {
+                    const lost = opps.filter((o) => String(o.outcome) === "Lost");
+                    const by = STAGES.filter((x) => x !== "CW").map((sg) => ({
+                      sg, n: lost.filter((o) => String(o.lost_from) === sg).length,
+                      usd: lost.filter((o) => String(o.lost_from) === sg).reduce((a, b) => a + (num(b.usd) ?? 0), 0) }));
+                    const mx = Math.max(1, ...by.map((b) => ($ ? b.usd : b.n)));
+                    return by.map((b) => {
+                      const v = $ ? b.usd : b.n;
+                      return (
+                        <div key={b.sg} style={{ display: "grid", gridTemplateColumns: "72px 1fr 74px", gap: 10, alignItems: "center" }}>
+                          <span style={{ fontSize: 12.5, color: C.t2 }}>{b.sg}</span>
+                          <span style={{ height: 15, borderRadius: 3, background: C.red, opacity: .78, width: `${(v / mx) * 100}%`, minWidth: v ? 3 : 0 }} />
+                          <span style={{ fontFamily: "var(--font-dm-mono)", fontSize: 12.5, textAlign: "right", color: C.t1 }}>{show(v)}</span>
+                        </div>
+                      );
+                    });
+                  })()}
+                  <div style={{ fontSize: 11.5, color: C.t3, marginTop: 4 }}>
+                    {opps.filter((o) => String(o.outcome) === "Lost").length} lost deals in view. A deal is counted at the furthest stage it reached, so “SQL” means it never got qualified.
+                  </div>
+                </div>
+              </Card>
+
+              <Card title="Open pipeline ageing" sub="Deals still undecided, by the stage they are sitting in. These are excluded from every rate on this page.">
+                <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                        {["Stage", "Open", "Avg days since SQL", "> 90 days", "$ > 90 days"].map((h, i) => (
+                          <th key={h} style={{ textAlign: i ? "right" : "left", padding: "8px 12px 8px 0",
+                            fontFamily: "var(--font-dm-mono)", fontSize: 10, letterSpacing: ".06em",
+                            textTransform: "uppercase", color: C.t3, whiteSpace: "nowrap" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const open = opps.filter((o) => String(o.outcome) === "Open");
+                        const stages = [...new Set(open.map((o) => String(o.stage)))].sort();
+                        return stages.map((sg) => {
+                          const g = open.filter((o) => String(o.stage) === sg);
+                          const ages = g.map((o) => num(o.days_open) ?? 0);
+                          const old = g.filter((o) => (num(o.days_open) ?? 0) > 90);
+                          return (
+                            <tr key={sg} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                              <td style={{ textAlign: "left", padding: "8px 12px 8px 0", fontSize: 13, color: C.t1 }}>{sg}</td>
+                              <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5 }}>{g.length}</td>
+                              <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5, color: C.t2 }}>
+                                {ages.length ? Math.round(ages.reduce((a, b) => a + b, 0) / ages.length) : "—"}</td>
+                              <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5,
+                                color: old.length ? C.ylw : C.t3 }}>{old.length}</td>
+                              <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5, color: C.t2 }}>
+                                {fmt(old.reduce((a, b) => a + (num(b.usd) ?? 0), 0))}</td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+
+            {/* 9 · flow */}
+            <Card title={`Stage entries per ${fcGrain.toLowerCase()}`}
+              sub="How many deals ENTERED each stage in the period — a volume metric, deliberately never divided into a rate. Closed Won shows the ARR that landed.">
+              <div style={{ overflowX: "auto", padding: "4px 20px 18px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                      {["Period", ...STAGES.map((x) => (x === "CW" ? "Closed Won" : x)), "Won ARR"].map((h, i) => (
+                        <th key={h} style={{ textAlign: i ? "right" : "left", padding: "8px 14px 8px 0",
+                          fontFamily: "var(--font-dm-mono)", fontSize: 10, letterSpacing: ".06em",
+                          textTransform: "uppercase", color: C.t3, whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {periods.map((p) => {
+                      const f = F.flow.find((x) => String(x.grain) === fcGrain && String(x.period) === p
+                        && String(x.region) === fcRegion && String(x.segment) === fcSeg);
+                      if (!f) return null;
+                      return (
+                        <tr key={p} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                          <td style={{ textAlign: "left", padding: "8px 14px 8px 0", fontSize: 13, fontWeight: 600, color: C.t1 }}>{p}</td>
+                          {STAGES.map((sg) => (
+                            <td key={sg} style={{ textAlign: "right", padding: "8px 14px 8px 0",
+                              fontFamily: "var(--font-dm-mono)", fontSize: 12.5, color: C.t1 }}>{num(f[`e_${sg}`]) ?? 0}</td>
+                          ))}
+                          <td style={{ textAlign: "right", padding: "8px 14px 8px 0", fontFamily: "var(--font-dm-mono)",
+                            fontSize: 12.5, fontWeight: 600, color: C.grn }}>{fmt(num(f.usd_e_CW) ?? 0)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            {/* 10 · definitions */}
+            <Card title="How every number here is defined"
+              sub="The rules this page is built to, from the Sales Ops handover brief v3.">
+              <div style={{ padding: "4px 20px 18px" }}>
+                <button onClick={() => setFcDefs((v) => !v)} style={{ ...pill(fcDefs), marginBottom: 12 }}>
+                  {fcDefs ? "Hide the rules" : "Show the rules"}
+                </button>
+                {fcDefs && (
+                  <div style={{ fontSize: 13, color: C.t2, display: "flex", flexDirection: "column", gap: 11, lineHeight: 1.6 }}>
+                    <p style={{ margin: 0 }}><b style={{ color: C.t1 }}>A rate only counts decided deals.</b> rate(X→Y) = reached Y ÷ (reached Y + lost between X and Y). A deal still open is in neither side of that fraction — it appears in the Open column and nowhere else.</p>
+                    <p style={{ margin: 0 }}><b style={{ color: C.t1 }}>Reaching a stage is cumulative.</b> A deal that got to Billing has also reached Trial, SQO and SAL, whether or not those dates were ever stamped. So the stage counts only ever fall left to right.</p>
+                    <p style={{ margin: 0 }}><b style={{ color: C.t1 }}>Cohort = the sales-cycle quarter a deal became SQL.</b> Q1 = 2 Jan–1 Apr, Q2 = 2 Apr–1 Jul, Q3 = 2 Jul–1 Oct, Q4 = 2 Oct–1 Jan, labelled by the year the quarter starts. This is the sales calendar, not the finance one. Entry date is the SQL stamp, or the earliest of the SAL/SQO/Trial/created dates when it is missing.</p>
+                    <p style={{ margin: 0 }}><b style={{ color: C.t1 }}>New Business only.</b> Renewals, expansions and upsells never pass through SQL, so they are not in scope.</p>
+                    <p style={{ margin: 0 }}><b style={{ color: C.t1 }}>Excluded from the population:</b> {String(F.meta.excl_unclassified ?? 0)} deals whose account has no segment, {String(F.meta.excl_test ?? 0)} test record, and {String(F.meta.excl_quick_sql_loss ?? 0)} “quick SQL losses” — lost straight out of SQL within {String(F.meta.quick_loss_days ?? 30)} days, which are noise rather than funnel. {String(F.meta.deals_included ?? 0)} deals remain.</p>
+                    <p style={{ margin: 0 }}><b style={{ color: C.t1 }}>Every slice is computed from its own deals.</b> Totals are never an average of the rows beneath them — this page reads a precomputed row per region × segment × period from the “Funnel Conversion” sheet tab and does no arithmetic of its own.</p>
+                    <p style={{ margin: 0, color: C.t3, borderTop: `1px solid ${C.s1}`, paddingTop: 11 }}>
+                      <b style={{ color: C.ylw }}>Known data issues.</b> Stage dates are often stamped in bulk at close, so per-stage velocity is unreliable — quote SQL→Closed Won and nothing finer. Some contract live dates precede the SQL date. Many deals sit at SQL and SAL well past 90 days; they are Open, not lost, and are excluded from every rate here.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
         );
       })()}
 
