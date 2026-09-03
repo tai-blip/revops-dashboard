@@ -166,6 +166,7 @@ async function main() {
     }
     const cyc = pool.filter((x) => x.Won && x.cwDate).map((x) => days(x.entry, x.cwDate)).filter((x) => x >= 0).sort((a, b) => a - b);
     o.medCycle = cyc.length ? cyc[Math.floor(cyc.length / 2)] : "";
+    o.avgWon = o.n.CW ? Math.round(o.usd.CW / o.n.CW) : "";
     return o;
   };
   const sel = (pool, region, seg) => pool.filter((x) => (region === "Total" || x.region === region) && (seg === "Total" || x.seg === seg));
@@ -198,7 +199,7 @@ async function main() {
     ...PAIRS.map(([x, y]) => `nL_${x}_${y}`), ...PAIRS.map(([x, y]) => `usdL_${x}_${y}`),
     ...PAIRS.map(([x, y]) => `rate_${x}_${y}`), ...PAIRS.map(([x, y]) => `rate_usd_${x}_${y}`),
     "cum_SQL_SQO", "cum_SQL_Trial", "cum_SQL_CW",
-    "cum_usd_SQL_SQO", "cum_usd_SQL_Trial", "cum_usd_SQL_CW", "median_cycle_days"];
+    "cum_usd_SQL_SQO", "cum_usd_SQL_Trial", "cum_usd_SQL_CW", "median_cycle_days", "avg_won_arr"];
   rows.push([`② COHORT_LONG — one row per grain × period × region × segment. Rates are decided-deals only.`]);
   rows.push(CH);
   const asOfM = ASOF.slice(0, 7);
@@ -215,7 +216,7 @@ async function main() {
       ...ST.map((s) => Math.round(o.usd[s])), Math.round(o.usdLost), Math.round(o.usdOpen),
       ...PAIRS.map(([x, y]) => o.nL[`${x}_${y}`]), ...PAIRS.map(([x, y]) => Math.round(o.usdL[`${x}_${y}`])),
       ...PAIRS.map(([x, y]) => o.rate[`${x}_${y}`]), ...PAIRS.map(([x, y]) => o.rateUsd[`${x}_${y}`]),
-      o.cum.SQO, o.cum.Trial, o.cum.CW, o.cumUsd.SQO, o.cumUsd.Trial, o.cumUsd.CW, o.medCycle]);
+      o.cum.SQO, o.cum.Trial, o.cum.CW, o.cumUsd.SQO, o.cumUsd.Trial, o.cumUsd.CW, o.medCycle, o.avgWon]);
     cohortRows++;
   }
   // The matured benchmark, as its own slice per region × segment (§3, §6.2).
@@ -227,7 +228,7 @@ async function main() {
       ...ST.map((s) => Math.round(o.usd[s])), Math.round(o.usdLost), Math.round(o.usdOpen),
       ...PAIRS.map(([x, y]) => o.nL[`${x}_${y}`]), ...PAIRS.map(([x, y]) => Math.round(o.usdL[`${x}_${y}`])),
       ...PAIRS.map(([x, y]) => o.rate[`${x}_${y}`]), ...PAIRS.map(([x, y]) => o.rateUsd[`${x}_${y}`]),
-      o.cum.SQO, o.cum.Trial, o.cum.CW, o.cumUsd.SQO, o.cumUsd.Trial, o.cumUsd.CW, o.medCycle]);
+      o.cum.SQO, o.cum.Trial, o.cum.CW, o.cumUsd.SQO, o.cumUsd.Trial, o.cumUsd.CW, o.medCycle, o.avgWon]);
     cohortRows++;
   }
   rows.push([]);
@@ -243,7 +244,42 @@ async function main() {
   }
   rows.push([]);
 
-  // ④ OPPORTUNITIES — deal level, for drill-downs, ageing and the where-deals-die view.
+  // ⑤ LOST_FROM — where deals die (§6.7). A lost deal is counted at the FURTHEST stage it
+  // reached, so "SQL" means it never got qualified. Precomputed per slice for the same reason
+  // as everything else: the dashboard must not have to add anything up.
+  const DIE = ST.filter((s) => s !== "CW");
+  rows.push([`⑤ LOST_FROM — lost deals by the furthest stage they reached.`]);
+  rows.push(["grain", "period", "region", "segment", ...DIE.map((s) => `lost_at_${s}`), ...DIE.map((s) => `usd_lost_at_${s}`), "n_lost", "usd_lost"]);
+  for (const p of [...PERIODS, { grain: "Benchmark", label: "Matured benchmark", from: BENCH[0], to: BENCH[1] }])
+    for (const region of REGIONS) for (const seg of SEGMENTS) {
+      const pool = sel(p.grain === "Benchmark"
+        ? deals.filter((x) => x.entry >= BENCH[0] && x.entry <= BENCH[1])
+        : deals.filter((x) => (p.grain === "Quarter" ? x.q : x.m) === p.label), region, seg).filter((x) => x.Lost);
+      const g = DIE.map((sg) => pool.filter((x) => x.lostFrom === sg));
+      rows.push([p.grain, p.label, region, seg, ...g.map((a) => a.length),
+        ...g.map((a) => Math.round(a.reduce((s2, b) => s2 + b.usd, 0))),
+        pool.length, Math.round(pool.reduce((s2, b) => s2 + b.usd, 0))]);
+    }
+  rows.push([]);
+
+  // ⑥ AGEING — open pipeline by the stage it is sitting in (§6.8). As-of now, not per cohort:
+  // an open deal has no cohort outcome yet, which is the whole point of excluding it from rates.
+  rows.push([`⑥ AGEING — open deals by current stage, as of ${ASOF}. These sit in no rate on this page.`]);
+  rows.push(["region", "segment", "stage", "n_open", "avg_days_since_sql", "median_days_since_sql", "over_90_n", "over_90_usd", "usd_open"]);
+  const openStages = [...new Set(deals.filter((x) => x.Open).map((x) => x.stage))].sort();
+  for (const region of REGIONS) for (const seg of SEGMENTS) for (const sg of openStages) {
+    const pool = sel(deals.filter((x) => x.Open && x.stage === sg), region, seg);
+    if (!pool.length) continue;
+    const ages = pool.map((x) => days(x.entry, ASOF)).sort((a, b) => a - b);
+    const old90 = pool.filter((x) => days(x.entry, ASOF) > 90);
+    rows.push([region, seg, sg, pool.length,
+      Math.round(ages.reduce((a, b) => a + b, 0) / ages.length), ages[Math.floor(ages.length / 2)],
+      old90.length, Math.round(old90.reduce((a, b) => a + b.usd, 0)),
+      Math.round(pool.reduce((a, b) => a + b.usd, 0))]);
+  }
+  rows.push([]);
+
+  // ④ OPPORTUNITIES — deal level, for drill-downs.
   rows.push([`④ OPPORTUNITIES — the ${deals.length} included deals, one row each.`]);
   rows.push(["id", "deal", "account", "owner", "region", "segment", "entry_date", "cohort_q", "cohort_m",
     "stage", "prev_stage", "outcome", "lost_from", "lost_reasons", "lead_source", "usd",

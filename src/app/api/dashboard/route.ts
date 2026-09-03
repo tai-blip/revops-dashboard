@@ -151,7 +151,7 @@ async function buildPayload(): Promise<Payload> {
         // (META / COHORT_LONG / FLOW_LONG / OPPORTUNITIES) split on their ①②③④ markers below.
         // Every region × segment × period slice is precomputed there, so the dashboard picks a
         // row and never combines rates — the one thing §3 of the brief forbids.
-        { tab: "Funnel Conversion", range: "A1:AZ1400" },
+        { tab: "Funnel Conversion", range: "A1:BZ2000" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -465,7 +465,8 @@ async function buildPayload(): Promise<Payload> {
       if (k) fcMeta[k] = (r[1] ?? "") as string | number;
     }
     const funnel = fcRows.length
-      ? { meta: fcMeta, cohort: fcObjects("② COHORT_LONG"), flow: fcObjects("③ FLOW_LONG"), opps: fcObjects("④ OPPORTUNITIES") }
+      ? { meta: fcMeta, cohort: fcObjects("② COHORT_LONG"), flow: fcObjects("③ FLOW_LONG"),
+          lostFrom: fcObjects("⑤ LOST_FROM"), ageing: fcObjects("⑥ AGEING"), opps: fcObjects("④ OPPORTUNITIES") }
       : null;
 
     const scRows = salesCycleRows ?? [];

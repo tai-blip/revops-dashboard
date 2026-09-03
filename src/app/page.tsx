@@ -103,6 +103,9 @@ type DashboardData = {
     meta: Record<string, string | number>;
     cohort: Record<string, string | number | null>[];
     flow: Record<string, string | number | null>[];
+    // Optional: a "Funnel Conversion" tab written before these blocks existed still parses.
+    lostFrom?: Record<string, string | number | null>[];
+    ageing?: Record<string, string | number | null>[];
     opps: Record<string, string | number | null>[];
   } | null;
   closedWonFeed?: { name: string; owner: string; stage: string; status: string; arr: number; rt: string; rtRaw: string; eld: string; cld: string; tier: string }[];
@@ -4813,9 +4816,6 @@ export default function Dashboard() {
           return { background: `color-mix(in srgb, ${C.grn} ${Math.round(t * 62)}%, transparent)`,
             color: t > 0.62 ? "#0b3b28" : C.t1, fontWeight: t > 0.62 ? 700 : 500 };
         };
-        const opps = F.opps.filter((o) =>
-          (fcRegion === "Total" || String(o.region) === fcRegion) &&
-          (fcSeg === "Total" || String(o.segment) === fcSeg));
 
         const pill = (on: boolean) => ({
           cursor: "pointer", border: `1px solid ${on ? C.navy : C.bd}`,
@@ -4959,7 +4959,7 @@ export default function Dashboard() {
                         const r = F.cohort.find((x) => String(x.period) === "Matured benchmark"
                           && String(x.region) === rg && String(x.segment) === sg);
                         if (!r) return null;
-                        const nCW = num(r.n_CW) ?? 0, usdCW = num(r.usd_CW) ?? 0;
+                        const nCW = num(r.n_CW) ?? 0;
                         const isTot = rg === "Total";
                         return (
                           <tr key={sg + rg} style={{ borderBottom: `1px solid ${C.s1}`, background: isTot ? C.s2 : undefined }}>
@@ -4975,7 +4975,7 @@ export default function Dashboard() {
                             <td style={{ textAlign: "right", padding: "8px 14px 8px 0", fontFamily: "var(--font-dm-mono)",
                               fontSize: 12.5, ...heat(num(r.rate_Trial_Billing), 0.4, 1) }}>{pctTxt(num(r.rate_Trial_Billing))}</td>
                             <td style={{ textAlign: "right", padding: "8px 14px 8px 0", fontFamily: "var(--font-dm-mono)",
-                              fontSize: 12.5, color: C.t2 }}>{nCW ? fmt(usdCW / nCW) : "—"}</td>
+                              fontSize: 12.5, color: C.t2 }}>{num(r.avg_won_arr) == null ? "—" : fmt(num(r.avg_won_arr) as number)}</td>
                           </tr>
                         );
                       }))}
@@ -4986,13 +4986,13 @@ export default function Dashboard() {
 
             {/* 7 · where deals die + 8 · open pipeline ageing */}
             <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))" }}>
-              <Card title="Where deals die" sub={`The furthest stage a lost deal reached, ${fcRegion} · ${fcSeg}.`}>
+              <Card title="Where deals die" sub={`The furthest stage a lost deal reached over the matured benchmark window · ${fcRegion} · ${fcSeg}.`}>
                 <div style={{ padding: "6px 20px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
                   {(() => {
-                    const lost = opps.filter((o) => String(o.outcome) === "Lost");
+                    const lf = (F.lostFrom ?? []).find((x) => String(x.period) === "Matured benchmark"
+                      && String(x.region) === fcRegion && String(x.segment) === fcSeg);
                     const by = STAGES.filter((x) => x !== "CW").map((sg) => ({
-                      sg, n: lost.filter((o) => String(o.lost_from) === sg).length,
-                      usd: lost.filter((o) => String(o.lost_from) === sg).reduce((a, b) => a + (num(b.usd) ?? 0), 0) }));
+                      sg, n: num(lf?.[`lost_at_${sg}`]) ?? 0, usd: num(lf?.[`usd_lost_at_${sg}`]) ?? 0 }));
                     const mx = Math.max(1, ...by.map((b) => ($ ? b.usd : b.n)));
                     return by.map((b) => {
                       const v = $ ? b.usd : b.n;
@@ -5006,7 +5006,7 @@ export default function Dashboard() {
                     });
                   })()}
                   <div style={{ fontSize: 11.5, color: C.t3, marginTop: 4 }}>
-                    {opps.filter((o) => String(o.outcome) === "Lost").length} lost deals in view. A deal is counted at the furthest stage it reached, so “SQL” means it never got qualified.
+                    {String((F.lostFrom ?? []).find((x) => String(x.period) === "Matured benchmark" && String(x.region) === fcRegion && String(x.segment) === fcSeg)?.n_lost ?? 0)} lost deals over the benchmark window. A deal is counted at the furthest stage it reached, so “SQL” means it never got qualified.
                   </div>
                 </div>
               </Card>
@@ -5024,27 +5024,17 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {(() => {
-                        const open = opps.filter((o) => String(o.outcome) === "Open");
-                        const stages = [...new Set(open.map((o) => String(o.stage)))].sort();
-                        return stages.map((sg) => {
-                          const g = open.filter((o) => String(o.stage) === sg);
-                          const ages = g.map((o) => num(o.days_open) ?? 0);
-                          const old = g.filter((o) => (num(o.days_open) ?? 0) > 90);
-                          return (
-                            <tr key={sg} style={{ borderBottom: `1px solid ${C.s1}` }}>
-                              <td style={{ textAlign: "left", padding: "8px 12px 8px 0", fontSize: 13, color: C.t1 }}>{sg}</td>
-                              <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5 }}>{g.length}</td>
-                              <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5, color: C.t2 }}>
-                                {ages.length ? Math.round(ages.reduce((a, b) => a + b, 0) / ages.length) : "—"}</td>
-                              <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5,
-                                color: old.length ? C.ylw : C.t3 }}>{old.length}</td>
-                              <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5, color: C.t2 }}>
-                                {fmt(old.reduce((a, b) => a + (num(b.usd) ?? 0), 0))}</td>
-                            </tr>
-                          );
-                        });
-                      })()}
+                      {(F.ageing ?? []).filter((a) => String(a.region) === fcRegion && String(a.segment) === fcSeg)
+                        .map((a) => (
+                          <tr key={String(a.stage)} style={{ borderBottom: `1px solid ${C.s1}` }}>
+                            <td style={{ textAlign: "left", padding: "8px 12px 8px 0", fontSize: 13, color: C.t1 }}>{String(a.stage)}</td>
+                            <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5 }}>{num(a.n_open) ?? 0}</td>
+                            <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5, color: C.t2 }}>{num(a.avg_days_since_sql) ?? "—"}</td>
+                            <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5,
+                              color: (num(a.over_90_n) ?? 0) ? C.ylw : C.t3 }}>{num(a.over_90_n) ?? 0}</td>
+                            <td style={{ textAlign: "right", padding: "8px 12px 8px 0", fontFamily: "var(--font-dm-mono)", fontSize: 12.5, color: C.t2 }}>{fmt(num(a.over_90_usd) ?? 0)}</td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
                 </div>
