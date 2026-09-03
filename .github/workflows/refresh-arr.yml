@@ -57,6 +57,13 @@ jobs:
         # dashboard API being up.
         run: node scripts/build-sales-cycle-tab.mjs
 
+      - name: Funnel Conversion (SFDC → Sheet)
+        if: always()
+        # New Business SQL→Closed Won by cohort, to the Sales Ops handover brief v3. Reads
+        # Salesforce directly, so it does not depend on the dashboard API being up. Without this
+        # the tab would be frozen at whenever it was last built by hand.
+        run: node scripts/build-funnel-conversion-tab.mjs
+
       - name: ARR Definitions tab (mirror of the dashboard funnel)
         # Writes the "ARR Definitions" tab from the deployed dashboard API, so the Sheet always
         # carries the same Pilot / Invoiced / Billed / Live ARR / Booked Pilot figures the
