@@ -89,7 +89,7 @@ async function buildPayload(): Promise<Payload> {
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
     // NOTE: order here MUST match the destructured variables below.
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows, liveArrPullRows, salesCycleRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows, liveArrPullRows, salesCycleRows, funnelRows] =
       await getSheetValuesBatch([
         { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
@@ -146,6 +146,12 @@ async function buildPayload(): Promise<Payload> {
         // "(2) DEALS" marker and the deal-level rows the counts are built from, which back the
         // click-through. Range covers both.
         { tab: "Sales Cycle", range: "A5:N2000" },
+        // Funnel Conversion = New Business SQL→Closed Won by cohort, built to the Sales Ops
+        // handover brief v3 by scripts/build-funnel-conversion-tab.mjs. Four stacked blocks
+        // (META / COHORT_LONG / FLOW_LONG / OPPORTUNITIES) split on their ①②③④ markers below.
+        // Every region × segment × period slice is precomputed there, so the dashboard picks a
+        // row and never combines rates — the one thing §3 of the brief forbids.
+        { tab: "Funnel Conversion", range: "A1:BZ2000" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -438,6 +444,38 @@ async function buildPayload(): Promise<Payload> {
     // "Sales Cycle" is two stacked blocks in one tab. Everything before the "② DEALS" marker
     // row is the metric grid; everything after its column header is deal-level. Split on the
     // marker, not a fixed offset, so adding a metric row cannot shift the deal parsing.
+    // ── Funnel Conversion: four blocks in one tab, each found by its marker. Each block's
+    // header row names its own columns, so a row is parsed into an object by header name and
+    // adding a column upstream cannot silently shift the reads.
+    const fcRows = funnelRows ?? [];
+    const fcBlock = (marker: string) => {
+      const at = fcRows.findIndex((r) => String(r?.[0] ?? "").startsWith(marker));
+      if (at === -1) return { head: [] as string[], body: [] as (string | number | null)[][] };
+      const head = (fcRows[at + 1] ?? []).map((c) => String(c ?? ""));
+      const body: (string | number | null)[][] = [];
+      for (let i = at + 2; i < fcRows.length; i++) {
+        const first = String(fcRows[i]?.[0] ?? "");
+        if (!first) break;                       // blank line ends the block
+        if (/^[①②③④]/.test(first)) break;         // next block starts
+        body.push(fcRows[i]);
+      }
+      return { head, body };
+    };
+    const fcObjects = (marker: string) => {
+      const { head, body } = fcBlock(marker);
+      return body.map((r) => { const o: Record<string, string | number | null> = {};
+        head.forEach((h, i) => { if (h) o[h] = r[i] ?? null; }); return o; });
+    };
+    const fcMeta: Record<string, string | number> = {};
+    for (const r of fcBlock("① META").body) {
+      const k = String(r?.[0] ?? "").trim();
+      if (k) fcMeta[k] = (r[1] ?? "") as string | number;
+    }
+    const funnel = fcRows.length
+      ? { meta: fcMeta, cohort: fcObjects("② COHORT_LONG"), flow: fcObjects("③ FLOW_LONG"),
+          lostFrom: fcObjects("⑤ LOST_FROM"), ageing: fcObjects("⑥ AGEING"), opps: fcObjects("④ OPPORTUNITIES") }
+      : null;
+
     const scRows = salesCycleRows ?? [];
     const scMarker = scRows.findIndex((r) => String(r?.[0] ?? "").startsWith("② DEALS"));
     const scMetricRows = (scMarker === -1 ? scRows : scRows.slice(0, scMarker))
@@ -472,6 +510,7 @@ async function buildPayload(): Promise<Payload> {
         segment: String(r[6] ?? ""),   // "" = the all-segments row
         median: typeof r[7] === "number" ? (r[7] as number) : null,
       })),
+      funnel,
       salesCycleDeals: scDealRows.map((r) => ({
         region: String(r[0]), quarter: String(r[1]), segment: String(r[2] ?? ""),
         deal: String(r[3] ?? ""), account: String(r[4] ?? ""), owner: String(r[5] ?? ""),
