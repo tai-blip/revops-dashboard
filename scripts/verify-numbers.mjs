@@ -325,6 +325,82 @@ async function main() {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
+  // C2. THE LAST MILE — what the DASHBOARD serves, vs the sheet it claims to read.
+  //
+  //   Everything above proves  Sheet == Salesforce.  Nothing above proves the screen shows
+  //   the sheet. That gap is real and it has bitten twice in one week:
+  //     · the Funnel tab's read range stopped at column AZ, so a 53rd column arrived as
+  //       undefined — sheet correct, screen showed "—", every audit green;
+  //     · at the month boundary the tiles read $0 and then September's figures under an
+  //       August label — sheet correct, screen wrong, every audit green.
+  //   Both were found by eye. Neither could have been caught by comparing the sheet to
+  //   Salesforce, because the sheet was right both times.
+  //
+  //   So: fetch the real /api/dashboard payload — the exact JSON the page renders from —
+  //   and assert its headline values equal the Headline tab. Sheet == SFDC (above) plus
+  //   Dashboard == Sheet (here) is the whole chain, Salesforce to screen.
+  //
+  //   Needs DASH_API_URL (the deployed origin, or a local dev server) and, against prod,
+  //   CRON_TOKEN. Without them this SKIPS and says so — it does not quietly pass.
+  // ════════════════════════════════════════════════════════════════════════════
+  const dashOrigin = (process.env.DASH_API_URL || "").replace(/\/+$/, "");
+  if (!dashOrigin) {
+    add("INFO", "Dashboard vs Sheet (the last mile)",
+      "SKIPPED — DASH_API_URL is not set, so nothing here checked that the dashboard actually shows the sheet's numbers. Sheet-vs-Salesforce above is still verified.",
+      "Set DASH_API_URL — as a repo variable or secret, either works — plus the CRON_TOKEN secret. Locally: DASH_API_URL=http://localhost:3010 node --env-file=.env scripts/verify-numbers.mjs");
+  } else {
+    let dash = null, dashErr = "";
+    try {
+      const r = await fetch(`${dashOrigin}/api/dashboard`, {
+        headers: process.env.CRON_TOKEN ? { "x-cron-token": process.env.CRON_TOKEN } : {},
+        signal: AbortSignal.timeout(45000),
+      });
+      if (!r.ok) dashErr = `HTTP ${r.status}`;
+      else dash = await r.json();
+    } catch (e) { dashErr = e.message; }
+
+    if (!dash) {
+      add("FAIL", "Dashboard vs Sheet (the last mile)",
+        `could not read ${dashOrigin}/api/dashboard — ${dashErr}`,
+        "If the dashboard is down, the audit cannot vouch for what anyone is looking at.");
+    } else {
+      const hs = dash.headlineSource ?? {};
+      // The keys the Command tab leads with. If any of these disagrees with the sheet, someone
+      // is reading a wrong number off the screen right now.
+      const LAST_MILE = ["live_arr", "gap_to_10m", "new_arr_mo", "churn_mo", "total_pipeline",
+        "coverage", "q3_target", "q3_booked", "pipe_created_q3", "up_for_renewal_mo"];
+      const missing = [], drifted = [];
+      for (const k of LAST_MILE) {
+        const sheetV = H[k], dashV = hs[k];
+        if (sheetV == null) continue;                       // not published by the sheet; A/B covers that
+        if (dashV == null) { missing.push(k); continue; }   // sheet has it, dashboard lost it
+        const tol = Math.max(1, Math.abs(sheetV) * 0.0001);
+        if (Math.abs(dashV - sheetV) > tol) drifted.push(`${k}: dashboard ${dashV} vs sheet ${sheetV}`);
+      }
+      if (missing.length)
+        add("FAIL", "Dashboard dropped a sheet value",
+          `${missing.join(", ")} — present in the Headline tab, absent from the API payload. The tile falls back to an in-code figure or renders blank, and no other check would notice.`,
+          "Usually the read range in src/app/api/dashboard/route.ts is too narrow, or the key was renamed on one side only.");
+      else if (drifted.length)
+        add("FAIL", "Dashboard disagrees with the sheet", drifted.join(" · "),
+          "The dashboard must read the sheet, not recompute. See AGENTS.md → Where calculations live.");
+      else
+        add("PASS", "Dashboard vs Sheet (the last mile)",
+          `${LAST_MILE.filter((k) => H[k] != null).length} headline values served by ${dashOrigin} match the Headline tab exactly — Salesforce → Sheet → screen is verified end to end.`);
+
+      // The funnel tab is wide enough that a truncated read range is a live risk, and that is
+      // precisely how avg_won_arr went missing. Assert the payload is shaped, not just present.
+      if (dash.funnel) {
+        const bench = (dash.funnel.cohort ?? []).find((r) => r.period === "Matured benchmark" && r.region === "Total" && r.segment === "Total");
+        const cols = bench ? Object.keys(bench).length : 0;
+        if (!bench) add("FAIL", "Funnel payload", "no Total/Total matured-benchmark row in the API response — the Funnel Conversion tab will render empty.");
+        else if (cols < 53) add("FAIL", "Funnel payload truncated", `benchmark row carries ${cols} columns, expected 53 — the read range is cutting the tab off.`, "Widen the Funnel Conversion range in src/app/api/dashboard/route.ts.");
+        else add("PASS", "Funnel payload", `${(dash.funnel.cohort ?? []).length} cohort slices, ${cols} columns each.`);
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
   // D. BASELINE DRIFT — every key vs. the last committed snapshot.
   //    This is the half that catches "my code change moved a number": metrics with no
   //    SOQL equivalent still can't shift silently. Real movement is expected daily, so

@@ -55,6 +55,11 @@ jobs:
       SF_API_VERSION: ${{ secrets.SF_API_VERSION }}
       SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
       SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
+      # Enables the "last mile" check — the dashboard's own /api/dashboard payload vs the sheet.
+      # Neither is set today, so that check SKIPS with an INFO saying the screen is unverified;
+      # it starts running the moment they exist. Everything else in the gate is unaffected.
+      DASH_API_URL: ${{ vars.DASH_API_URL || secrets.DASH_API_URL }}
+      CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
