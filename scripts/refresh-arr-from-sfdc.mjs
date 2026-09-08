@@ -68,9 +68,14 @@ function normTerm(v) {
   return "Other/Unknown";
 }
 
-function monthList(startY, startM /*1-based*/) {
-  const now = new Date();
-  const endY = now.getUTCFullYear(), endM = now.getUTCMonth() + 1;
+// The last month generated must be the month the SPREADSHEET thinks it is, not the month UTC
+// thinks it is. The Headline tab matches on EOMONTH(TODAY(),0) and TODAY() resolves in the
+// spreadsheet's timezone (Asia/Saigon, UTC+7). Bounding this on getUTCMonth() meant that from
+// sheet-local midnight until 00:00 UTC — seven hours at every month boundary — the sheet was
+// already in the new month while this function had not yet written its row, so the Exec New ARR
+// and Churn tiles had nothing to match. Pass the sheet's own year/month and the gap closes at
+// the source. (endY, endM are 1-based month.)
+function monthList(startY, startM /*1-based*/, endY, endM) {
   const out = [];
   let y = startY, m = startM;
   while (y < endY || (y === endY && m <= endM)) {
@@ -141,7 +146,22 @@ async function main() {
   }
 
   // 3) Month rows (Apr 2021 -> current month)
-  const months = monthList(2021, 4);
+  // Ask the spreadsheet what month it is in, so the row exists the moment its TODAY() rolls over.
+  let endY, endM;
+  try {
+    const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "properties.timeZone" });
+    const tz = meta.data.properties?.timeZone || "UTC";
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit" })
+      .format(new Date()).split("-");
+    endY = Number(parts[0]); endM = Number(parts[1]);
+    console.log(`month rows run to ${endY}-${String(endM).padStart(2, "0")} (spreadsheet timezone ${tz})`);
+  } catch (e) {
+    // Never fewer months than UTC would have given — falling short is what caused the bug.
+    const n = new Date();
+    endY = n.getUTCFullYear(); endM = n.getUTCMonth() + 1;
+    console.log(`could not read the spreadsheet timezone (${e.message}); falling back to UTC ${endY}-${String(endM).padStart(2, "0")}`);
+  }
+  const months = monthList(2021, 4, endY, endM);
   const N = won.length, LAST = N + 1;
 
   const dim = (x) => [

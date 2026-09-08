@@ -137,9 +137,28 @@ function algebra(check, shown, expected, { fmt = usd, tolAbs = 1, fix } = {}) {
   else add("FAIL", check, detail, fix);
 }
 
+// "Aug 2026" — the label format ARR_MoM_Rebuild writes in col A.
+const monthName = (y, m) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", year: "numeric" })
+  .format(new Date(Date.UTC(y, m, 15)));
+
 async function main() {
   const now = new Date();
-  const y = now.getUTCFullYear(), m = now.getUTCMonth();
+
+  // Which month is "this month"? It has to be the month the SPREADSHEET is in, because that is
+  // the month the dashboard is showing: the Headline tab matches on EOMONTH(TODAY(),0) and
+  // TODAY() resolves in the spreadsheet's timezone (Asia/Saigon, UTC+7). Checking UTC instead
+  // meant that for seven hours at every month boundary the gate compared the sheet's September
+  // against Salesforce's August and reported a $344k regression that did not exist. One clock,
+  // and it is the sheet's. Falls back to UTC only if the lookup fails.
+  let y = now.getUTCFullYear(), m = now.getUTCMonth(), clock = "UTC";
+  try {
+    const meta = await retry("sheets.get timeZone", () => sheets.spreadsheets.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID, fields: "properties.timeZone" }));
+    const tz = meta.data.properties?.timeZone || "UTC";
+    const [ys, ms] = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit" })
+      .format(now).split("-");
+    y = Number(ys); m = Number(ms) - 1; clock = tz;
+  } catch { /* keep UTC */ }
 
   const [sf, sheetRes] = await Promise.all([
     sfLogin(),
@@ -149,20 +168,32 @@ async function main() {
         "Headline!A1:E240",
         "Targets!A1:C120",
         "ARR_MoM_Rebuild!V1:W1",
+        "ARR_MoM_Rebuild!A1:A400",            // month labels ("Aug 2026") — is the current one written yet?
         "'Open pipeline - SOQL pull'!A1:A1",   // banner carries the pull timestamp
       ],
       valueRenderOption: "UNFORMATTED_VALUE",
     })),
   ]);
-  const [headRows, targetRows, w1Rows, bannerRows] = sheetRes.data.valueRanges.map((v) => v.values || []);
+  const [headRows, targetRows, w1Rows, momMonthRows, bannerRows] = sheetRes.data.valueRanges.map((v) => v.values || []);
   const H = parseKeyValue(headRows);
   const T = parseKeyValue(targetRows);
   const w1 = typeof w1Rows?.[0]?.[1] === "number" ? w1Rows[0][1] : null;
   const banner = String(bannerRows?.[0]?.[0] ?? "").replace(/\s+/g, " ").trim();
 
+  // Does ARR_MoM_Rebuild carry a row for the month the SHEET thinks it is? The Headline formulas
+  // MATCH on EOMONTH(TODAY(),0), and TODAY() resolves in the spreadsheet's own timezone, while the
+  // row is appended by a refresh bounded on getUTCMonth(). Between sheet-local midnight and UTC
+  // midnight — seven hours, once a month — no row matches and new_arr_mo / churn_mo are blank BY
+  // DESIGN (blank, not 0: see the note in scripts/build-headline-tab.mjs). Without this the gate
+  // reads that as a broken formula and fails the nightly build every month-start.
+  const sheetMonthLabel = monthName(y, m);
+  const curMonthRowExists = (momMonthRows ?? []).some((r) => String(r?.[0] ?? "").trim() === sheetMonthLabel);
+  // Keys that are legitimately absent during that window, and only then.
+  const BLANK_OK = curMonthRowExists ? new Set() : new Set(["new_arr_mo", "churn_mo"]);
+
   console.log(`\nNumbers regression gate — ${iso(now)}`);
   console.log(`Source pull: ${banner || "(no timestamp banner)"}`);
-  console.log(`Headline keys: ${Object.keys(H).length} · Targets keys: ${Object.keys(T).length}\n`);
+  console.log(`Headline keys: ${Object.keys(H).length} · Targets keys: ${Object.keys(T).length} · month basis: ${monthName(y, m)} (${clock})\n`);
 
   // ════════════════════════════════════════════════════════════════════════════
   // A. SFDC CROSS-CHECKS — independent SOQL recompute of each headline metric.
@@ -314,7 +345,11 @@ async function main() {
       const DRIFT_PCT = 0.10; // flag a >10% move in any single metric for a human to eyeball
       for (const [group, cur] of [["headline", H], ["targets", T]]) {
         const prev = base[group] ?? {};
-        const gone = Object.keys(prev).filter((k) => !(k in cur));
+        const goneAll = Object.keys(prev).filter((k) => !(k in cur));
+        const expectedBlank = goneAll.filter((k) => BLANK_OK.has(k));
+        const gone = goneAll.filter((k) => !BLANK_OK.has(k));
+        if (expectedBlank.length) add("INFO", `Baseline: ${group} keys blank at the month boundary`,
+          `${expectedBlank.join(", ")} — ARR_MoM_Rebuild has no "${sheetMonthLabel}" row yet, so these read blank rather than a false $0. Clears on the first refresh after 00:00 UTC.`);
         const fresh = Object.keys(cur).filter((k) => !(k in prev));
         if (gone.length) add("FAIL", `Baseline: ${group} keys vanished`, gone.join(", "),
           "A tile reading a removed key renders blank — restore it or update the dashboard.");

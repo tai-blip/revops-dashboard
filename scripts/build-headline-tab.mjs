@@ -44,8 +44,16 @@ const wPrev = `INDEX(${W}!$B$2:$B,COUNTA(${W}!$A$2:$A)-1)`;
 // Exec-summary helpers (current calendar month / prior month) for the machine-readable block.
 const curMatch = `MATCH(EOMONTH(TODAY(),0),${A}!$B:$B,0)`;
 const prevActive = `INDEX(${A}!$C:$C,MATCH(EOMONTH(TODAY(),-1),${A}!$B:$B,0))`;
-const newArrMoF = `IFERROR(INDEX(${A}!$Q:$Q,${curMatch}),0)`;
-const churnMoF = `IFERROR(INDEX(${A}!$J:$J,${curMatch}),0)`;
+// Blank, NOT zero, when the current month has no row yet. ARR_MoM_Rebuild gains its new month
+// on the first refresh after UTC midnight, but TODAY() here rolls at sheet-local midnight
+// (Asia/Saigon, UTC+7) — so for seven hours at every month boundary the MATCH finds nothing.
+// Defaulting that to 0 turned "not written yet" into the claim "we booked nothing and churned
+// nothing", which is a different and false statement: on 2026-09-01 the tiles read $0 while
+// August had in fact done $344,990. Blank instead means route.ts's parseKeyValue skips the key
+// (it only takes numeric cells), so the dashboard's own current-month fallback answers — and
+// that one keys off UTC, so it still resolves to the right month during the gap.
+const newArrMoF = `IFERROR(INDEX(${A}!$Q:$Q,${curMatch}),"")`;
+const churnMoF = `IFERROR(INDEX(${A}!$J:$J,${curMatch}),"")`;
 const momPctF = `IFERROR((${A}!$W$1-${prevActive})/${prevActive},"")`;
 const wowPctF = `IFERROR((${wLast}-${wPrev})/${wPrev},"")`;
 // Cross-tab reads for the REST of the Command tab, so EVERY Command number is a computed cell here
@@ -151,6 +159,11 @@ async function main() {
     ["key", "value", "feeds"],
     ["live_arr", `=${A}!$W$1`, "Exec: Live ARR (as of today)"],
     ["gap_to_10m", `=10000000-${A}!$W$1`, "Exec: gap to $10M milestone"],
+    // The month TODAY() resolves to in the SPREADSHEET's timezone. Published so the dashboard and
+    // the numbers gate label and compare against the same month this tab computed against, instead
+    // of each deriving "now" from its own clock — which is how the tiles ended up showing
+    // September's figures under an August label.
+    ["as_of_month", `=TEXT(TODAY(),"YYYY-MM")`, "The month the (mo) tiles are computed for"],
     ["new_arr_mo", `=${newArrMoF}`, "Exec: New ARR (current month)"],
     ["churn_mo", `=${churnMoF}`, "Exec: Churned (current month)"],
     ["up_for_renewal_mo", `=${renewalF}`, "Exec: up for renewal this month"],
