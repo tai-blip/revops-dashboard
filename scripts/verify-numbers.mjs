@@ -316,7 +316,7 @@ async function main() {
   if (!dashOrigin) {
     add("INFO", "Dashboard vs Sheet (the last mile)",
       "SKIPPED — DASH_API_URL is not set, so nothing here checked that the dashboard actually shows the sheet's numbers. Sheet-vs-Salesforce above is still verified.",
-      "Set DASH_API_URL to the deployed origin (plus CRON_TOKEN), or run locally against your dev server: DASH_API_URL=http://localhost:3010 node --env-file=.env scripts/verify-numbers.mjs");
+      "Set DASH_API_URL — as a repo variable or secret, either works — plus the CRON_TOKEN secret. Locally: DASH_API_URL=http://localhost:3010 node --env-file=.env scripts/verify-numbers.mjs");
   } else {
     let dash = null, dashErr = "";
     try {
