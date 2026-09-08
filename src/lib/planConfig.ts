@@ -73,6 +73,11 @@ export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; q
   //   less team Q3 closed won  −274,670   (New Business + Expansion, roster owners, as of 28 Aug)
   //   = 830,330, rounded         830,000
   // Recomputed 2026-08-28 after Jill's Q3 quota was corrected from $520k to $200k.
+  // 2026-09-06: this list is now the FALLBACK only. The live source is the Targets tab
+  // (ae_quota_q3_* keys), which the "AE Attainment (Official)" quota cells look up. Keep the two
+  // in step — they drifted once already: Davi's quota was written here and never to the sheet,
+  // which failed the nightly audit every day from 1 Sep. Mathias is 150k (Tai, 2026-09-06); the
+  // attainment sheet had 250k, which was wrong.
   { name: "David Dubinski", short: "Davi", quotaQ3: 830000, quotaAnnual: null, am: false, lead: true },
 ];
 

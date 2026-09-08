@@ -12,6 +12,13 @@
 import { google } from "googleapis";
 
 const APPLY = process.argv.includes("--apply");
+// HEADS UP (2026-09-06): the source tab this duplicates, "AE attainment", NO LONGER EXISTS in the
+// workbook — only "AE Attainment (Official)" and "AE Attainment (Annual)" remain. So this script
+// cannot currently run, and the Official tab is hand-maintained. It is kept because it documents
+// how the official filter differs from the old Status-based one (see toOfficial below), and it
+// would work again if the source tab were restored. The quota column is NOT its business any more:
+// scripts/link-ae-quotas.mjs points those cells at the Targets tab. main() fails fast below rather
+// than half-running.
 const SRC = "AE attainment";
 const NEW = "AE Attainment (Official)";
 const auth = new google.auth.JWT({ email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, key: Buffer.from(process.env.GOOGLE_PRIVATE_KEY_B64, "base64").toString("utf-8"), scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
@@ -36,7 +43,12 @@ function toOfficial(f) {
 async function meta() {
   const s = (await api.spreadsheets.get({ spreadsheetId: ID })).data.sheets;
   const find = (t) => s.find((x) => x.properties.title === t)?.properties;
-  return { src: find(SRC), exist: find(NEW), count: s.length };
+  const src = find(SRC);
+  if (!src) throw new Error(
+    `the source tab "${SRC}" no longer exists in this workbook, so there is nothing to duplicate. ` +
+    `"${NEW}" is now hand-maintained; its quota column is driven by scripts/link-ae-quotas.mjs ` +
+    `from the Targets tab. Restore "${SRC}" if you want to regenerate the whole tab from scratch.`);
+  return { src, exist: find(NEW), count: s.length };
 }
 
 async function main() {

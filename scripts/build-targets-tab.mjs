@@ -10,6 +10,24 @@ import { google } from "googleapis";
 const gAuth = new google.auth.JWT({ email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, key: Buffer.from(process.env.GOOGLE_PRIVATE_KEY_B64, "base64").toString("utf-8"), scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
 const NAVY = { red: 0.13, green: 0.19, blue: 0.32 };
 
+// ---- Per-AE Q3 quotas. Must match src/lib/planConfig.ts AE_ROSTER (the in-code fallback). ----
+// Davi carries the residual: the other reps' assigned quotas less what the team had already
+// closed. Derived once on 2026-08-28 and FROZEN — recomputing it live would drop his quota every
+// time a teammate closed something, moving his attainment for reasons that are not his.
+//   other reps' Q3 quotas   1,105,000  (James 255k, Dorsa 250k, Jed 250k, Jill 200k, Mathias 150k)
+//   less team Q3 closed won  −274,670  (New Business + Expansion, roster owners, as of 28 Aug)
+//   = 830,330, rounded        830,000
+// Mathias is 150k, confirmed by Tai 2026-09-06 — the attainment sheet had 250k, which was wrong
+// and would have made the residual 100k too small had it been used.
+const AE_QUOTAS = [
+  ["James Burdick", 255000, "Q3 quota — James Burdick"],
+  ["Dorsa Mahmoudnia", 250000, "Q3 quota — Dorsa Mahmoudnia"],
+  ["Jed Rutstein", 250000, "Q3 quota — Jed Rutstein"],
+  ["Jill Bucci", 200000, "Q3 quota — Jill Bucci (quarterly figure, not the $520k H2 total)"],
+  ["Mathias Berthelemot", 150000, "Q3 quota — Mathias Berthelemot"],
+  ["David Dubinski", 830000, "Q3 quota — David Dubinski (frozen residual, see note above)"],
+];
+
 // ---- Fixed finance plan (ported EXACTLY from planConfig.ts), Jan..Dec 2026 ----
 const newBiz = [251698, 257202, 262647, 383856, 391254, 431734, 431370, 438347, 589757, 683008, 739043, 825669];
 const expansion = [62924, 64301, 65662, 95964, 97813, 107933, 107843, 109587, 147439, 170752, 184761, 206417];
@@ -112,7 +130,24 @@ async function main() {
     ["fy26_ending_arr_target", `=$C$${planLastRow}`, "FY26 Ending ARR target (Dec year-end)"],
     ...months.map((n) => [`plan_newarr_m${n}`, `=$B$${planFirstRow + n - 1}`, `Plan New ARR target — ${MON[n - 1]}`]),
     ...months.map((n) => [`plan_endarr_m${n}`, `=$C$${planFirstRow + n - 1}`, `Plan Ending ARR target — ${MON[n - 1]}`]),
+    // ── Per-AE Q3 quotas. THE single source. ────────────────────────────────────────────────
+    // These used to exist in three places at once — planConfig.ts AE_ROSTER, and hand-typed twice
+    // inside "AE Attainment (Official)" (rows 5-10 and again 15-20). On 2026-08-28 Davi's residual
+    // was worked out and written to planConfig only; the sheet copies never got it. His quota cell
+    // stayed blank, and from 1 Sep — the day his first Q3 deal went live — the nightly audit failed
+    // every single day: a rep with actuals and no quota inflates team attainment, because his ARR
+    // lands in the numerator with nothing under it.
+    // Now the attainment tab's quota cells POINT HERE, so there is one number to change.
+    ...AE_QUOTAS.map(([name, q, note]) => [`ae_quota_q3_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`, q, note]),
+    ["ae_quota_q3_total", "", "Σ per-AE Q3 quota — the team denominator (formula patched in below)"],
   ];
+
+  // The AE-quota total sums the quota rows rather than carrying a number this script added up:
+  // the sheet owns the arithmetic, so editing one rep's quota moves the denominator too.
+  const qFirst = values.findIndex((r) => String(r[0]).startsWith("ae_quota_q3_")) + 1;   // 1-based
+  const qLast = qFirst + AE_QUOTAS.length - 1;
+  const qTotalIx = values.findIndex((r) => r[0] === "ae_quota_q3_total");
+  if (qTotalIx > -1) values[qTotalIx][1] = `=SUM($B$${qFirst}:$B$${qLast})`;
 
   // Patch section ②'s Δ / attainment formulas to reference their OWN rows (now that the layout
   // is fixed). Section ② "Month" header is at index (find it), data rows follow.
@@ -125,11 +160,26 @@ async function main() {
 
   const meta = await api.spreadsheets.get({ spreadsheetId: ID, fields: "sheets.properties(sheetId,title)" });
   const existing = meta.data.sheets.find((s) => s.properties.title === "Targets");
+  // CLEAR IN PLACE — never delete and recreate. Deleting a sheet turns every cross-tab reference
+  // to it into #REF!, permanently: the formulas do not heal when a tab of the same name reappears.
+  // This script used to delete, and on 2026-09-06 that silently broke four Headline keys
+  // (q3_target, gap_to_target, arr_needed_week, q3_pct) and would have re-broken the AE quota
+  // lookups the moment anyone re-ran it. Other tabs point here now, so the sheetId must survive.
+  let gid;
   const reqs = [];
-  if (existing) reqs.push({ deleteSheet: { sheetId: existing.properties.sheetId } });
-  reqs.push({ addSheet: { properties: { title: "Targets", index: 2, tabColor: NAVY, gridProperties: { rowCount: values.length + 10, columnCount: 6 } } } });
-  const res = await api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: reqs } });
-  const gid = res.data.replies.find((r) => r.addSheet).addSheet.properties.sheetId;
+  if (existing) {
+    gid = existing.properties.sheetId;
+    reqs.push({ updateSheetProperties: { properties: { sheetId: gid, tabColor: NAVY,
+      gridProperties: { rowCount: Math.max(values.length + 10, 200), columnCount: 6 } },
+      fields: "tabColor,gridProperties.rowCount,gridProperties.columnCount" } });
+    await api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: reqs } });
+    await api.spreadsheets.values.clear({ spreadsheetId: ID, range: "'Targets'!A1:Z10000" });
+  } else {
+    const res = await api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: [
+      { addSheet: { properties: { title: "Targets", index: 2, tabColor: NAVY,
+        gridProperties: { rowCount: values.length + 10, columnCount: 6 } } } }] } });
+    gid = res.data.replies.find((r) => r.addSheet).addSheet.properties.sheetId;
+  }
   await api.spreadsheets.values.update({ spreadsheetId: ID, range: "'Targets'!A1", valueInputOption: "USER_ENTERED", requestBody: { values } });
 
   // ---- Formatting: navy title/section headers, gray italic source lines, gray bold table
