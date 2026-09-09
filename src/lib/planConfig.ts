@@ -58,8 +58,6 @@ export function monthsInQuarter(q: string): number[] {
 // quotas are set independently (ramp/seasonality), so annual ≠ quotaQ3 × 4.
 export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; quotaAnnual: number | null; am: boolean; lead?: boolean }[] = [
   { name: "James Burdick", short: "James", quotaQ3: 255000, quotaAnnual: 1000000, am: false },
-  { name: "Dorsa Mahmoudnia", short: "Dorsa", quotaQ3: 250000, quotaAnnual: 883200, am: false },
-  { name: "Jed Rutstein", short: "Jed", quotaQ3: 250000, quotaAnnual: 750000, am: false },
   // Jill ramped mid-year. $200k is her QUARTERLY number and $520k is the H2 total
   // (Tai, 2026-08-28) — the quarterly view had been using the H2 figure, overstating her
   // Q3 quota by $320k. The AE Attainment (Official) sheet had $200k correct all along.
@@ -72,6 +70,10 @@ export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; q
   //   other reps' Q3 quotas   1,105,000   (James 255k, Dorsa 250k, Jed 250k, Jill 200k, Mathias 150k)
   //   less team Q3 closed won  −274,670   (New Business + Expansion, roster owners, as of 28 Aug)
   //   = 830,330, rounded         830,000
+  // Dorsa and Jed left the team 2026-09-09. Their $250k each is NOT reallocated: Tai's call was
+  // to leave Davi at $830,000, because the figure was frozen precisely so it would not move for
+  // reasons outside his control, and losing two teammates is one of those. The team denominator
+  // simply drops from $1,935,000 to $1,435,000.
   // Recomputed 2026-08-28 after Jill's Q3 quota was corrected from $520k to $200k.
   // 2026-09-06: this list is now the FALLBACK only. The live source is the Targets tab
   // (ae_quota_q3_* keys), which the "AE Attainment (Official)" quota cells look up. Keep the two
@@ -81,11 +83,9 @@ export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; q
   { name: "David Dubinski", short: "Davi", quotaQ3: 830000, quotaAnnual: null, am: false, lead: true },
 ];
 
-// AEs excluded from the FORECAST tab only (not AE Attainment). Dorsa has no AE/AM %
-// on her open opps, so her Potential computes to $0 while her quota still counts —
-// which drags the Q3 team projection below quota artificially. Excluded until her
-// pipeline is forecasted. Scoped to the Forecast tab (Quarterly + Yearly).
-export const FORECAST_EXCLUDE = new Set<string>(["Dorsa Mahmoudnia"]);
+// AEs excluded from the FORECAST tab only (not AE Attainment). Empty since 2026-09-09:
+// the only entry was Dorsa, and she is no longer on the roster, so the exclusion is moot.
+export const FORECAST_EXCLUDE = new Set<string>([]);
 
 export const CURRENT_LIVE_ARR_FALLBACK = 5690808;
 

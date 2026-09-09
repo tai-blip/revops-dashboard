@@ -12,7 +12,7 @@ import { google } from "googleapis";
 import fs from "node:fs";
 
 const TAB = "Deal Tracker (DRAFT)";
-const AE = { Davi: "David Dubinski", James: "James Burdick", Jill: "Jill Bucci", Jed: "Jed Rutstein", Dorsa: "Dorsa Mahmoudnia", Mathias: "Mathias Berthelemot", Os: "Osman Mubarak" };
+const AE = { Davi: "David Dubinski", James: "James Burdick", Jill: "Jill Bucci", Mathias: "Mathias Berthelemot", Os: "Osman Mubarak" };
 
 // Davi's Key Deals 2026 — in-play only [name, aeShort, confidence, potentialARR, estLive, notes]
 const KEY = [

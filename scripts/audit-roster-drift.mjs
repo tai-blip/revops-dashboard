@@ -36,8 +36,6 @@ const TARGETS = [
 // Declared-intentional omissions: "<label>|<name>" → why. Keep the reason honest; an entry
 // here means "we know they're missing and that is correct", not "we gave up".
 const ACK = {
-  "Forecast Potential — AES|Dorsa Mahmoudnia":
-    "FORECAST_EXCLUDE — no AE/AM % on her open opps, so Potential computes to $0 and would drag the team projection. Scoped to the Forecast tab by design.",
 };
 
 const findings = [];

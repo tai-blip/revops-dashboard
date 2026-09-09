@@ -19,8 +19,6 @@ const EXCLUDE = new Set(["Sri Muniandy", "Jesse Brennan"]);
 // actual $1.16M. Every roster member must appear here, quota or not.
 const GOALS = {
   "James Burdick": 1000000,
-  "Dorsa Mahmoudnia": 883200,
-  "Jed Rutstein": 750000,
   "Jill Bucci": 520000,
   "Mathias Berthelemot": 600000,
   "David Dubinski": null, // lead — residual quota pending the department total

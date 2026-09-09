@@ -23,7 +23,7 @@ const AGE0 = `IFERROR(TODAY()-DATEVALUE(LEFT(IF(${R("L")}<>"",${R("L")},${R("G")
 // measured from stage dates, not probability, so that reason does not carry over here. She has
 // four open deals (2 Expansion Lead, 1 Renewal Pending, 1 SQL) that belong in this matrix.
 // scripts/audit-roster-drift.mjs fails the nightly audit if this list drifts from the roster.
-const AES = ["All (everyone)", "David Dubinski", "Dorsa Mahmoudnia", "James Burdick", "Jed Rutstein", "Jill Bucci", "Mathias Berthelemot"];
+const AES = ["All (everyone)", "David Dubinski", "James Burdick", "Jill Bucci", "Mathias Berthelemot"];
 // Stephen's explicit stages; "Other (renewal/billing)" is the catch-all for anything else.
 const EXPLICIT = ["SQL", "SAL", "SQO", "Trial", "Proposal", "Pending Signature", "Expansion Lead"];
 const OTHER = "Other (renewal/billing)";
