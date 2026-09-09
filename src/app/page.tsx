@@ -570,7 +570,7 @@ export default function Dashboard() {
   // Forecast tab: which cell's deals to show. Stored as the SELECTION (owner + which stage
   // bucket), never as a copied list, so the panel is always derived from the same rows the
   // number itself came from.
-  const [fDrill, setFDrill] = useState<{ owners: string[]; label: string; bucket: "open" | "early" | "late"; cell: number } | null>(null);
+  const [fDrill, setFDrill] = useState<{ owners: string[]; label: string; bucket: "open" | "early" | "late" | "potential"; cell: number; cw?: number } | null>(null);
   // Booked ARR & Cashflow: which month's rows to show. cfDrill = cash-in payments (Cash timing),
   // pcDrill = deals arriving into a tier (Forward ARR forecast).
   const [cfDrill, setCfDrill] = useState<{ ym: string; label: string; kind: "std" | "rr" | "all" } | null>(null);
@@ -2404,9 +2404,9 @@ export default function Dashboard() {
         const OWN_AE = F.rows.filter((r) => !r.am && !r.lead).map((r) => r.name);
         const OWN_AM = F.rows.filter((r) => !r.lead).map((r) => r.name);
         const OWN_ALL = F.rows.map((r) => r.name);
-        const tnum = (owners: string[], label: string, bucket: "open" | "early" | "late", value: number) => (
+        const tnum = (owners: string[], label: string, bucket: "open" | "early" | "late" | "potential", value: number, cw?: number) => (
           <span style={drillable} title="Click to see every deal behind this total"
-            onClick={() => { setCwDrill(null); setFDrill({ owners, label, bucket, cell: value }); }}>{fmt(value)}</span>
+            onClick={() => { setCwDrill(null); setFDrill({ owners, label, bucket, cell: value, cw }); }}>{fmt(value)}</span>
         );
         const ctier = (owners: string[], label: string, scope: "q" | "y", tier: "Contracted" | "Billed", value: number) =>
           value > 0
@@ -2417,8 +2417,8 @@ export default function Dashboard() {
           <span style={drillable} title="Click to see every deal behind this total"
             onClick={() => { setFDrill(null); setCwDrill({ owners, label, scope, cell: value }); }}>{fmt(value)}</span>
         );
-        const dnum = (owner: string, label: string, bucket: "open" | "early" | "late", value: number) => (
-          <span style={drillable} onClick={() => { setCwDrill(null); setFDrill({ owners: [owner], label, bucket, cell: value }); }} title="Click to see the deals">{fmt(value)}</span>
+        const dnum = (owner: string, label: string, bucket: "open" | "early" | "late" | "potential", value: number, cw?: number) => (
+          <span style={drillable} onClick={() => { setCwDrill(null); setFDrill({ owners: [owner], label, bucket, cell: value, cw }); }} title="Click to see the deals">{fmt(value)}</span>
         );
         // Quarterly per-row cells (toggle-aware). Potential = Closed Won + Early + Late.
         // "Pot. Late" (SQO + Trial) is the half of Potential with a real chance of closing in
@@ -2701,7 +2701,7 @@ export default function Dashboard() {
                       <Td mono color={C.grn}>{ctier([r.name], r.short ?? short(r.name), "q", "Billed", cwQ([r.name], "Billed"))}</Td>
                       <Td mono color={C.coralDk}>{dnum(r.name, r.short ?? short(r.name), "early", earlyPot(r, false))}</Td>
                       <TdLate>{dnum(r.name, r.short ?? short(r.name), "late", latePot(r, false))}</TdLate>
-                      <Td mono bold>{fmt(qCells(r).pot)}</Td>
+                      <Td mono bold>{dnum(r.name, r.short ?? short(r.name), "potential", qCells(r).pot, cwQ([r.name]))}</Td>
                       <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(r).attainP, qCells(r).variance)}</td>
                     </tr>
                   ))}
@@ -2710,7 +2710,7 @@ export default function Dashboard() {
                     <Td mono color={C.blue}>{tnum(OWN_AE, "AE team", "open", F.aeTeam.openPipe)}</Td><Td mono>{fmt(F.aeTeam.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_AE, "AE team", "q", cwQ(OWN_AE))}</Td>
                     <Td mono color={C.blue}>{ctier(OWN_AE, "AE team", "q", "Contracted", cwQ(OWN_AE, "Contracted"))}</Td>
                     <Td mono color={C.grn}>{ctier(OWN_AE, "AE team", "q", "Billed", cwQ(OWN_AE, "Billed"))}</Td>
-                    <Td mono color={C.coralDk}>{tnum(OWN_AE, "AE team", "early", earlyPot(F.aeTeam, false))}</Td><TdLate bold>{tnum(OWN_AE, "AE team", "late", latePot(F.aeTeam, false))}</TdLate><Td mono bold>{fmt(qCells(F.aeTeam).pot)}</Td>
+                    <Td mono color={C.coralDk}>{tnum(OWN_AE, "AE team", "early", earlyPot(F.aeTeam, false))}</Td><TdLate bold>{tnum(OWN_AE, "AE team", "late", latePot(F.aeTeam, false))}</TdLate><Td mono bold>{tnum(OWN_AE, "AE team", "potential", qCells(F.aeTeam).pot, cwQ(OWN_AE))}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.aeTeam).attainP, qCells(F.aeTeam).variance)}</td>
                   </tr>
                   <tr style={{ background: "#EEF2F8", fontWeight: 700 }}>
@@ -2718,7 +2718,7 @@ export default function Dashboard() {
                     <Td mono color={C.blue}>{tnum(OWN_AM, "incl AM", "open", F.totalInclAM.openPipe)}</Td><Td mono>{fmt(F.totalInclAM.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_AM, "incl AM", "q", cwQ(OWN_AM))}</Td>
                     <Td mono color={C.blue}>{ctier(OWN_AM, "incl AM", "q", "Contracted", cwQ(OWN_AM, "Contracted"))}</Td>
                     <Td mono color={C.grn}>{ctier(OWN_AM, "incl AM", "q", "Billed", cwQ(OWN_AM, "Billed"))}</Td>
-                    <Td mono color={C.coralDk}>{tnum(OWN_AM, "incl AM", "early", earlyPot(F.totalInclAM, false))}</Td><TdLate bold last={!hasLead}>{tnum(OWN_AM, "incl AM", "late", latePot(F.totalInclAM, false))}</TdLate><Td mono bold>{fmt(qCells(F.totalInclAM).pot)}</Td>
+                    <Td mono color={C.coralDk}>{tnum(OWN_AM, "incl AM", "early", earlyPot(F.totalInclAM, false))}</Td><TdLate bold last={!hasLead}>{tnum(OWN_AM, "incl AM", "late", latePot(F.totalInclAM, false))}</TdLate><Td mono bold>{tnum(OWN_AM, "incl AM", "potential", qCells(F.totalInclAM).pot, cwQ(OWN_AM))}</Td>
                     <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(F.totalInclAM).attainP, null)}</td>
                   </tr>
                   {hasLead && (() => {
@@ -2729,7 +2729,7 @@ export default function Dashboard() {
                         <Td mono color={C.blue}>{tnum(OWN_ALL, "everyone", "open", G.openPipe)}</Td><Td mono>{fmt(G.quota)}</Td><Td mono color={C.coralDk}>{tcw(OWN_ALL, "everyone", "q", cwQ(OWN_ALL))}</Td>
                     <Td mono color={C.blue}>{ctier(OWN_ALL, "everyone", "q", "Contracted", cwQ(OWN_ALL, "Contracted"))}</Td>
                     <Td mono color={C.grn}>{ctier(OWN_ALL, "everyone", "q", "Billed", cwQ(OWN_ALL, "Billed"))}</Td>
-                        <Td mono color={C.coralDk}>{tnum(OWN_ALL, "everyone", "early", earlyPot(G, false))}</Td><TdLate bold last>{tnum(OWN_ALL, "everyone", "late", latePot(G, false))}</TdLate><Td mono bold>{fmt(qCells(G).pot)}</Td>
+                        <Td mono color={C.coralDk}>{tnum(OWN_ALL, "everyone", "early", earlyPot(G, false))}</Td><TdLate bold last>{tnum(OWN_ALL, "everyone", "late", latePot(G, false))}</TdLate><Td mono bold>{tnum(OWN_ALL, "everyone", "potential", qCells(G).pot, cwQ(OWN_ALL))}</Td>
                         <td style={{ textAlign: "right", padding: "10px 16px" }}>{vsQuotaPill(qCells(G).attainP, null)}</td>
                       </tr>
                     );
@@ -2752,13 +2752,21 @@ export default function Dashboard() {
                 let spec: DrillSpec<NonNullable<typeof data.dealBreakdown>[number]> | null = null;
                 const yearly = fcastView === "yearly";
                 if (fDrill && data.dealBreakdown) {
-                  const stages = fDrill.bucket === "early" ? FB_EARLY : fDrill.bucket === "late" ? FB_LATE : null;
+                  // "potential" is a COMPOSITE cell: already-won ARR plus the weighted early and
+                  // late pipeline. The rows below can only be the open half — the won deals live in
+                  // a different feed and have their own column — so the note names the missing part
+                  // rather than letting the reader wonder why the rows come up short.
+                  const stages = fDrill.bucket === "early" ? FB_EARLY
+                    : fDrill.bucket === "late" ? FB_LATE
+                    : fDrill.bucket === "potential" ? [...FB_EARLY, ...FB_LATE] : null;
                   const rows = data.dealBreakdown
                     .filter((d) => fDrill.owners.includes(d.owner)
                       && (stages ? stages.includes(d.stage) : !FB_OPEN_EXCLUDE.includes(d.stage)))
                     .sort((a, b) => b.arr - a.arr);
                   const bucketChip = fDrill.bucket === "open" ? "open pipeline · excl. Billing"
-                    : fDrill.bucket === "early" ? "early · SQL + SAL" : "late · SQO + Trial";
+                    : fDrill.bucket === "early" ? "early · SQL + SAL"
+                    : fDrill.bucket === "potential" ? "potential · closed won + SQL/SAL/SQO/Trial"
+                    : "late · SQO + Trial";
                   // Why the rows may not add up to the number clicked — state it rather than let
                   // the reader discover a mismatch and stop trusting the panel. The panel hands us
                   // its own row total, so nothing is re-summed here.
@@ -2766,6 +2774,8 @@ export default function Dashboard() {
                     ? (total: number) => Math.abs(total - fDrill.cell) > Math.max(1000, fDrill.cell * 0.01)
                         ? `Heads up: the cell reads ${fmt(fDrill.cell)} from the Forecasting tab but these deals sum to ${fmt(total)} (Δ ${fmt(Math.abs(total - fDrill.cell))}). Both should be "open opps excluding stage Billing" — worth a look.`
                         : `Matches the cell (${fmt(fDrill.cell)}): open opps for ${fDrill.owners.length === 1 ? "this AE" : "these AEs"}, excluding stage Billing, same basis as the Forecasting tab formula.`
+                    : fDrill.bucket === "potential"
+                    ? (total: number) => `Potential ${fmt(fDrill.cell)} = already-won ${fmt(fDrill.cw ?? 0)} + the weighted value of the open deals below. Those deals are listed at their FULL unweighted ARR (${fmt(total)}), and the won ones are not listed here at all — they are in the Closed column. So this list will not add up to the cell, by design.`
                     : (total: number) => `This cell is probability-weighted — Σ(deal value × AE/AM %) = ${fmt(fDrill.cell)}. The deals below show their full unweighted ARR (${fmt(total)}), so they will total more.`;
                   spec = {
                     title: `forecast-${fDrill.label}-${fDrill.bucket}`,
