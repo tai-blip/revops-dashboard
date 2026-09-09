@@ -138,7 +138,7 @@ async function main() {
   // job stays green and the reason is printed instead of blowing up the run.
   const TEAM_ID = "11AuKNXZmRQtDzEony0ZA7BM5rLVxdUKskVuAzJZy0Us";
   try {
-  const REP_TABS = ["James Burdick", "Dorsa Mahmoudnia", "Osman Mubarak", "Jed Rutstein", "Jill Bucci", "Mathias Berthelemot", "David Dubinski"];
+  const REP_TABS = ["James Burdick", "Osman Mubarak", "Jill Bucci", "Mathias Berthelemot", "David Dubinski"];
   const STAGE_ORDER = ["Billing", "Trial", "SQO", "SQL", "SAL"];
   const stepRank = (s) => [STEP_CLOSE, STEP_LINK, STEP_CREATE, STEP_CHECK].indexOf(s);
   const oppLink = (id) => `=HYPERLINK("${instance}/lightning/r/Opportunity/${id}/view","${id}")`;

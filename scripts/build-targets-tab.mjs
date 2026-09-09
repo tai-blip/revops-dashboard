@@ -21,8 +21,6 @@ const NAVY = { red: 0.13, green: 0.19, blue: 0.32 };
 // and would have made the residual 100k too small had it been used.
 const AE_QUOTAS = [
   ["James Burdick", 255000, "Q3 quota — James Burdick"],
-  ["Dorsa Mahmoudnia", 250000, "Q3 quota — Dorsa Mahmoudnia"],
-  ["Jed Rutstein", 250000, "Q3 quota — Jed Rutstein"],
   ["Jill Bucci", 200000, "Q3 quota — Jill Bucci (quarterly figure, not the $520k H2 total)"],
   ["Mathias Berthelemot", 150000, "Q3 quota — Mathias Berthelemot"],
   ["David Dubinski", 830000, "Q3 quota — David Dubinski (frozen residual, see note above)"],

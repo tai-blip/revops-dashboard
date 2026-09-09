@@ -45,7 +45,7 @@ const isQ3 = (l) => { const m = /^([a-z]{3})-(\d{2})$/.exec(l.toLowerCase().trim
 const nb = d.pipelineWow.newArrMom;
 const q3idx = nb.months.map((m, i) => (isQ3(m) ? i : -1)).filter((i) => i >= 0);
 const pipeGen = (name) => q3idx.reduce((s, i) => s + ((nb.reps[name] || [])[i] || 0), 0);
-const PIPE_TARGET = { "James Burdick": 738000, "Dorsa Mahmoudnia": 750000, "Jed Rutstein": 960000, "Jill Bucci": 850000, "Mathias Berthelemot": 0, "David Dubinski": 0 };
+const PIPE_TARGET = { "James Burdick": 738000, "Jill Bucci": 850000, "Mathias Berthelemot": 0, "David Dubinski": 0 };
 
 // ---- per-rep scorecard rows (config-driven quotas via forecastTab) ----
 const rows = d.forecastTab.rows;

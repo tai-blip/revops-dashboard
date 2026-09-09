@@ -91,7 +91,7 @@ async function main() {
   // link; Summary keeps its Rep | Flagged Opps | <dated snapshot>... layout, with
   // today's column written as static numbers so history stays frozen. ──
   const TEAM_ID = "1wZ93z8rdYLWo6Js-Jd0Qh0tWsSJURmrTPHtnf-n34L0";
-  const AE_TABS = ["James Burdick", "Dorsa Mahmoudnia", "Jed Rutstein", "Jill Bucci", "David Dubinski", "Mathias Berthelemot"];
+  const AE_TABS = ["James Burdick", "Jill Bucci", "David Dubinski", "Mathias Berthelemot"];
   const oppLink = (id) => `=HYPERLINK("${instance}/lightning/r/Opportunity/${id}/view","${id}")`;
   const detailHeader = ["Id", "Name", "AccountId", "StageName", "CloseDate", "Probability", "AnnualContractValueARR__c (USD)", "Account.Name", "RecordType.Name", "Owner.Name", "Last_Forecasted_Date_Quarterly__c", "Days Since"];
   const detailRow = (r) => {

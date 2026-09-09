@@ -25,7 +25,6 @@ const TAB = "Forecast Potential";
 const AES = [
   ["James", "James Burdick"],
   ["Jill", "Jill Bucci"],
-  ["Jed", "Jed Rutstein"],
   ["Mathias", "Mathias Berthelemot"],
   ["Davi", "David Dubinski"],
 ];
