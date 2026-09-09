@@ -15,3 +15,6 @@ data-snapshots/
 
 # TypeScript incremental build cache — machine-specific, and it conflicted on every rebase.
 tsconfig.tsbuildinfo
+
+# throwaway analysis scripts written at the repo root during a session
+_*.mjs
