@@ -937,6 +937,9 @@ export default function Dashboard() {
     const below10 = reps.filter((r) => r.pctOfQuota < 0.1).length;
 
     // Pipeline totals + this-week read from the Headline tab (computed cells); Pipeline tab as fallback.
+    const pipeEarly = data.headlineSource?.pipe_early ?? null;
+    const pipeLate = data.headlineSource?.pipe_late ?? null;
+    const pipeOther = data.headlineSource?.pipe_other ?? null;
     const totalOpps =
       data.headlineSource?.total_opps ??
       data.pipeline.metricSections["1. TOTAL PIPELINE"]?.find((m) => m.metric === "Total Opportunities")?.value ?? 0;
@@ -992,6 +995,13 @@ export default function Dashboard() {
           {
             label: "Total pipeline",
             value: fmt(totalPipe),
+            // New Business + Expansion only, split by how each stage is sized: early (SQL/SAL)
+            // on Amount because ARR is not filled in yet, late (SQO/Trial) on real ARR, the rest
+            // (expansion leads, billing, negotiation) on the same stage rule. The three sum to
+            // the value above.
+            sub: pipeEarly != null && pipeLate != null && pipeOther != null
+              ? `early ${fmt(pipeEarly)} · late ${fmt(pipeLate)} · other ${fmt(pipeOther)}`
+              : `${totalOpps} opportunities`,
             extra: { label: "Coverage", value: S.coverage.toFixed(2) + "x", tone: S.coverage >= 3 ? ("good" as const) : ("warn" as const) },
           },
         ],
@@ -1012,7 +1022,15 @@ export default function Dashboard() {
         sentence: `Q3 pipeline generation stands at ${fmt(S.gen)} — ${S.genPct.toFixed(0)}% of the ${fmt(S.quota)} quota with ${S.elapsedPct.toFixed(0)}% of the quarter gone (${S.genStatus.label.toLowerCase()}). Open pipeline totals ${fmt(totalPipe)} across ${totalOpps} opportunities at ${S.coverage.toFixed(1)}x coverage.${wowPhrase}`,
         stats: [
           { label: "Created in Q3", value: fmt(S.gen), sub: `${S.genPct.toFixed(0)}% of ${fmt(S.quota)} quota`, tone: S.genStatus.tone },
-          { label: "Open pipeline", value: fmt(totalPipe), sub: `${totalOpps} opportunities` },
+          // Split three ways, not two. Early and late are sized differently — SQL/SAL carry no
+          // ARR yet so they use Amount, SQO/Trial use real ARR — but those four stages are only
+          // 4 of the 13 an open deal can sit in. Showing just early and late invited the obvious
+          // question of why they did not add up to the headline; the $4.5M of renewals, expansion
+          // leads and billing is the answer, so it is on the tile rather than left implicit.
+          { label: "Open pipeline", value: fmt(totalPipe),
+            sub: pipeEarly != null && pipeLate != null && pipeOther != null
+              ? `early ${fmt(pipeEarly)} · late ${fmt(pipeLate)} · other ${fmt(pipeOther)}`
+              : `${totalOpps} opportunities` },
           { label: "New Pipeline this week", value: fmt(arrThisWeek), sub: S.wowDelta != null ? `${S.wowDelta >= 0 ? "+" : "−"}${Math.abs(Math.round(S.wowDelta))}% WoW` : undefined, tone: (S.wowDelta ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
           { label: "Coverage", value: S.coverage.toFixed(2) + "x", sub: "open pipe vs Q3 quota", tone: S.coverage >= 3 ? ("good" as const) : ("warn" as const) },
         ],

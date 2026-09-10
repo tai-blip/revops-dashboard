@@ -66,6 +66,11 @@ const totalPipeF = mL("Total Pipeline (ARR)");
 const totalOppsF = mL("Total Opportunities");
 const coverageF = mL("Pipeline Coverage Ratio");
 const pipeCreatedQ3F = mL("Created This Quarter (ARR)");
+// Early / Late split of open pipeline (Tai, 2026-09-10). Read BY LABEL like every other
+// Pipeline metric, so inserting these two rows could not shift anything.
+const pipeEarlyF = mL("Early Pipeline (SQL + SAL)");
+const pipeLateF = mL("Late Pipeline (SQO + Trial)");
+const pipeOtherF = mL("Other stages (expansion leads, billing, negotiation…)");
 const pipeQuotaF = mL("Total Q3 Pipe Quota (All AEs)");
 const pipeCreatedWeekF = `INDEX('${PW}'!$A:$I,MATCH("New ARR pipeline Created ($)",'${PW}'!$A:$A,0),9)`;
 const pipeCreatedWeekPrevF = `INDEX('${PW}'!$A:$I,MATCH("New ARR pipeline Created ($)",'${PW}'!$A:$A,0),8)`;
@@ -172,6 +177,9 @@ async function main() {
     ["total_opps", `=${totalOppsF}`, "Exec: open opportunities (#)"],
     ["coverage", `=${coverageF}`, "Exec: coverage ratio (open ÷ Q3 quota)"],
     ["pipe_created_q3", `=${pipeCreatedQ3F}`, "Exec/Pipeline: created this quarter (ARR)"],
+    ["pipe_early", `=${pipeEarlyF}`, "Exec/Pipeline: open pipeline at SQL + SAL (sized on Amount)"],
+    ["pipe_late", `=${pipeLateF}`, "Exec/Pipeline: open pipeline at SQO + Trial (sized on ARR)"],
+    ["pipe_other", `=${pipeOtherF}`, "Exec/Pipeline: open pipeline outside SQL/SAL/SQO/Trial"],
     ["pipe_quota", `=${pipeQuotaF}`, "Exec/Pipeline: Q3 pipe quota (all AEs)"],
     ["gen_pct", `=${genPctF}`, "Exec: pipe gen % of quota (fraction)"],
     ["pipe_created_week", `=${pipeCreatedWeekF}`, "Exec: new pipeline this week (ARR)"],

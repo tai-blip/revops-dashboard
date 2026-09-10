@@ -108,6 +108,28 @@ async function writeTab(api, tab, header, rows, extraCols = null) {
   console.log(`wrote ${tab}: ${rows.length} data rows`);
 }
 
+// How much a deal is worth, by the stage it is in (Tai, 2026-09-10).
+//
+//   SQL · SAL · Expansion Lead · Value Identified   ->  Amount
+//   everything from SQO onward, and renewals        ->  AnnualContractValueARR__c
+//
+// Why the split: ARR is simply not filled in early. Across the open book it is set on 5 of 85
+// SQLs and 52 of 131 SALs, but on 14 of 14 Billing deals and 111 of 117 renewals. Sizing an SQL
+// on ARR would report most of early pipeline as zero; sizing a Billing deal on Amount reports a
+// three-year contract as if it all landed this year. Amount is the honest proxy while ARR is
+// unknown, and stops being the honest one the moment ARR exists.
+//
+// Late-stage deals with no ARR fall back to Amount rather than to zero — a deal at SQO with a
+// blank ARR field is a data gap, not a worthless deal, and zeroing it would quietly shrink the
+// forecast. The fallback is deliberate; the underlying blanks are worth chasing separately.
+const EARLY_STAGES = new Set(["SQL", "SAL", "Expansion Lead", "Value Identified"]);
+const pipelineValue = (x) => {
+  const amount = Number(x.Amount) || 0;
+  const arr = Number(x.AnnualContractValueARR__c) || 0;
+  if (EARLY_STAGES.has(String(x.StageName ?? ""))) return amount;
+  return arr > 0 ? arr : amount;
+};
+
 async function main() {
   const api = google.sheets({ version: "v4", auth: gAuth });
   const { token, instance } = await sfAuth();
@@ -119,19 +141,26 @@ async function main() {
   // byte identical to the old two-query output (0 set/value/order diffs), so every
   // downstream consumer (dashboard code; Forecasting/Forecast Potential; Pipeline,
   // Pipeline - WoW, AE Attainment formulas) is unaffected.
-  //   Query 1 (15 cols): Amount + AE_AM_Probability__c/_Year__c power the Forecast tab's
+  //   Query 1 (17 cols): Amount + AE_AM_Probability__c/_Year__c power the Forecast tab's
   //     stage-based Potential (SQL/SAL use Amount×%, SQO/Trial use ARR×%).
+  //     Cols P and Q added 2026-09-10. Until then Query 1 carried no true ARR at all: the
+  //     column named Annual_Contract_Value_ARR_Formula__c (col D) returns the SAME number as
+  //     Amount on every open deal — $20,063,828 vs $20,063,828 across the whole book — because
+  //     that formula never divides by term. So "late stages use ARR" was implemented against a
+  //     column that is really multi-year TCV, and both halves of the rule ended up on Amount.
+  //       P  AnnualContractValueARR__c  the genuine annual figure
+  //       Q  Pipeline_Value             Tai's rule, applied once here so every consumer agrees
   //   Open pipeline (18 cols): load-bearing column order — the funnel formulas key off
   //     I=SQL, J=SAL, K=SQO date columns by position. Money fields raw (no convertCurrency)
   //     to match the basis those tab formulas were built on.
   const openOpps = await sfQueryAll(instance, token,
     `SELECT Id, Name, StageName, Annual_Contract_Value_ARR_Formula__c, Expected_Revenue_Quarter_AE__c, CloseDate, CreatedDate, Date_Reached_SQL__c, ChannelofContact__c, Owner.Name, RecordType.Name, LastStageChangeDate, Amount, AE_AM_Probability__c, AE_AM_Probability_Year__c, Date_Reached_SAL__c, Date_Reached_SQO__c, AnnualContractValueARR__c, Date_Reached_Trial__c, Managed_Services_Tier__c, Chat_Agent_Tier__c FROM Opportunity WHERE IsClosed = false`);
   await writeTab(api, "Query 1",
-    ["Id","Name","StageName","Annual_Contract_Value_ARR_Formula__c","Expected_Revenue_Quarter_AE__c","CloseDate","CreatedDate","Date_Reached_SQL__c","ChannelofContact__c","Owner.Name","RecordType.Name","LastStageChangeDate","Amount","AE_AM_Probability__c","AE_AM_Probability_Year__c"],
-    openOpps.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.CreatedDate), val(x.Date_Reached_SQL__c), val(x.ChannelofContact__c), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.LastStageChangeDate), val(x.Amount), val(x.AE_AM_Probability__c), val(x.AE_AM_Probability_Year__c)]));
+    ["Id","Name","StageName","Annual_Contract_Value_ARR_Formula__c","Expected_Revenue_Quarter_AE__c","CloseDate","CreatedDate","Date_Reached_SQL__c","ChannelofContact__c","Owner.Name","RecordType.Name","LastStageChangeDate","Amount","AE_AM_Probability__c","AE_AM_Probability_Year__c","AnnualContractValueARR__c","Pipeline_Value"],
+    openOpps.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.CreatedDate), val(x.Date_Reached_SQL__c), val(x.ChannelofContact__c), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.LastStageChangeDate), val(x.Amount), val(x.AE_AM_Probability__c), val(x.AE_AM_Probability_Year__c), val(x.AnnualContractValueARR__c), pipelineValue(x)]));
   await writeTab(api, "Open pipeline - SOQL pull",
-    ["Id","Name","StageName","Annual_Contract_Value_ARR_Formula__c","Expected_Revenue_Quarter_AE__c","CloseDate","LastStageChangeDate","ChannelofContact__c","Date_Reached_SQL__c","Date_Reached_SAL__c","Date_Reached_SQO__c","Amount","Owner.Name","RecordType.Name","AnnualContractValueARR__c","Date_Reached_Trial__c","Managed_Services_Tier__c","Chat_Agent_Tier__c"],
-    openOpps.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.LastStageChangeDate), val(x.ChannelofContact__c), val(x.Date_Reached_SQL__c), val(x.Date_Reached_SAL__c), val(x.Date_Reached_SQO__c), val(x.Amount), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.AnnualContractValueARR__c), val(x.Date_Reached_Trial__c), val(x.Managed_Services_Tier__c), val(x.Chat_Agent_Tier__c)]));
+    ["Id","Name","StageName","Annual_Contract_Value_ARR_Formula__c","Expected_Revenue_Quarter_AE__c","CloseDate","LastStageChangeDate","ChannelofContact__c","Date_Reached_SQL__c","Date_Reached_SAL__c","Date_Reached_SQO__c","Amount","Owner.Name","RecordType.Name","AnnualContractValueARR__c","Date_Reached_Trial__c","Managed_Services_Tier__c","Chat_Agent_Tier__c","Pipeline_Value"],
+    openOpps.map((x) => [x.Id, x.Name, x.StageName, val(x.Annual_Contract_Value_ARR_Formula__c), val(x.Expected_Revenue_Quarter_AE__c), val(x.CloseDate), val(x.LastStageChangeDate), val(x.ChannelofContact__c), val(x.Date_Reached_SQL__c), val(x.Date_Reached_SAL__c), val(x.Date_Reached_SQO__c), val(x.Amount), x.Owner?.Name ?? "", x.RecordType?.Name ?? "", val(x.AnnualContractValueARR__c), val(x.Date_Reached_Trial__c), val(x.Managed_Services_Tier__c), val(x.Chat_Agent_Tier__c), pipelineValue(x)]));
 
   // ---- Query 2: closed opportunities, last 18 months ----
   const q2 = await sfQueryAll(instance, token,
