@@ -170,11 +170,12 @@ async function main() {
         "ARR_MoM_Rebuild!V1:W1",
         "ARR_MoM_Rebuild!A1:A400",            // month labels ("Aug 2026") — is the current one written yet?
         "'Open pipeline - SOQL pull'!A1:A1",   // banner carries the pull timestamp
+        "'Pipeline - WoW'!A6:I13",             // WoW block — the "New ARR pipeline Created ($)" row is pipe_wow_pct's denominator
       ],
       valueRenderOption: "UNFORMATTED_VALUE",
     })),
   ]);
-  const [headRows, targetRows, w1Rows, momMonthRows, bannerRows] = sheetRes.data.valueRanges.map((v) => v.values || []);
+  const [headRows, targetRows, w1Rows, momMonthRows, bannerRows, pipeWowRows] = sheetRes.data.valueRanges.map((v) => v.values || []);
   const H = parseKeyValue(headRows);
   const T = parseKeyValue(targetRows);
   const w1 = typeof w1Rows?.[0]?.[1] === "number" ? w1Rows[0][1] : null;
@@ -188,8 +189,22 @@ async function main() {
   // reads that as a broken formula and fails the nightly build every month-start.
   const sheetMonthLabel = monthName(y, m);
   const curMonthRowExists = (momMonthRows ?? []).some((r) => String(r?.[0] ?? "").trim() === sheetMonthLabel);
-  // Keys that are legitimately absent during that window, and only then.
-  const BLANK_OK = curMonthRowExists ? new Set() : new Set(["new_arr_mo", "churn_mo"]);
+  // Keys that are legitimately blank right now, each mapped to WHY. A blank here is expected
+  // and must not read as a vanished tile — the reason prints in the run so it stays reviewable.
+  const BLANK_OK = new Map();
+  if (!curMonthRowExists) {
+    const why = `ARR_MoM_Rebuild has no "${sheetMonthLabel}" row yet, so this reads blank rather than a false $0. Clears on the first refresh after 00:00 UTC.`;
+    BLANK_OK.set("new_arr_mo", why);
+    BLANK_OK.set("churn_mo", why);
+  }
+  // pipe_wow_pct = (this week − prior week) / prior week of "New ARR pipeline Created ($)".
+  // When prior-week creation is 0 the ratio is 0/0, the Sheet formula yields "" by design, and
+  // parseKeyValue drops the blank key. That is a flat pipeline-creation week, not a broken tile,
+  // so exempt it — detected from the row's own prior-week cell (col H), never blanket-exempted.
+  const pipeWowRow = (pipeWowRows ?? []).find((r) => String(r?.[0] ?? "").trim() === "New ARR pipeline Created ($)");
+  const pipeWowPrevWeek = typeof pipeWowRow?.[7] === "number" ? pipeWowRow[7] : 0; // col H = prior week (denominator)
+  if (!pipeWowPrevWeek) BLANK_OK.set("pipe_wow_pct",
+    "prior-week New ARR pipeline Created ($) is 0, so the WoW ratio is 0/0 and reads blank by design — a flat pipeline-creation week, not a broken tile.");
 
   console.log(`\nNumbers regression gate — ${iso(now)}`);
   console.log(`Source pull: ${banner || "(no timestamp banner)"}`);
@@ -218,14 +233,22 @@ async function main() {
   });
 
   // A2. Open opportunity COUNT — the cheapest possible proof the pipeline tab is fresh.
+  //     Scope MUST match the Pipeline tab: since #80 ("Size open pipeline by stage, and scope
+  //     it to New Business + Expansion") the tab's "Total Opportunities" / "Total Pipeline"
+  //     count New Business + Business Expansion open opps and EXCLUDE the Renewals record type.
+  //     A bare IsClosed=false count also sweeps in ~196 open renewal opps the dashboard never
+  //     shows (it read 705 vs the tile's 509) — a scope mismatch, not a stale pull. arrTrue /
+  //     arrFormulaField below inherit the same scope so A3 compares like with like.
   const openAgg = await soqlAgg(sf, `
     SELECT COUNT(Id) cnt,
            SUM(convertCurrency(AnnualContractValueARR__c)) arrTrue,
            SUM(Annual_Contract_Value_ARR_Formula__c) arrFormulaField
-    FROM Opportunity WHERE IsClosed = false`);
+    FROM Opportunity
+    WHERE IsClosed = false
+      AND RecordType.Name IN ('1.New Business','3.Business Expansion')`);
   cross("Open opportunity count", H.total_opps, openAgg.cnt, {
     tolAbs: 15, tolPct: 0.02, fmt: (n) => `${Math.round(n)}`,
-    fix: "'Open pipeline - SOQL pull' is stale or partially written (scripts/refresh-sf-imports.mjs).",
+    fix: "Pipeline 'Total Opportunities' = New Business + Expansion open opps, renewals excluded (#80). If it still drifts, 'Open pipeline - SOQL pull' is stale/partial (scripts/refresh-sf-imports.mjs).",
   });
 
   // A3. Open pipeline ARR. NOTE: the Pipeline tab sums col D of the open-pipeline pull,
@@ -424,8 +447,8 @@ async function main() {
         const goneAll = Object.keys(prev).filter((k) => !(k in cur));
         const expectedBlank = goneAll.filter((k) => BLANK_OK.has(k));
         const gone = goneAll.filter((k) => !BLANK_OK.has(k));
-        if (expectedBlank.length) add("INFO", `Baseline: ${group} keys blank at the month boundary`,
-          `${expectedBlank.join(", ")} — ARR_MoM_Rebuild has no "${sheetMonthLabel}" row yet, so these read blank rather than a false $0. Clears on the first refresh after 00:00 UTC.`);
+        for (const k of expectedBlank) add("INFO", `Baseline: ${group} key blank (expected)`,
+          `${k} — ${BLANK_OK.get(k)}`);
         const fresh = Object.keys(cur).filter((k) => !(k in prev));
         if (gone.length) add("FAIL", `Baseline: ${group} keys vanished`, gone.join(", "),
           "A tile reading a removed key renders blank — restore it or update the dashboard.");
