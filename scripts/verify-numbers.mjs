@@ -232,38 +232,50 @@ async function main() {
     fix: "Headline live_arr should be =ARR_MoM_Rebuild!$W$1 (scripts/build-headline-tab.mjs).",
   });
 
+  // Scope shared by the open-pipeline checks. Since #80 ("Size open pipeline by stage, scope
+  // to New Business + Expansion") the Pipeline tab counts/sums New Business + Business
+  // Expansion open opps and EXCLUDES the Renewals record type. Every recompute below applies
+  // the same filter, or it is comparing against a book the dashboard never shows.
+  const NBEXP = "RecordType.Name IN ('1.New Business','3.Business Expansion')";
+
   // A2. Open opportunity COUNT — the cheapest possible proof the pipeline tab is fresh.
-  //     Scope MUST match the Pipeline tab: since #80 ("Size open pipeline by stage, and scope
-  //     it to New Business + Expansion") the tab's "Total Opportunities" / "Total Pipeline"
-  //     count New Business + Business Expansion open opps and EXCLUDE the Renewals record type.
-  //     A bare IsClosed=false count also sweeps in ~196 open renewal opps the dashboard never
-  //     shows (it read 705 vs the tile's 509) — a scope mismatch, not a stale pull. arrTrue /
-  //     arrFormulaField below inherit the same scope so A3 compares like with like.
-  const openAgg = await soqlAgg(sf, `
-    SELECT COUNT(Id) cnt,
-           SUM(convertCurrency(AnnualContractValueARR__c)) arrTrue,
-           SUM(Annual_Contract_Value_ARR_Formula__c) arrFormulaField
-    FROM Opportunity
-    WHERE IsClosed = false
-      AND RecordType.Name IN ('1.New Business','3.Business Expansion')`);
-  cross("Open opportunity count", H.total_opps, openAgg.cnt, {
+  //     A bare IsClosed=false count sweeps in ~196 open renewal opps the tile omits (it read
+  //     705 vs the tile's 509) — a scope mismatch, not a stale pull.
+  const openCount = await soqlAgg(sf, `
+    SELECT COUNT(Id) cnt FROM Opportunity WHERE IsClosed = false AND ${NBEXP}`);
+  cross("Open opportunity count", H.total_opps, openCount.cnt, {
     tolAbs: 15, tolPct: 0.02, fmt: (n) => `${Math.round(n)}`,
     fix: "Pipeline 'Total Opportunities' = New Business + Expansion open opps, renewals excluded (#80). If it still drifts, 'Open pipeline - SOQL pull' is stale/partial (scripts/refresh-sf-imports.mjs).",
   });
 
-  // A3. Open pipeline ARR. NOTE: the Pipeline tab sums col D of the open-pipeline pull,
-  //     which is Annual_Contract_Value_ARR_Formula__c — empirically identical to Amount
-  //     (multi-year TCV), NOT the annual value in AnnualContractValueARR__c. Both are
-  //     reported so the failure is self-explaining rather than just "number wrong".
-  cross("Open pipeline ARR", H.total_pipeline, openAgg.arrTrue, {
-    tolPct: 0.01,
-    fix: "Pipeline!B5 sums col D (Annual_Contract_Value_ARR_Formula__c = TCV). For ARR it must sum col O (AnnualContractValueARR__c).",
+  // A3. Open pipeline value — verify the STAGE RULE the dashboard actually applies (#80), not
+  //     a flat column. pipelineValue() in scripts/refresh-sf-imports.mjs sizes each open deal:
+  //       early stages (SQL/SAL/Expansion Lead/Value Identified) → Amount   (ARR isn't filled
+  //         in yet, so ARR would read them as ~$0),
+  //       SQO onward                                             → AnnualContractValueARR__c,
+  //         falling back to Amount when ARR is blank,
+  //     summed over New Business + Expansion. Rebuild it from three aggregates so this check
+  //     shares no code with the pull's Pipeline_Value column it is grading.
+  const EARLY_SOQL = "('SQL','SAL','Expansion Lead','Value Identified')";
+  const [plEarly, plLateArr, plLateFallback] = await Promise.all([
+    soqlAgg(sf, `SELECT SUM(Amount) v FROM Opportunity WHERE IsClosed=false AND ${NBEXP} AND StageName IN ${EARLY_SOQL}`),
+    soqlAgg(sf, `SELECT SUM(AnnualContractValueARR__c) v FROM Opportunity WHERE IsClosed=false AND ${NBEXP} AND StageName NOT IN ${EARLY_SOQL} AND AnnualContractValueARR__c > 0`),
+    soqlAgg(sf, `SELECT SUM(Amount) v FROM Opportunity WHERE IsClosed=false AND ${NBEXP} AND StageName NOT IN ${EARLY_SOQL} AND (AnnualContractValueARR__c = null OR AnnualContractValueARR__c <= 0)`),
+  ]);
+  const pipeStageRuleUsd = (Number(plEarly.v) || 0) + (Number(plLateArr.v) || 0) + (Number(plLateFallback.v) || 0);
+  // Tolerance is wide enough (2%) to absorb the currency basis below plus intraday snapshot
+  // drift, but a real regression (rule broken → pure ARR ~$6.6M, or renewals re-included) is
+  // an order of magnitude off and still caught.
+  cross("Open pipeline value (stage rule, NB+Exp)", H.total_pipeline, pipeStageRuleUsd, {
+    tolPct: 0.02,
+    fix: "Pipeline!B5 sums 'Open pipeline - SOQL pull' col S (Pipeline_Value) over NB+Exp; the rule is pipelineValue() in scripts/refresh-sf-imports.mjs. A miss here means that rule, its scope, or the pull changed.",
   });
-  if (H.total_pipeline != null && openAgg.arrFormulaField != null) {
-    const nearTcv = Math.abs(H.total_pipeline - openAgg.arrFormulaField) <= Math.abs(openAgg.arrFormulaField) * 0.05;
-    add("INFO", "Open pipeline basis",
-      `TCV basis ${usd(openAgg.arrFormulaField)} · true-ARR basis ${usd(openAgg.arrTrue)} · tile shows ${usd(H.total_pipeline)}` +
-      (nearTcv ? " → tile is on the TCV basis" : ""));
+  // The tile sums RAW row-level values; SF aggregates auto-convert to USD (the multi-currency
+  // gotcha). The residual is currency mixing, not a rule error — surfaced here, not hidden.
+  if (H.total_pipeline != null && pipeStageRuleUsd) {
+    const gap = H.total_pipeline - pipeStageRuleUsd;
+    add("INFO", "Open pipeline currency basis",
+      `tile ${usd(H.total_pipeline)} is raw multi-currency; USD-converted stage rule ${usd(pipeStageRuleUsd)} · gap ${usd(gap)} (${pct(gap / pipeStageRuleUsd)}) is the currency mix, not a basis error.`);
   }
 
   // A4. New ARR, current month = New Business + Expansion going live in (1st, 1st-of-next].
