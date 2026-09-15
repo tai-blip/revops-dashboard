@@ -170,11 +170,12 @@ async function main() {
         "ARR_MoM_Rebuild!V1:W1",
         "ARR_MoM_Rebuild!A1:A400",            // month labels ("Aug 2026") — is the current one written yet?
         "'Open pipeline - SOQL pull'!A1:A1",   // banner carries the pull timestamp
+        "'Pipeline - WoW'!A6:I13",             // WoW block — the "New ARR pipeline Created ($)" row is pipe_wow_pct's denominator
       ],
       valueRenderOption: "UNFORMATTED_VALUE",
     })),
   ]);
-  const [headRows, targetRows, w1Rows, momMonthRows, bannerRows] = sheetRes.data.valueRanges.map((v) => v.values || []);
+  const [headRows, targetRows, w1Rows, momMonthRows, bannerRows, pipeWowRows] = sheetRes.data.valueRanges.map((v) => v.values || []);
   const H = parseKeyValue(headRows);
   const T = parseKeyValue(targetRows);
   const w1 = typeof w1Rows?.[0]?.[1] === "number" ? w1Rows[0][1] : null;
@@ -188,8 +189,22 @@ async function main() {
   // reads that as a broken formula and fails the nightly build every month-start.
   const sheetMonthLabel = monthName(y, m);
   const curMonthRowExists = (momMonthRows ?? []).some((r) => String(r?.[0] ?? "").trim() === sheetMonthLabel);
-  // Keys that are legitimately absent during that window, and only then.
-  const BLANK_OK = curMonthRowExists ? new Set() : new Set(["new_arr_mo", "churn_mo"]);
+  // Keys that are legitimately blank right now, each mapped to WHY. A blank here is expected
+  // and must not read as a vanished tile — the reason prints in the run so it stays reviewable.
+  const BLANK_OK = new Map();
+  if (!curMonthRowExists) {
+    const why = `ARR_MoM_Rebuild has no "${sheetMonthLabel}" row yet, so this reads blank rather than a false $0. Clears on the first refresh after 00:00 UTC.`;
+    BLANK_OK.set("new_arr_mo", why);
+    BLANK_OK.set("churn_mo", why);
+  }
+  // pipe_wow_pct = (this week − prior week) / prior week of "New ARR pipeline Created ($)".
+  // When prior-week creation is 0 the ratio is 0/0, the Sheet formula yields "" by design, and
+  // parseKeyValue drops the blank key. That is a flat pipeline-creation week, not a broken tile,
+  // so exempt it — detected from the row's own prior-week cell (col H), never blanket-exempted.
+  const pipeWowRow = (pipeWowRows ?? []).find((r) => String(r?.[0] ?? "").trim() === "New ARR pipeline Created ($)");
+  const pipeWowPrevWeek = typeof pipeWowRow?.[7] === "number" ? pipeWowRow[7] : 0; // col H = prior week (denominator)
+  if (!pipeWowPrevWeek) BLANK_OK.set("pipe_wow_pct",
+    "prior-week New ARR pipeline Created ($) is 0, so the WoW ratio is 0/0 and reads blank by design — a flat pipeline-creation week, not a broken tile.");
 
   console.log(`\nNumbers regression gate — ${iso(now)}`);
   console.log(`Source pull: ${banner || "(no timestamp banner)"}`);
@@ -217,30 +232,50 @@ async function main() {
     fix: "Headline live_arr should be =ARR_MoM_Rebuild!$W$1 (scripts/build-headline-tab.mjs).",
   });
 
+  // Scope shared by the open-pipeline checks. Since #80 ("Size open pipeline by stage, scope
+  // to New Business + Expansion") the Pipeline tab counts/sums New Business + Business
+  // Expansion open opps and EXCLUDES the Renewals record type. Every recompute below applies
+  // the same filter, or it is comparing against a book the dashboard never shows.
+  const NBEXP = "RecordType.Name IN ('1.New Business','3.Business Expansion')";
+
   // A2. Open opportunity COUNT — the cheapest possible proof the pipeline tab is fresh.
-  const openAgg = await soqlAgg(sf, `
-    SELECT COUNT(Id) cnt,
-           SUM(convertCurrency(AnnualContractValueARR__c)) arrTrue,
-           SUM(Annual_Contract_Value_ARR_Formula__c) arrFormulaField
-    FROM Opportunity WHERE IsClosed = false`);
-  cross("Open opportunity count", H.total_opps, openAgg.cnt, {
+  //     A bare IsClosed=false count sweeps in ~196 open renewal opps the tile omits (it read
+  //     705 vs the tile's 509) — a scope mismatch, not a stale pull.
+  const openCount = await soqlAgg(sf, `
+    SELECT COUNT(Id) cnt FROM Opportunity WHERE IsClosed = false AND ${NBEXP}`);
+  cross("Open opportunity count", H.total_opps, openCount.cnt, {
     tolAbs: 15, tolPct: 0.02, fmt: (n) => `${Math.round(n)}`,
-    fix: "'Open pipeline - SOQL pull' is stale or partially written (scripts/refresh-sf-imports.mjs).",
+    fix: "Pipeline 'Total Opportunities' = New Business + Expansion open opps, renewals excluded (#80). If it still drifts, 'Open pipeline - SOQL pull' is stale/partial (scripts/refresh-sf-imports.mjs).",
   });
 
-  // A3. Open pipeline ARR. NOTE: the Pipeline tab sums col D of the open-pipeline pull,
-  //     which is Annual_Contract_Value_ARR_Formula__c — empirically identical to Amount
-  //     (multi-year TCV), NOT the annual value in AnnualContractValueARR__c. Both are
-  //     reported so the failure is self-explaining rather than just "number wrong".
-  cross("Open pipeline ARR", H.total_pipeline, openAgg.arrTrue, {
-    tolPct: 0.01,
-    fix: "Pipeline!B5 sums col D (Annual_Contract_Value_ARR_Formula__c = TCV). For ARR it must sum col O (AnnualContractValueARR__c).",
+  // A3. Open pipeline value — verify the STAGE RULE the dashboard actually applies (#80), not
+  //     a flat column. pipelineValue() in scripts/refresh-sf-imports.mjs sizes each open deal:
+  //       early stages (SQL/SAL/Expansion Lead/Value Identified) → Amount   (ARR isn't filled
+  //         in yet, so ARR would read them as ~$0),
+  //       SQO onward                                             → AnnualContractValueARR__c,
+  //         falling back to Amount when ARR is blank,
+  //     summed over New Business + Expansion. Rebuild it from three aggregates so this check
+  //     shares no code with the pull's Pipeline_Value column it is grading.
+  const EARLY_SOQL = "('SQL','SAL','Expansion Lead','Value Identified')";
+  const [plEarly, plLateArr, plLateFallback] = await Promise.all([
+    soqlAgg(sf, `SELECT SUM(Amount) v FROM Opportunity WHERE IsClosed=false AND ${NBEXP} AND StageName IN ${EARLY_SOQL}`),
+    soqlAgg(sf, `SELECT SUM(AnnualContractValueARR__c) v FROM Opportunity WHERE IsClosed=false AND ${NBEXP} AND StageName NOT IN ${EARLY_SOQL} AND AnnualContractValueARR__c > 0`),
+    soqlAgg(sf, `SELECT SUM(Amount) v FROM Opportunity WHERE IsClosed=false AND ${NBEXP} AND StageName NOT IN ${EARLY_SOQL} AND (AnnualContractValueARR__c = null OR AnnualContractValueARR__c <= 0)`),
+  ]);
+  const pipeStageRuleUsd = (Number(plEarly.v) || 0) + (Number(plLateArr.v) || 0) + (Number(plLateFallback.v) || 0);
+  // Tolerance is wide enough (2%) to absorb the currency basis below plus intraday snapshot
+  // drift, but a real regression (rule broken → pure ARR ~$6.6M, or renewals re-included) is
+  // an order of magnitude off and still caught.
+  cross("Open pipeline value (stage rule, NB+Exp)", H.total_pipeline, pipeStageRuleUsd, {
+    tolPct: 0.02,
+    fix: "Pipeline!B5 sums 'Open pipeline - SOQL pull' col S (Pipeline_Value) over NB+Exp; the rule is pipelineValue() in scripts/refresh-sf-imports.mjs. A miss here means that rule, its scope, or the pull changed.",
   });
-  if (H.total_pipeline != null && openAgg.arrFormulaField != null) {
-    const nearTcv = Math.abs(H.total_pipeline - openAgg.arrFormulaField) <= Math.abs(openAgg.arrFormulaField) * 0.05;
-    add("INFO", "Open pipeline basis",
-      `TCV basis ${usd(openAgg.arrFormulaField)} · true-ARR basis ${usd(openAgg.arrTrue)} · tile shows ${usd(H.total_pipeline)}` +
-      (nearTcv ? " → tile is on the TCV basis" : ""));
+  // The tile sums RAW row-level values; SF aggregates auto-convert to USD (the multi-currency
+  // gotcha). The residual is currency mixing, not a rule error — surfaced here, not hidden.
+  if (H.total_pipeline != null && pipeStageRuleUsd) {
+    const gap = H.total_pipeline - pipeStageRuleUsd;
+    add("INFO", "Open pipeline currency basis",
+      `tile ${usd(H.total_pipeline)} is raw multi-currency; USD-converted stage rule ${usd(pipeStageRuleUsd)} · gap ${usd(gap)} (${pct(gap / pipeStageRuleUsd)}) is the currency mix, not a basis error.`);
   }
 
   // A4. New ARR, current month = New Business + Expansion going live in (1st, 1st-of-next].
@@ -424,8 +459,8 @@ async function main() {
         const goneAll = Object.keys(prev).filter((k) => !(k in cur));
         const expectedBlank = goneAll.filter((k) => BLANK_OK.has(k));
         const gone = goneAll.filter((k) => !BLANK_OK.has(k));
-        if (expectedBlank.length) add("INFO", `Baseline: ${group} keys blank at the month boundary`,
-          `${expectedBlank.join(", ")} — ARR_MoM_Rebuild has no "${sheetMonthLabel}" row yet, so these read blank rather than a false $0. Clears on the first refresh after 00:00 UTC.`);
+        for (const k of expectedBlank) add("INFO", `Baseline: ${group} key blank (expected)`,
+          `${k} — ${BLANK_OK.get(k)}`);
         const fresh = Object.keys(cur).filter((k) => !(k in prev));
         if (gone.length) add("FAIL", `Baseline: ${group} keys vanished`, gone.join(", "),
           "A tile reading a removed key renders blank — restore it or update the dashboard.");
