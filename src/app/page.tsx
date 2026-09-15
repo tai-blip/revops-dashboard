@@ -50,7 +50,7 @@ type DashboardData = {
   topBooked?: { opp: string; account: string; owner: string; arr: number; status: string; liveDate: string }[];
   signedLive?: { byOwner: Record<string, { owner: string; signed: number; live: number; signedNotLive: number }>; total: { owner: string; signed: number; live: number; signedNotLive: number } };
   cashForecast?: { events: { owner: string; name: string; ym: string; arr: number; kind: "rr" | "std" }[]; owners: string[]; total: number; rrTotal: number; stdTotal: number };
-  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; contractedRR: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; liveArr: number; bookedPilot: number; ids?: Record<string, number[] | undefined> }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
+  arrFunnel?: { stock: { ym: string; label: string; booked: number; contracted: number; contractedRenewal: number; contractedNewExp: number; contractedExpansion: number; contractedNetNew: number; contractedRR: number; live: number; churn: number; bToC: number; cToL: number; bToLost: number; bNew: number; bToLive: number; bDrop: number; cNewSigned: number; cLeak: number; lNewDirect: number; lChurn: number; liveArr: number; bookedPilot: number; ids?: Record<string, number[] | undefined> }[]; dealIndex: { account: string; opp: string; owner: string; am: string; type: string; rr: boolean; arr: number; stage: string; trial: string; liveDate: string; livePay: string; end: string; lost: string }[] };
   predictedCashflow?: { months: { ym: string; label: string; contracted: number; live: number }[]; baseline: { contracted: number; live: number }; booked: number; deals: { tier: "contracted" | "live"; opp: string; account: string; owner: string; arr: number; arriveYm: string; arriveDate: string; basis: string }[] };
   bookedTotal?: number; // full standing Booked pilot book total (from Booked ARR Snapshot v2 tab)
   pipelineGen?: { byOwner: Record<string, { arr: number; count: number }>; total: number; totalCount: number };
@@ -3221,8 +3221,10 @@ export default function Dashboard() {
                       hint: "Awaiting Billing — signed and contract-live, but payment has not started yet" },
                     { bucket: "contractedRenewal", label: "Contracted Renewal", color: C.t2, get: (p) => p.contractedRenewal,
                       parent: "contracted", hint: "The renewal share of Contracted" },
-                    { bucket: "contractedNewExp", label: "Contracted Expansion", color: C.t2, get: (p) => p.contractedNewExp,
-                      parent: "contracted", hint: "The rest of Contracted — new business and expansion, i.e. everything that is not a renewal" },
+                    { bucket: "contractedNetNew", label: "Contracted Net New", color: C.t2, get: (p) => p.contractedNetNew,
+                      parent: "contracted", hint: "New Business share of Contracted — first-time contracts, signed and contract-live but not yet billing" },
+                    { bucket: "contractedExpansion", label: "Contracted Expansion", color: C.t2, get: (p) => p.contractedExpansion,
+                      parent: "contracted", hint: "Business Expansion share of Contracted — upsell/add-on on an existing account, signed but not yet billing" },
                     { bucket: "contractedRR", label: "Contracted — Rip & Replace", color: C.ylw, get: (p) => p.contractedRR,
                       parent: "contracted", cross: true,
                       hint: "A cross-cut, not a third slice: these deals are ALREADY counted in Renewal or Expansion above. Broken out because a rip & replace changeover is the usual reason a deal is contracted but not yet billing." },
