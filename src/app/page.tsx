@@ -25,6 +25,7 @@ import {
   currentSalesQ,
   monthsInQuarter,
   FORECAST_EXCLUDE,
+  AE_ROSTER,
 } from "@/lib/planConfig";
 import type { ArrPoint } from "@/lib/parse";
 import { AE_PLAN } from "@/lib/aePlan";
@@ -631,8 +632,13 @@ export default function Dashboard() {
     const months = data.arr.monthly;
     const latest = months[months.length - 1];
 
-    const teamQuota = data.aeAttainment.reps.reduce((s, r) => s + r.quota, 0);
-    const teamActual = data.aeAttainment.reps.reduce((s, r) => s + r.actual, 0);
+    // Team totals exclude AMs and Enterprise leads (Mathias = AM, Davi = lead): they carry a
+    // separate/no quota and are not part of the AE-team attainment denominator. Without this the
+    // "team target" summed everyone and didn't tie to the AE rows shown.
+    const teamExclude = new Set(AE_ROSTER.filter((a) => a.am || a.lead).map((a) => a.name));
+    const teamReps = data.aeAttainment.reps.filter((r) => !teamExclude.has(r.name));
+    const teamQuota = teamReps.reduce((s, r) => s + r.quota, 0);
+    const teamActual = teamReps.reduce((s, r) => s + r.actual, 0);
     const teamPctOfQuota = teamQuota > 0 ? teamActual / teamQuota : 0;
 
     const totalPipelineARR =
@@ -931,8 +937,11 @@ export default function Dashboard() {
     const reps = [...data.aeAttainment.reps].sort((a, b) => b.pctOfQuota - a.pctOfQuota);
     const top = reps[0];
     const bottom = reps[reps.length - 1];
-    const teamQuota = data.aeAttainment.reps.reduce((s, r) => s + r.quota, 0);
-    const teamActual = data.aeAttainment.reps.reduce((s, r) => s + r.actual, 0);
+    // Exclude AMs + Enterprise leads (Mathias, Davi) from the team target — see note above.
+    const teamExclude = new Set(AE_ROSTER.filter((a) => a.am || a.lead).map((a) => a.name));
+    const teamReps = data.aeAttainment.reps.filter((r) => !teamExclude.has(r.name));
+    const teamQuota = teamReps.reduce((s, r) => s + r.quota, 0);
+    const teamActual = teamReps.reduce((s, r) => s + r.actual, 0);
     const teamPct = teamQuota > 0 ? (teamActual / teamQuota) * 100 : 0;
     const below10 = reps.filter((r) => r.pctOfQuota < 0.1).length;
 
@@ -2700,7 +2709,7 @@ export default function Dashboard() {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
-                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed</Th><Th>· Contracted</Th><Th>· Billed</Th><Th>Pot. Early (SQL+SAL)</Th><ThLate>Pot. Late (SQO+Trial)</ThLate><Th>Potential</Th><Th>vs Quota</Th>
+                    <Th l>AE</Th><Th>Open Pipeline</Th><Th>Quota</Th><Th>Closed Won (Contracted + Billed)</Th><Th>· Contracted</Th><Th>· Billed</Th><Th>Pot. Early (SQL+SAL)</Th><ThLate>Pot. Late (SQO+Trial)</ThLate><Th>Potential</Th><Th>vs Quota</Th>
                   </tr>
                 </thead>
                 <tbody>
