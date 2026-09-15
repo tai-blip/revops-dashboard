@@ -19,6 +19,8 @@ const EXCLUDE = new Set(["Sri Muniandy", "Jesse Brennan"]);
 // actual $1.16M. Every roster member must appear here, quota or not.
 const GOALS = {
   "James Burdick": 1000000,
+  "Dorsa Mahmoudnia": 883200, // returned to the annual view 2026-09-15 (FY26 ACV quota)
+  "Jed Rutstein": 750000,     // returned to the roster 2026-09-15
   "Jill Bucci": 520000,
   "Mathias Berthelemot": 600000,
   "David Dubinski": null, // lead — residual quota pending the department total
