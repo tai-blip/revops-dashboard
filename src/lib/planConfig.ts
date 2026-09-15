@@ -58,29 +58,23 @@ export function monthsInQuarter(q: string): number[] {
 // quotas are set independently (ramp/seasonality), so annual ≠ quotaQ3 × 4.
 export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; quotaAnnual: number | null; am: boolean; lead?: boolean }[] = [
   { name: "James Burdick", short: "James", quotaQ3: 255000, quotaAnnual: 1000000, am: false },
+  // Jed Rutstein returned to the team 2026-09-15 (his book was reassigned back to him). $250k Q3
+  // quota, also written to Targets as ae_quota_q3_jed_rutstein so the sheet and this list agree.
+  { name: "Jed Rutstein", short: "Jed", quotaQ3: 250000, quotaAnnual: 750000, am: false },
   // Jill ramped mid-year. $200k is her QUARTERLY number and $520k is the H2 total
   // (Tai, 2026-08-28) — the quarterly view had been using the H2 figure, overstating her
   // Q3 quota by $320k. The AE Attainment (Official) sheet had $200k correct all along.
   { name: "Jill Bucci", short: "Jill", quotaQ3: 200000, quotaAnnual: 520000, am: false },
   { name: "Mathias Berthelemot", short: "Mathias", quotaQ3: 150000, quotaAnnual: 600000, am: true },
-  // Davi carries the residual: the other reps' assigned quotas less what the team has already
-  // closed (Tai, 2026-08-28). Derived once and FROZEN — a quota recomputed live would fall every
-  // time a rep closed something, which would make his attainment move for reasons that are not
-  // his. Same figure applies to Q4 per the same rule; revisit at the quarter boundary.
-  //   other reps' Q3 quotas   1,105,000   (James 255k, Dorsa 250k, Jed 250k, Jill 200k, Mathias 150k)
-  //   less team Q3 closed won  −274,670   (New Business + Expansion, roster owners, as of 28 Aug)
-  //   = 830,330, rounded         830,000
-  // Dorsa and Jed left the team 2026-09-09. Their $250k each is NOT reallocated: Tai's call was
-  // to leave Davi at $830,000, because the figure was frozen precisely so it would not move for
-  // reasons outside his control, and losing two teammates is one of those. The team denominator
-  // simply drops from $1,935,000 to $1,435,000.
-  // Recomputed 2026-08-28 after Jill's Q3 quota was corrected from $520k to $200k.
-  // 2026-09-06: this list is now the FALLBACK only. The live source is the Targets tab
-  // (ae_quota_q3_* keys), which the "AE Attainment (Official)" quota cells look up. Keep the two
-  // in step — they drifted once already: Davi's quota was written here and never to the sheet,
-  // which failed the nightly audit every day from 1 Sep. Mathias is 150k (Tai, 2026-09-06); the
-  // attainment sheet had 250k, which was wrong.
-  { name: "David Dubinski", short: "Davi", quotaQ3: 830000, quotaAnnual: null, am: false, lead: true },
+  // David ("Davi") is an Enterprise lead, tracked separately and NOT in the AE-team attainment
+  // total (see the `lead` badge, and the am/lead exclusion in page.tsx). His Q3 quota was REMOVED
+  // 2026-09-15 (Tai) — he previously carried a frozen residual ($830k); that residual is retired,
+  // so he no longer contributes to the team quota denominator. quotaQ3 null → no team-quota effect;
+  // his own actuals still render on his card.
+  // NOTE: this list is the FALLBACK for the sheet. The live quota source is the Targets tab
+  // (ae_quota_q3_* keys) that the "AE Attainment (Official)" cells look up — keep the two in step.
+  // Davi's quota was also deleted from the Targets tab on 2026-09-15.
+  { name: "David Dubinski", short: "Davi", quotaQ3: null, quotaAnnual: null, am: false, lead: true },
 ];
 
 // AEs excluded from the FORECAST tab only (not AE Attainment). Empty since 2026-09-09:
