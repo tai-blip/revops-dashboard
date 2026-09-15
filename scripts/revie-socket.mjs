@@ -26,7 +26,6 @@
 // One-time: `claude` → /login in a terminal (CLI auth is separate from the desktop app).
 // Run: node --env-file=.env scripts/revie-socket.mjs
 import { spawn } from "child_process";
-import { applyPending, cancelPending, CONFIRM_WINDOW } from "./revie-write.mjs";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from "fs";
 import os from "os";
 import path from "path";
@@ -45,8 +44,16 @@ const LEDGER = path.join(LEDGER_DIR, "usage.jsonl");
 const QALOG = path.join(LEDGER_DIR, "qa.jsonl"); // every Q&A + explicit feedback, for the nightly review
 const CLI_TIMEOUT_MS = 240_000;
 const CLI_CHECK_MS = 30 * 60_000; // how often to confirm the CLI still starts
-// Who may request and confirm a data change. Defaults to Tai alone; widen via REVIE_WRITERS.
-const WRITERS = new Set([ADMIN, ...(process.env.REVIE_WRITERS || "").split(",").map((s) => s.trim()).filter(Boolean)]);
+// Stripped from the spawned CLI's environment — the model never needs one of these in scope.
+// CLAUDE_*/ANTHROPIC_* are exempt: those belong to the CLI itself, and blanket-stripping anything
+// matching /TOKEN/ would cut its own auth out from under it the day it authenticates that way.
+const SECRET_ENV = /TOKEN|SECRET|PASSWORD|WEBHOOK|PRIVATE|API_KEY|CLIENT_ID/i;
+const CLI_OWN_ENV = /^(CLAUDE|ANTHROPIC)/i;
+const isSecret = (k) => SECRET_ENV.test(k) && !CLI_OWN_ENV.test(k);
+// No writer allowlist here any more. Anyone may ASK; nothing they ask for reaches Salesforce
+// without an approver clicking Approve in Deal Desk, and Deal Desk enforces ownership against the
+// asker's email — a rep's email only reaches that rep's deals. Gatekeeping the same act twice, in
+// two codebases, with two lists to keep in sync, is how the two lists drift apart.
 
 // Revie's brief lives in a file, not in this code, so Tai can change how Revie behaves without
 // touching JavaScript: edit scripts/revie-prompt.md, save, ask again. It is re-read whenever it
@@ -62,7 +69,6 @@ function loadSystem() {
       const text = readFileSync(PROMPT_FILE, "utf-8")
         .replace(/<!--[\s\S]*?-->/g, "")     // notes for whoever edits the file, not for Revie
         .replace(/\{\{ADMIN\}\}/g, ADMIN)
-        .replace(/\{\{CONFIRM_WINDOW\}\}/g, CONFIRM_WINDOW)
         .trim();
       if (!text) throw new Error("the prompt file is empty");
       brief = { mtime: mtimeMs, text };
@@ -128,13 +134,46 @@ async function slackGet(method, params) {
 const post = (channel, text, thread_ts) => slack("chat.postMessage", { channel, text, ...(thread_ts ? { thread_ts } : {}), unfurl_links: false });
 const react = (channel, timestamp, name) => slack("reactions.add", { channel, timestamp, name }).catch(() => {});
 
+// Who is asking, resolved from the Slack user id the event carried. This reaches the CLI in its
+// ENVIRONMENT, never on the command line: the model composes that command out of untrusted Slack
+// text, so if it could name the requester, an injected instruction could file a change as another
+// rep. Cached — Slack rate-limits users.info and the answer rarely changes.
+const emailCache = new Map();
+async function emailFor(userId) {
+  if (emailCache.has(userId)) return emailCache.get(userId);
+  let email = "";
+  try {
+    const r = await slackGet("users.info", { user: userId });
+    if (r.ok) email = r.user?.profile?.email || "";
+    else console.error(`[revie] users.info failed for ${userId}: ${r.error}` +
+                       (r.error === "missing_scope" ? " — add users:read.email to the Slack app and reinstall" : ""));
+  } catch (e) {
+    console.error("[revie] users.info threw:", e.message || e);
+  }
+  emailCache.set(userId, email);
+  return email;
+}
+
+// A permalink to the message being answered, so the Deal Desk approver can read the ask itself
+// rather than Revie's summary of it.
+async function permalinkFor(channel, ts) {
+  try {
+    const r = await slackGet("chat.getPermalink", { channel, message_ts: ts });
+    return r.ok ? (r.permalink || "") : "";
+  } catch { return ""; }
+}
+
 // ── the guarded CLI call ──────────────────────────────────────────────────────
-function askClaude(question, threadContext, userId, canWrite) {
+function askClaude(question, threadContext, userId, canWrite, requester = {}) {
   const system = loadSystem();
   if (!system) return Promise.resolve({ text: "", cost: 0, isError: true,
     raw: "my brief (scripts/revie-prompt.md) is missing or empty — I won't answer without it." });
-  const who = `The person asking is <@${userId}> (Slack id ${userId}). They are ${WRITERS.has(userId) ? "" : "NOT "}an authorised writer.` +
-    (canWrite ? "" : " You have no write tool in this channel. Do not mention that unless they actually ask you to change something — an unrequested disclaimer is noise. If they do ask, say changes are only possible in #ask-revops or a DM with you, and answer any read-only part of their question normally.");
+  const canFile = canWrite && !!requester.email;
+  const who = `The person asking is <@${userId}> (Slack id ${userId}).` +
+    (requester.email
+      ? " Their Momos email is already known to your filing tool — you never need to ask for it, and you must never put an email on the command line."
+      : " Their email could not be resolved, so you cannot file a change for them; say so plainly if they ask for one.") +
+    (canWrite ? "" : " You cannot file changes in this channel. Do not mention that unless they actually ask you to change something — an unrequested disclaimer is noise. If they do ask, say changes can only be filed from #ask-revops or a DM with you, and answer any read-only part of their question normally.");
   const prompt = threadContext
     ? `${who}\n\nThread context (earlier messages, for reference):\n${threadContext}\n\nAnswer this question:\n${question}`
     : `${who}\n\nAnswer this question:\n${question}`;
@@ -146,13 +185,19 @@ function askClaude(question, threadContext, userId, canWrite) {
     "--setting-sources", "project",
     "--append-system-prompt", system,
     "--allowedTools", "Read", "Bash(node --env-file=.env scripts/revie-query.mjs*)",
-    ...(canWrite ? ["Bash(node --env-file=.env scripts/revie-write.mjs plan*)"] : []),
+    ...(canFile ? ["Bash(node --env-file=.env scripts/revie-file.mjs*)"] : []),
     "--disallowedTools", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "TodoWrite",
     "Bash(git*)", "Read(./.env)", "Read(.env*)", "Read(**/.env*)",
   ];
   if (process.env.REVIE_MODEL) args.push("--model", process.env.REVIE_MODEL);
   return new Promise((resolve) => {
-    const child = spawn("claude", args, { cwd: REPO, stdio: ["ignore", "pipe", "pipe"] });
+    // The model's process gets no credentials: both helper scripts re-read what they need with
+    // their own --env-file=.env, so nothing here needs a token in scope. The asker's identity goes
+    // in the same way — as environment, out of reach of any command the model composes.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !isSecret(k)));
+    env.REVIE_REQUESTER_EMAIL = requester.email || "";
+    env.REVIE_THREAD_URL = requester.permalink || "";
+    const child = spawn("claude", args, { cwd: REPO, env, stdio: ["ignore", "pipe", "pipe"] });
     let out = "", err = "", done = false;
     const killer = setTimeout(() => child.kill("SIGKILL"), CLI_TIMEOUT_MS);
     const finish = (r) => { if (done) return; done = true; clearTimeout(killer); resolve(r); };
@@ -194,38 +239,11 @@ async function threadContext(channel, ts) {
   }
 }
 
-// ── the write path ───────────────────────────────────────────────────────────
-// applyPending/cancelPending are imported functions, not shell commands — there is no
-// command line that reaches them. Execution happens here and only here, after an
-// authorised human replies "@Revie confirm <code>" in Slack.
-async function confirmWrite(ev, action, nonce, isDm, threadTs, canWrite) {
-  const reply = (t) => post(ev.channel, t, isDm ? undefined : threadTs);
-  if (!canWrite) {
-    await reply(`:no_entry: Changes can only be confirmed in <#C0BS48N4P4N> or a DM with me.`);
-    return;
-  }
-  if (!WRITERS.has(ev.user)) {
-    await reply(`:no_entry: Only authorised writers can ${action} a change — ask <@${ADMIN}>.`);
-    return;
-  }
-  await react(ev.channel, ev.ts, "hourglass_flowing_sand");
-  let j;
-  try {
-    j = action === "confirm" ? await applyPending(nonce, ev.user) : cancelPending(nonce, ev.user);
-  } catch (err) {
-    await reply(`:warning: ${err.message || err}`);
-    console.error(`[revie] ${action} ${nonce} by ${ev.user} FAILED: ${err.message || err}`);
-    return;
-  }
-  if (action === "cancel") {
-    await reply(`:wastebasket: Cancelled — *${j.name ?? nonce}* is unchanged.`);
-  } else {
-    const field = Object.keys(j.after ?? {})[0];
-    await reply(`:white_check_mark: Done — *${j.name}*: ${field} is now *${j.after?.[field]}* (was ${j.before?.[field] ?? "—"}).\n_Audited to .revie/writes.jsonl · confirmed by <@${ev.user}>._`);
-  }
-  await react(ev.channel, ev.ts, "white_check_mark");
-  console.log(`[revie] ${action} ${nonce} by ${ev.user} → ok`);
-}
+// ── changes ──────────────────────────────────────────────────────────────────
+// Revie no longer writes to Salesforce, and no longer holds the confirmation either. It files a
+// request with Deal Desk (scripts/revie-file.mjs) and stops there; Deal Desk pings an approver
+// with Approve / Reject buttons, and only that click writes anything. The old
+// `@Revie confirm <code>` flow went with it — two approval mechanisms for one act is one too many.
 
 // ── event handling (serialized — one answer at a time) ───────────────────────
 const seen = new Set();
@@ -255,11 +273,13 @@ function handleEvent(ev) {
     return;
   }
 
-  // "confirm A1B2C3" / "cancel A1B2C3" — handled by the runner, never by the CLI.
-  const conf = question.match(/^(confirm|cancel)\s+([0-9a-fA-F]{6})$/);
-  if (conf) {
-    queue = queue.then(() => confirmWrite(ev, conf[1].toLowerCase(), conf[2].toUpperCase(), isDm, threadTs, canWrite))
-                 .catch((e) => console.error("[revie] confirm error:", e));
+  // Anyone still typing the old confirmation is confirming into the void. Say where the decision
+  // actually happens now instead of letting the model answer it as though it were a question.
+  if (/^(confirm|cancel)\s+[0-9a-fA-F]{6}$/.test(question)) {
+    queue = queue.then(() => post(ev.channel,
+      ":information_source: I don't take confirmations any more — approvals live in Deal Desk now. " +
+      "The approver clicks *Approve* on its Slack ping, or decides at `/approvals`.",
+      isDm ? undefined : threadTs)).catch((e) => console.error("[revie] notice error:", e));
     return;
   }
 
@@ -272,7 +292,11 @@ function handleEvent(ev) {
     }
     await react(ev.channel, ev.ts, "eyes");
     const ctx = ev.thread_ts ? await threadContext(ev.channel, ev.thread_ts) : "";
-    const a = await askClaude(question, ctx, ev.user, canWrite);
+    // Resolved here, from the Slack event — so who is asking is never something the model asserts.
+    const requester = canWrite
+      ? { email: await emailFor(ev.user), permalink: await permalinkFor(ev.channel, ev.ts) }
+      : {};
+    const a = await askClaude(question, ctx, ev.user, canWrite, requester);
     if (a.cost) recordSpend(a.cost);
     if (a.isError || !a.text) {
       recordQA({ kind: "failure", user: ev.user, channel: ev.channel, thread: threadTs,
