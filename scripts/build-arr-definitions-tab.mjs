@@ -117,12 +117,12 @@ async function main() {
 
   // ③ the dashboard's monthly table, column for column
   rows.push(["③ MONTHLY — point-in-time ARR in each tier at month-end (same table the dashboard shows)"]);
-  rows.push(["Month", "Pilot", "$ P→Lost", "$ P→Con", "Contracted", "Contracted Renewal", "Contracted Expansion",
+  rows.push(["Month", "Pilot", "$ P→Lost", "$ P→Con", "Contracted", "Contracted Renewal", "Contracted Net New", "Contracted Expansion",
     "$ Con→Billed", "Billed", "Churn", "Live ARR", "Booked ARR", "MoM (Live ARR)"]);
   AF.stock.forEach((p, i) => {
     const prev = AF.stock[i - 1];
     rows.push([p.label, money(p.booked), money(p.bToLost), money(p.bToC), money(p.contracted),
-      money(p.contractedRenewal), money(p.contractedNewExp), money(p.cToL), money(p.live),
+      money(p.contractedRenewal), money(p.contractedNetNew ?? 0), money(p.contractedExpansion ?? 0), money(p.cToL), money(p.live),
       money(p.churn), money(p.liveArr), money(p.bookedPilot),
       prev ? money(p.liveArr - prev.liveArr) : ""]);
   });
