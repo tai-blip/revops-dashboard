@@ -231,6 +231,32 @@ const TABS = [
   ["productarr", "Product ARR"],
 ] as const;
 
+// Sai's "expected" ARR (2026-09-18): the forward-looking number so a big renewal
+// swing is never a surprise. Expected = today's Live ARR + open Potential + the
+// Contracted-Renewal book. Each piece is a sheet-owned figure read by key, summed
+// here for display only (same pattern as the Forecast tile): Live ARR = liveArrToday
+// (Headline tab); Potential = the Forecast Potential tab grand total (incl. AM +
+// Davi), Q = Early+Late this quarter, Y = Early+Late full-year; Renewal = the current
+// month's "Contracted Renewal" cell on the Booked ARR & Cashflow tab. The two totals
+// reconcile exactly with the Forecast tab's Q3/Yearly toggle by construction.
+function computeExpectedArr(data: DashboardData) {
+  const live = data.liveArrToday ?? data.forecastTab?.currentLiveARR ?? 0;
+  const T = data.forecastTab?.totalInclLead ?? data.forecastTab?.totalInclAM;
+  const potEarlyQ = T?.potEarlyQ ?? 0, potLateQ = T?.potLateQ ?? 0;
+  const potEarlyY = T?.potEarlyY ?? 0, potLateY = T?.potLateY ?? 0;
+  const potQ = potEarlyQ + potLateQ;
+  const potY = potEarlyY + potLateY;
+  const stock = data.arrFunnel?.stock;
+  const renew = stock && stock.length ? stock[stock.length - 1].contractedRenewal : 0;
+  return {
+    live, renew,
+    potEarlyQ, potLateQ, potQ,
+    potEarlyY, potLateY, potY,
+    q3End: live + potQ + renew,
+    yearEnd: live + potY + renew,
+  };
+}
+
 // Is a Pipeline-WoW MoM month label (e.g. "Jul-26") inside Q3 FY26 (Jul–Sep 2026)?
 const MONTH_ABBR = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 function isQ3Fy26(label: string): boolean {
@@ -986,10 +1012,19 @@ export default function Dashboard() {
 
     const gp = (n: number | null | undefined) => (n != null ? pct(n) : "—");
 
+    // Sai's forward view (2026-09-18): lead the Command tab with the EXPECTED year-end
+    // number so a coming renewal is never a surprise. Expected = Live ARR + full-year
+    // Potential + Contracted Renewal (see computeExpectedArr). Spot Live ARR is kept as
+    // its own chip and in the sub-line so the today-figure is never hidden.
+    const EA = computeExpectedArr(data);
+    const expGap10 = Math.max(0, 10000000 - EA.yearEnd);
+
     return {
       command: {
-        sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
+        sentence: `Expected year-end ARR is ${fmt(EA.yearEnd)} — Live ${fmt(EA.live)} today + ${fmt(EA.potY)} potential + ${fmt(EA.renew)} contracted renewals, ${fmt(expGap10)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
         stats: [
+          { label: "Expected year-end ARR", value: fmt(EA.yearEnd), tone: "good" as const,
+            sub: `Live ${fmt(EA.live)} + Potential ${fmt(EA.potY)} + Renewal ${fmt(EA.renew)} · forward view` },
           { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const, sub: "signed contracts — SFDC stages Billing + Closed Won (contract-live & not churned) · as of today" },
           { label: "New ARR (mo)", value: fmt(data.headlineSource?.new_arr_mo ?? S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
           { label: "Churned (mo)", value: fmt(data.headlineSource?.churn_mo ?? S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
@@ -1347,12 +1382,18 @@ export default function Dashboard() {
             {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
               const n = data.arrFunnel.stock[data.arrFunnel.stock.length - 1];
               const cnt = (b: string) => (n.ids?.[b] ?? []).length;
-              const tiles = [
+              const EA = computeExpectedArr(data);
+              type GlanceTile = { label: string; v: number; c: string; sub: string; deals?: number; note?: string; to?: string; hero?: boolean };
+              const tiles: GlanceTile[] = [
                 { label: "Pilot", v: n.booked, c: C.gold, sub: "in trial, unsigned", deals: cnt("booked") },
                 { label: "Contracted", v: n.contracted, c: C.blue, sub: "signed, billing not started", deals: cnt("contracted") },
                 { label: "Billed", v: n.live, c: C.grn, sub: "paying", deals: cnt("live") },
-                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed", deals: cnt("liveArr"), hero: true },
+                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed", deals: cnt("liveArr") },
                 { label: "Booking", v: n.bookedPilot, c: C.t1, sub: "Live ARR + Pilot", deals: cnt("bookedPilot") },
+                // Sai's forward view: Live ARR + full-year Potential + Contracted Renewal.
+                { label: "Expected year-end", v: EA.yearEnd, c: C.coralDk, hero: true, to: "forecast",
+                  sub: `Live ${fmt(EA.live)} + Potential ${fmt(EA.potY)} + Renewal ${fmt(EA.renew)}`,
+                  note: "forward · opens Forecast" },
               ];
               return (
                 <Card title="ARR at a glance" sub={`Point-in-time, as of ${n.label} · full detail on the Booked ARR & Cashflow tab`}>
@@ -1360,16 +1401,16 @@ export default function Dashboard() {
                     {tiles.map((t) => (
                       // Straight through to the tab that defines these, so "where does this come
                       // from" is one click rather than a hunt through the tab bar.
-                      <div key={t.label} onClick={() => setTab("cashflow")} role="link" tabIndex={0}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setTab("cashflow"); }}
-                        title="Open Booked ARR & Cashflow for the full breakdown"
+                      <div key={t.label} onClick={() => setTab((t.to ?? "cashflow") as typeof tab)} role="link" tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setTab((t.to ?? "cashflow") as typeof tab); }}
+                        title={t.to === "forecast" ? "Open Forecast for the full breakdown" : "Open Booked ARR & Cashflow for the full breakdown"}
                         style={{ border: `1.5px solid ${t.hero ? t.c : C.bd}`, borderRadius: 10,
                         padding: "12px 14px", background: t.hero ? C.s2 : "transparent", cursor: "pointer" }}>
                         <div style={{ fontSize: 11.5, fontWeight: 700, color: t.c }}>{t.label}</div>
                         <div style={{ fontSize: 21, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(t.v)}</div>
                         <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{t.sub}</div>
                         <div style={{ fontSize: 10.5, color: C.t3, fontFamily: "var(--font-dm-mono)", marginTop: 1 }}>
-                          {t.deals} deals <span style={{ color: t.c, fontWeight: 700 }}>→</span>
+                          {t.note ?? `${t.deals} deals`} <span style={{ color: t.c, fontWeight: 700 }}>→</span>
                         </div>
                       </div>
                     ))}
@@ -2615,7 +2656,12 @@ export default function Dashboard() {
         const projEarly = fcastView === "yearly" ? annYTot.early : T.potEarlyQ;
         const projLate = fcastView === "yearly" ? annYTot.late : T.potLateQ;
         const projPot = projEarly + projLate;
-        const projEnd = projBase + projPot;
+        // Contracted-Renewal book (current month "Contracted Renewal" cell on the Booked
+        // ARR & Cashflow tab). Added to Expected so a coming renewal is visible up front —
+        // Sai, 2026-09-18. Same figure in both the Q3 and Yearly views (it is a standing
+        // book, not quarter-scoped).
+        const projRenew = computeExpectedArr(data).renew;
+        const projEnd = projBase + projPot + projRenew;
         const projGap = F.annualTarget - projEnd;
         const projPeriod = fcastView === "yearly" ? "Year End" : `${Q.key} End`;
 
@@ -2633,7 +2679,7 @@ export default function Dashboard() {
               <div style={{ padding: "14px 18px" }}>
                 <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projEnd >= F.annualTarget ? C.grn : C.coralDk }}>{fmt(projEnd)}</div>
                 <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>
-                  Live ARR <b>{fmt(projBase)}</b> (Closed Won) &nbsp;+&nbsp; Potential <b>{fmt(projPot)}</b> (Early {fmt(projEarly)} and Late {fmt(projLate)})
+                  Live ARR <b>{fmt(projBase)}</b> (Closed Won) &nbsp;+&nbsp; Potential <b>{fmt(projPot)}</b> (Early {fmt(projEarly)} and Late {fmt(projLate)}) &nbsp;+&nbsp; Renewal <b>{fmt(projRenew)}</b> (contracted)
                 </div>
                 <div style={{ fontSize: 11, color: C.t3, marginTop: 3 }}>vs {fmt(F.annualTarget)} target</div>
               </div>
@@ -3129,13 +3175,14 @@ export default function Dashboard() {
             const steps: Step[] = [
               { label: "Live ARR today", type: "base", value: projBase },
               { label: "Potential (Early + Late)", type: "inc", value: projPot, of: `${pct(potVsQuota)} of quota` },
+              { label: "Contracted renewal", type: "inc", value: projRenew, of: "contracted" },
               { label: "Gap to target", type: "gap", value: Math.max(0, projGap), from: projEnd },
               { label: "FY26 target", type: "target", value: F.annualTarget },
             ];
             const n = steps.length;
             let running = 0;
             return (
-              <Card title="Year-end projection vs annual target" sub="End-of-Q2 live ARR plus Q3 Potential ARR (from the Quarter Forecast), versus the FY26 ending-ARR target." accent={C.navy}>
+              <Card title="Year-end projection vs annual target" sub="Today's Live ARR plus open Potential ARR (from the Quarter Forecast) plus the contracted-renewal book, versus the FY26 ending-ARR target." accent={C.navy}>
                 <div style={{ padding: "16px 20px" }}>
                   <div style={{ position: "relative", height: PLOT, borderBottom: `1px solid ${C.bd}` }}>
                     {steps.map((s, i) => {
@@ -3163,9 +3210,10 @@ export default function Dashboard() {
                     ))}
                   </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginTop: 18 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 14, marginTop: 18 }}>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Live ARR today</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(projBase)}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Potential</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.blue }}>{fk(projPot)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>Early {fk(projEarly)} + Late {fk(projLate)}</div></div>
+                    <div><div style={{ fontSize: 11, color: C.t3 }}>Renewal</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.t2 }}>{fk(projRenew)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>contracted</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Expected {projPeriod}</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk }}>{fk(projEnd)}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Annual Target</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(F.annualTarget)}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Gap</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projGap > 0 ? C.red : C.grn }}>{fk(projGap)}</div></div>
@@ -3173,7 +3221,7 @@ export default function Dashboard() {
 
                   <div style={{ background: "#FAEEDA", borderRadius: 12, padding: "14px 16px", marginTop: 16, fontSize: 13.5, color: "#6b5320", lineHeight: 1.55 }}>
                     {projGap > 0 ? (
-                      <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> (Live ARR {fk(projBase)} + {fk(projPot)} potential, Early {fk(projEarly)} and Late {fk(projLate)}) is <b style={{ color: C.coralDk }}>{fk(projGap)}</b> short of the <b>{fk(F.annualTarget)}</b> target.</>
+                      <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> (Live ARR {fk(projBase)} + {fk(projPot)} potential, Early {fk(projEarly)} and Late {fk(projLate)} + {fk(projRenew)} contracted renewal) is <b style={{ color: C.coralDk }}>{fk(projGap)}</b> short of the <b>{fk(F.annualTarget)}</b> target.</>
                     ) : (
                       <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> is on track to meet or exceed the <b>{fk(F.annualTarget)}</b> target.</>
                     )}
