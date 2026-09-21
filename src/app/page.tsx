@@ -1012,19 +1012,10 @@ export default function Dashboard() {
 
     const gp = (n: number | null | undefined) => (n != null ? pct(n) : "—");
 
-    // Sai's forward view (2026-09-18): lead the Command tab with the EXPECTED year-end
-    // number so a coming renewal is never a surprise. Expected = Live ARR + full-year
-    // Potential + Contracted Renewal (see computeExpectedArr). Spot Live ARR is kept as
-    // its own chip and in the sub-line so the today-figure is never hidden.
-    const EA = computeExpectedArr(data);
-    const expGap10 = Math.max(0, 10000000 - EA.yearEnd);
-
     return {
       command: {
-        sentence: `Expected year-end ARR is ${fmt(EA.yearEnd)} — Live ${fmt(EA.live)} today + ${fmt(EA.potY)} potential + ${fmt(EA.renew)} contracted renewals, ${fmt(expGap10)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
+        sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
         stats: [
-          { label: "Expected year-end ARR", value: fmt(EA.yearEnd), tone: "good" as const,
-            sub: `Live ${fmt(EA.live)} + Potential ${fmt(EA.potY)} + Renewal ${fmt(EA.renew)} · forward view` },
           { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const, sub: "signed contracts — SFDC stages Billing + Closed Won (contract-live & not churned) · as of today" },
           { label: "New ARR (mo)", value: fmt(data.headlineSource?.new_arr_mo ?? S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
           { label: "Churned (mo)", value: fmt(data.headlineSource?.churn_mo ?? S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
@@ -1382,18 +1373,12 @@ export default function Dashboard() {
             {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
               const n = data.arrFunnel.stock[data.arrFunnel.stock.length - 1];
               const cnt = (b: string) => (n.ids?.[b] ?? []).length;
-              const EA = computeExpectedArr(data);
-              type GlanceTile = { label: string; v: number; c: string; sub: string; deals?: number; note?: string; to?: string; hero?: boolean };
-              const tiles: GlanceTile[] = [
+              const tiles = [
                 { label: "Pilot", v: n.booked, c: C.gold, sub: "in trial, unsigned", deals: cnt("booked") },
                 { label: "Contracted", v: n.contracted, c: C.blue, sub: "signed, billing not started", deals: cnt("contracted") },
                 { label: "Billed", v: n.live, c: C.grn, sub: "paying", deals: cnt("live") },
-                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed", deals: cnt("liveArr") },
+                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed · renewal included", deals: cnt("liveArr"), hero: true },
                 { label: "Booking", v: n.bookedPilot, c: C.t1, sub: "Live ARR + Pilot", deals: cnt("bookedPilot") },
-                // Sai's forward view: Live ARR + full-year Potential + Contracted Renewal.
-                { label: "Expected year-end", v: EA.yearEnd, c: C.coralDk, hero: true, to: "forecast",
-                  sub: `Live ${fmt(EA.live)} + Potential ${fmt(EA.potY)} + Renewal ${fmt(EA.renew)}`,
-                  note: "forward · opens Forecast" },
               ];
               return (
                 <Card title="ARR at a glance" sub={`Point-in-time, as of ${n.label} · full detail on the Booked ARR & Cashflow tab`}>
@@ -1401,16 +1386,16 @@ export default function Dashboard() {
                     {tiles.map((t) => (
                       // Straight through to the tab that defines these, so "where does this come
                       // from" is one click rather than a hunt through the tab bar.
-                      <div key={t.label} onClick={() => setTab((t.to ?? "cashflow") as typeof tab)} role="link" tabIndex={0}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setTab((t.to ?? "cashflow") as typeof tab); }}
-                        title={t.to === "forecast" ? "Open Forecast for the full breakdown" : "Open Booked ARR & Cashflow for the full breakdown"}
+                      <div key={t.label} onClick={() => setTab("cashflow")} role="link" tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setTab("cashflow"); }}
+                        title="Open Booked ARR & Cashflow for the full breakdown"
                         style={{ border: `1.5px solid ${t.hero ? t.c : C.bd}`, borderRadius: 10,
                         padding: "12px 14px", background: t.hero ? C.s2 : "transparent", cursor: "pointer" }}>
                         <div style={{ fontSize: 11.5, fontWeight: 700, color: t.c }}>{t.label}</div>
                         <div style={{ fontSize: 21, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{fmt(t.v)}</div>
                         <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{t.sub}</div>
                         <div style={{ fontSize: 10.5, color: C.t3, fontFamily: "var(--font-dm-mono)", marginTop: 1 }}>
-                          {t.note ?? `${t.deals} deals`} <span style={{ color: t.c, fontWeight: 700 }}>→</span>
+                          {t.deals} deals <span style={{ color: t.c, fontWeight: 700 }}>→</span>
                         </div>
                       </div>
                     ))}
