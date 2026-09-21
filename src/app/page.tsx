@@ -231,32 +231,6 @@ const TABS = [
   ["productarr", "Product ARR"],
 ] as const;
 
-// Sai's "expected" ARR (2026-09-18): the forward-looking number so a big renewal
-// swing is never a surprise. Expected = today's Live ARR + open Potential + the
-// Contracted-Renewal book. Each piece is a sheet-owned figure read by key, summed
-// here for display only (same pattern as the Forecast tile): Live ARR = liveArrToday
-// (Headline tab); Potential = the Forecast Potential tab grand total (incl. AM +
-// Davi), Q = Early+Late this quarter, Y = Early+Late full-year; Renewal = the current
-// month's "Contracted Renewal" cell on the Booked ARR & Cashflow tab. The two totals
-// reconcile exactly with the Forecast tab's Q3/Yearly toggle by construction.
-function computeExpectedArr(data: DashboardData) {
-  const live = data.liveArrToday ?? data.forecastTab?.currentLiveARR ?? 0;
-  const T = data.forecastTab?.totalInclLead ?? data.forecastTab?.totalInclAM;
-  const potEarlyQ = T?.potEarlyQ ?? 0, potLateQ = T?.potLateQ ?? 0;
-  const potEarlyY = T?.potEarlyY ?? 0, potLateY = T?.potLateY ?? 0;
-  const potQ = potEarlyQ + potLateQ;
-  const potY = potEarlyY + potLateY;
-  const stock = data.arrFunnel?.stock;
-  const renew = stock && stock.length ? stock[stock.length - 1].contractedRenewal : 0;
-  return {
-    live, renew,
-    potEarlyQ, potLateQ, potQ,
-    potEarlyY, potLateY, potY,
-    q3End: live + potQ + renew,
-    yearEnd: live + potY + renew,
-  };
-}
-
 // Is a Pipeline-WoW MoM month label (e.g. "Jul-26") inside Q3 FY26 (Jul–Sep 2026)?
 const MONTH_ABBR = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 function isQ3Fy26(label: string): boolean {
@@ -2641,12 +2615,7 @@ export default function Dashboard() {
         const projEarly = fcastView === "yearly" ? annYTot.early : T.potEarlyQ;
         const projLate = fcastView === "yearly" ? annYTot.late : T.potLateQ;
         const projPot = projEarly + projLate;
-        // Contracted-Renewal book (current month "Contracted Renewal" cell on the Booked
-        // ARR & Cashflow tab). Added to Expected so a coming renewal is visible up front —
-        // Sai, 2026-09-18. Same figure in both the Q3 and Yearly views (it is a standing
-        // book, not quarter-scoped).
-        const projRenew = computeExpectedArr(data).renew;
-        const projEnd = projBase + projPot + projRenew;
+        const projEnd = projBase + projPot;
         const projGap = F.annualTarget - projEnd;
         const projPeriod = fcastView === "yearly" ? "Year End" : `${Q.key} End`;
 
@@ -2664,7 +2633,7 @@ export default function Dashboard() {
               <div style={{ padding: "14px 18px" }}>
                 <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projEnd >= F.annualTarget ? C.grn : C.coralDk }}>{fmt(projEnd)}</div>
                 <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>
-                  Live ARR <b>{fmt(projBase)}</b> (Closed Won) &nbsp;+&nbsp; Potential <b>{fmt(projPot)}</b> (Early {fmt(projEarly)} and Late {fmt(projLate)}) &nbsp;+&nbsp; Renewal <b>{fmt(projRenew)}</b> (contracted)
+                  Live ARR <b>{fmt(projBase)}</b> (Closed Won · renewal already included) &nbsp;+&nbsp; Potential <b>{fmt(projPot)}</b> (Early {fmt(projEarly)} and Late {fmt(projLate)})
                 </div>
                 <div style={{ fontSize: 11, color: C.t3, marginTop: 3 }}>vs {fmt(F.annualTarget)} target</div>
               </div>
@@ -3160,14 +3129,13 @@ export default function Dashboard() {
             const steps: Step[] = [
               { label: "Live ARR today", type: "base", value: projBase },
               { label: "Potential (Early + Late)", type: "inc", value: projPot, of: `${pct(potVsQuota)} of quota` },
-              { label: "Contracted renewal", type: "inc", value: projRenew, of: "contracted" },
               { label: "Gap to target", type: "gap", value: Math.max(0, projGap), from: projEnd },
               { label: "FY26 target", type: "target", value: F.annualTarget },
             ];
             const n = steps.length;
             let running = 0;
             return (
-              <Card title="Year-end projection vs annual target" sub="Today's Live ARR plus open Potential ARR (from the Quarter Forecast) plus the contracted-renewal book, versus the FY26 ending-ARR target." accent={C.navy}>
+              <Card title="Year-end projection vs annual target" sub="End-of-Q2 live ARR plus Q3 Potential ARR (from the Quarter Forecast), versus the FY26 ending-ARR target." accent={C.navy}>
                 <div style={{ padding: "16px 20px" }}>
                   <div style={{ position: "relative", height: PLOT, borderBottom: `1px solid ${C.bd}` }}>
                     {steps.map((s, i) => {
@@ -3195,10 +3163,9 @@ export default function Dashboard() {
                     ))}
                   </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 14, marginTop: 18 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginTop: 18 }}>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Live ARR today</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(projBase)}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Potential</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.blue }}>{fk(projPot)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>Early {fk(projEarly)} + Late {fk(projLate)}</div></div>
-                    <div><div style={{ fontSize: 11, color: C.t3 }}>Renewal</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.t2 }}>{fk(projRenew)}</div><div style={{ fontSize: 10.5, color: C.t3 }}>contracted</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Expected {projPeriod}</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.coralDk }}>{fk(projEnd)}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Annual Target</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)" }}>{fk(F.annualTarget)}</div></div>
                     <div><div style={{ fontSize: 11, color: C.t3 }}>Gap</div><div style={{ fontSize: 17, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projGap > 0 ? C.red : C.grn }}>{fk(projGap)}</div></div>
@@ -3206,7 +3173,7 @@ export default function Dashboard() {
 
                   <div style={{ background: "#FAEEDA", borderRadius: 12, padding: "14px 16px", marginTop: 16, fontSize: 13.5, color: "#6b5320", lineHeight: 1.55 }}>
                     {projGap > 0 ? (
-                      <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> (Live ARR {fk(projBase)} + {fk(projPot)} potential, Early {fk(projEarly)} and Late {fk(projLate)} + {fk(projRenew)} contracted renewal) is <b style={{ color: C.coralDk }}>{fk(projGap)}</b> short of the <b>{fk(F.annualTarget)}</b> target.</>
+                      <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> (Live ARR {fk(projBase)} + {fk(projPot)} potential, Early {fk(projEarly)} and Late {fk(projLate)}) is <b style={{ color: C.coralDk }}>{fk(projGap)}</b> short of the <b>{fk(F.annualTarget)}</b> target.</>
                     ) : (
                       <>Expected {projPeriod.toLowerCase()} of <b>{fk(projEnd)}</b> is on track to meet or exceed the <b>{fk(F.annualTarget)}</b> target.</>
                     )}
