@@ -1351,7 +1351,7 @@ export default function Dashboard() {
                 { label: "Pilot", v: n.booked, c: C.gold, sub: "in trial, unsigned", deals: cnt("booked") },
                 { label: "Contracted", v: n.contracted, c: C.blue, sub: "signed, billing not started", deals: cnt("contracted") },
                 { label: "Billed", v: n.live, c: C.grn, sub: "paying", deals: cnt("live") },
-                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed", deals: cnt("liveArr"), hero: true },
+                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed · renewal included", deals: cnt("liveArr"), hero: true },
                 { label: "Booking", v: n.bookedPilot, c: C.t1, sub: "Live ARR + Pilot", deals: cnt("bookedPilot") },
               ];
               return (
@@ -2633,7 +2633,7 @@ export default function Dashboard() {
               <div style={{ padding: "14px 18px" }}>
                 <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: projEnd >= F.annualTarget ? C.grn : C.coralDk }}>{fmt(projEnd)}</div>
                 <div style={{ fontSize: 12, color: C.t2, marginTop: 2 }}>
-                  Live ARR <b>{fmt(projBase)}</b> (Closed Won) &nbsp;+&nbsp; Potential <b>{fmt(projPot)}</b> (Early {fmt(projEarly)} and Late {fmt(projLate)})
+                  Live ARR <b>{fmt(projBase)}</b> (Closed Won · renewal already included) &nbsp;+&nbsp; Potential <b>{fmt(projPot)}</b> (Early {fmt(projEarly)} and Late {fmt(projLate)})
                 </div>
                 <div style={{ fontSize: 11, color: C.t3, marginTop: 3 }}>vs {fmt(F.annualTarget)} target</div>
               </div>
