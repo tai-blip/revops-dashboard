@@ -308,6 +308,38 @@ async function main() {
     fix: "Headline q3_booked SUMIFS over ARR_MoM_Rebuild col Q (scripts/build-headline-tab.mjs).",
   });
 
+  // A5b. Renewal ongoing = Closed Won/Billing contracts in Status "Contract Paused" that are
+  //      past their end date (so Salesforce has dropped them out of Live ARR). The sheet splits
+  //      that set into counted + "renewal already live"; the two together must equal the raw
+  //      Salesforce total. Read on its own: the tab only exists once the refresh has run, and a
+  //      missing tab in the main batchGet would fail every other check too.
+  let RO = null;
+  try {
+    const roRows = (await sheets.spreadsheets.values.get({ spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: "Renewal_Ongoing!A1:C12", valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];
+    RO = parseKeyValue(roRows);
+  } catch { /* tab not created yet */ }
+  if (!RO || RO.renewal_ongoing == null) {
+    add("WARN", "Renewal ongoing", "Renewal_Ongoing tab missing or not numeric — runs after refresh-arr-from-sfdc.mjs creates it.");
+  } else {
+    const pausedAgg = await soqlAgg(sf, `
+      SELECT SUM(convertCurrency(AnnualContractValueARR__c)) arr
+      FROM Opportunity
+      WHERE StageName IN ('Billing','Closed Won')
+        AND Status__c = 'Contract Paused'
+        AND ContractLiveDate__c <= TODAY AND ContractEndDate__c <= TODAY`);
+    // 2%: SOQL's TODAY is the org's day, the sheet's is Asia/Saigon — a contract ending on the
+    // boundary day can sit on different sides for a few hours.
+    cross("Renewal ongoing (counted + already-renewed) = paused past end", RO.renewal_ongoing + (RO.renewal_paused_renewed ?? 0), pausedAgg.arr, {
+      tolPct: 0.02,
+      fix: "SOQL_Pull col W formula + Renewal_Ongoing key block in scripts/refresh-arr-from-sfdc.mjs.",
+    });
+    algebra("Renewal_Ongoing live_arr = Live ARR headline", RO.live_arr, w1,
+      { fix: "Renewal_Ongoing!B9 should point at ARR_MoM_Rebuild!W1." });
+    algebra("Live ARR + renewal ongoing = sum of its parts", RO.live_plus_renewal_ongoing, (RO.live_arr ?? 0) + RO.renewal_ongoing,
+      { fix: "Renewal_Ongoing!B10 = B9 + B5." });
+  }
+
   // A6. Churn this month = contracts whose END date lands in (prev month-end, month-end]
   //     and whose Status is the org's own churn marker.
   const prevEnd = iso(new Date(Date.UTC(y, m, 0)));      // last day of previous month

@@ -44,6 +44,18 @@ type DashboardData = {
   };
   arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
   liveArrToday?: number | null;
+  // Renewal ongoing (Renewal_Ongoing tab): paused contracts past their end date, which Salesforce
+  // drops out of Live ARR. Every figure is a sheet cell; null when the tab is missing.
+  renewalOngoing?: {
+    asOf: string; renewalOngoing: number; deals: number; ended30d: number; notCounted: number;
+    liveArr: number | null; livePlus: number;
+    dealList: { id: string; opp: string; account: string; owner: string; liveDate: string; endDate: string;
+      arr: number; daysPastEnd: number | null; counted: boolean; treatment: string; url: string }[];
+    // Keyed by "YYYY-MM": the last daily snapshot in that month, and that month's deal list.
+    monthly: Record<string, { renewalOngoing: number; deals: number; notCounted: number; liveArr: number | null; livePlus: number | null; asOf: string }>;
+    dealsByMonth: Record<string, { id: string; opp: string; account: string; owner: string; liveDate: string; endDate: string;
+      arr: number; daysPastEnd: number | null; counted: boolean; treatment: string; url: string }[]>;
+  } | null;
   headlineSource?: Record<string, number>; // key→value block from the Headline tab (single source)
   headlineTrend?: { ym: string; active: number; newARR: number; churn: number; mom: number }[]; // ARR-trend table (drives the Command chart)
   targetsSource?: Record<string, number>; // key→value block from the Targets tab (plan + rollups)
@@ -1289,7 +1301,7 @@ export default function Dashboard() {
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 30px 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.navy }}>
-              {data.demo ? "Horizon Dining Group — Q3 FY26" : "Momos Forecast — Q3 FY26"}
+              {data.demo ? `Horizon Dining Group — ${SALES_Q[currentSalesQ()].label}` : `Momos Forecast — ${SALES_Q[currentSalesQ()].label}`}
             </div>
             <div style={{ fontSize: 12, color: C.t3 }}>
               {data.demo && (
@@ -1347,11 +1359,17 @@ export default function Dashboard() {
             {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
               const n = data.arrFunnel.stock[data.arrFunnel.stock.length - 1];
               const cnt = (b: string) => (n.ids?.[b] ?? []).length;
-              const tiles = [
+              // Renewal ongoing sits INSIDE the Live ARR box, under a divider — a separate figure,
+              // not added into the headline (2026-10-02 Sales/Rev Ops Sync).
+              const RO = data.renewalOngoing;
+              const tiles: { label: string; v: number; c: string; sub: string; deals: number; hero?: boolean;
+                extra?: { label: string; v: number; sub: string } }[] = [
                 { label: "Pilot", v: n.booked, c: C.gold, sub: "in trial, unsigned", deals: cnt("booked") },
                 { label: "Contracted", v: n.contracted, c: C.blue, sub: "signed, billing not started", deals: cnt("contracted") },
                 { label: "Billed", v: n.live, c: C.grn, sub: "paying", deals: cnt("live") },
-                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed · renewal included", deals: cnt("liveArr"), hero: true },
+                { label: "Live ARR", v: n.liveArr, c: C.navy, sub: "Contracted + Billed · renewal included", deals: cnt("liveArr"), hero: true,
+                  extra: RO ? { label: "Renewal ongoing", v: RO.renewalOngoing,
+                    sub: `${RO.deals} paused past end · with Live ARR ${fmt(RO.livePlus)}` } : undefined },
                 { label: "Booking", v: n.bookedPilot, c: C.t1, sub: "Live ARR + Pilot", deals: cnt("bookedPilot") },
               ];
               return (
@@ -1371,6 +1389,13 @@ export default function Dashboard() {
                         <div style={{ fontSize: 10.5, color: C.t3, fontFamily: "var(--font-dm-mono)", marginTop: 1 }}>
                           {t.deals} deals <span style={{ color: t.c, fontWeight: 700 }}>→</span>
                         </div>
+                        {t.extra && (
+                          <div style={{ borderTop: `1px solid ${C.bd}`, marginTop: 10, paddingTop: 9 }}>
+                            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", color: C.teal }}>{t.extra.label}</div>
+                            <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "var(--font-dm-mono)", color: C.teal, marginTop: 2 }}>{fmt(t.extra.v)}</div>
+                            <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{t.extra.sub}</div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1926,7 +1951,7 @@ export default function Dashboard() {
           </Card>
 
           <Card
-            title="Pipeline generation by AE — Q3 FY26"
+            title={`Pipeline generation by AE — ${SALES_Q[currentSalesQ()].label}`}
             sub="New pipeline created this quarter — total contract value (Amount) of opps reaching SQL, vs each AE's quarterly pipe-generation target. Open pipeline shown for context."
             accent={C.coral}
           >
@@ -3197,6 +3222,11 @@ export default function Dashboard() {
             {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
               const AF = data.arrFunnel;
               const series = AF.stock;
+              // Renewal ongoing, per month (Renewal_Ongoing_History month-end snapshot). Agreed at the
+              // 2026-10-02 Sales/Rev Ops Sync: a separate line under Live ARR, never blended into it.
+              const RO = data.renewalOngoing;
+              const roAt = (ym: string) => RO?.monthly[ym];
+              const RO_BUCKETS = new Set(["renewalOngoing", "renewalNotCounted", "livePlusRenewal"]);
               const cur = series[series.length - 1] ?? { booked: 0, contracted: 0, live: 0, liveArr: 0 };
               const maxV = Math.max(1, ...series.map((p) => Math.max(p.liveArr, p.bookedPilot)));
               const W = 1160, H = 250, padL = 46, padR = 14, padT = 22, padB = 30;
@@ -3226,7 +3256,7 @@ export default function Dashboard() {
               const FUNNEL_SECTIONS: { title: string; sub: string; rows: FRow[] }[] = [
                 {
                   title: "ARR",
-                  sub: "Contracted + Billed = Live ARR",
+                  sub: RO ? "Contracted + Billed = Live ARR · Renewal ongoing sits outside Live ARR, added only in the last row" : "Contracted + Billed = Live ARR",
                   rows: [
                     { bucket: "contracted", label: "Contracted", color: C.blue, get: (p) => p.contracted,
                       hint: "Awaiting Billing — signed and contract-live, but payment has not started yet" },
@@ -3241,6 +3271,17 @@ export default function Dashboard() {
                       hint: "A cross-cut, not a third slice: these deals are ALREADY counted in Renewal or Expansion above. Broken out because a rip & replace changeover is the usual reason a deal is contracted but not yet billing." },
                     { bucket: "live", label: "Billed", color: C.grn, get: (p) => p.live },
                     { bucket: "liveArr", label: "Live ARR", color: C.navy, get: (p) => p.liveArr, total: true },
+                    ...(RO ? [
+                      { bucket: "renewalOngoing", label: "Renewal ongoing", color: C.teal, sign: "+",
+                        get: (p: typeof series[number]) => roAt(p.ym)?.renewalOngoing ?? 0,
+                        hint: "Closed Won contracts in \"Contract Paused\" past their end date. Salesforce drops a contract to $0 the day it ends, so these are NOT in Live ARR above. Month-end snapshot; tracked from 2026-10-07 (Salesforce keeps no history of Status)." },
+                      { bucket: "renewalNotCounted", label: "Not counted — renewal already live", color: C.t2,
+                        get: (p: typeof series[number]) => roAt(p.ym)?.notCounted ?? 0, parent: "renewalOngoing", cross: true,
+                        hint: "Paused, but the account already has a live Renewal that started within 60 days of this contract's end — it is in Live ARR, so it is not added again. The old row's Status just needs flipping to Contract Renewed." },
+                      { bucket: "livePlusRenewal", label: "Live ARR + renewal ongoing", color: C.teal, total: true,
+                        get: (p: typeof series[number]) => roAt(p.ym)?.livePlus ?? 0,
+                        hint: "Live ARR (the Command headline) + renewal ongoing — the book if every paused renewal lands. Computed in the Renewal_Ongoing sheet tab." },
+                    ] : []),
                   ],
                 },
                 {
@@ -3413,7 +3454,41 @@ export default function Dashboard() {
                   <div style={{ padding: "0 20px 14px" }}>
                     {(() => {
                       let spec: DrillSpec<NonNullable<typeof data.arrFunnel>["dealIndex"][number]> | null = null;
-                      if (afDrill) {
+                      let roSpec: DrillSpec<NonNullable<typeof data.renewalOngoing>["dealList"][number]> | null = null;
+                      if (afDrill && RO && RO_BUCKETS.has(afDrill.bucket)) {
+                        const m = roAt(afDrill.ym);
+                        // This month = the live list (same refresh as the cell); past months = their saved month-end list.
+                        const all = afDrill.ym === RO.asOf.slice(0, 7) ? RO.dealList : (RO.dealsByMonth[afDrill.ym] ?? []);
+                        const notCounted = afDrill.bucket === "renewalNotCounted";
+                        roSpec = {
+                          title: `renewal-ongoing-${afDrill.ym}-${afDrill.bucket}`,
+                          source: "Renewal_Ongoing tab (this month) · Renewal_Ongoing_Deals (month-end lists)",
+                          chips: [afDrill.label, afDrill.col, m ? `as of ${m.asOf}` : ""],
+                          note: afDrill.bucket === "livePlusRenewal"
+                            ? `${fmt(afDrill.cell)} = Live ARR ${m?.liveArr != null ? fmt(m.liveArr) : ""} (click the Live ARR row for its deals) + the renewal-ongoing deals below.`
+                            : notCounted
+                            ? "Paused in Salesforce, but a live Renewal on the same account already covers each of these, so they are in Live ARR and not added again. Flip the old row's Status to Contract Renewed."
+                            : (total) => Math.abs(total - afDrill.cell) > 1
+                              ? `The cell reads ${fmt(afDrill.cell)} but these deals sum to ${fmt(total)} — worth a look.`
+                              : `Ties to the cell exactly (${fmt(afDrill.cell)}).`,
+                          rows: all.filter((d) => (notCounted ? !d.counted : d.counted)),
+                          amount: (d) => d.arr,
+                          amountLabel: "ARR",
+                          emptyHint: "No deal list kept for this month.",
+                          cols: [
+                            { label: "Deal", l: true, csv: (d) => d.opp,
+                              render: (d) => d.url ? <a href={d.url} target="_blank" rel="noreferrer" style={{ color: C.navy }}>{d.opp || d.id}</a> : (d.opp || d.id) },
+                            { label: "Account", l: true, csv: (d) => d.account, render: (d) => d.account || "—" },
+                            { label: "Owner", l: true, csv: (d) => d.owner, render: (d) => d.owner || "—" },
+                            { label: "Contract live", l: true, csv: (d) => d.liveDate, render: (d) => d.liveDate || "—" },
+                            { label: "Ended", l: true, csv: (d) => d.endDate, render: (d) => d.endDate || "—" },
+                            { label: "Days past end", mono: true, csv: (d) => d.daysPastEnd ?? "",
+                              render: (d) => d.daysPastEnd == null ? "—" : <span style={{ color: d.daysPastEnd > 30 ? C.red : C.t1 }}>{d.daysPastEnd}</span> },
+                            { label: "ARR", mono: true, bold: true, csv: (d) => d.arr, render: (d) => fmt(d.arr) },
+                          ],
+                        };
+                      }
+                      if (afDrill && !roSpec) {
                         const pt = AF.stock.find((x) => x.ym === afDrill.ym);
                         const idx = pt?.ids?.[afDrill.bucket] ?? [];
                         const rows = idx.map((n) => AF.dealIndex[n]).filter(Boolean).sort((a, b) => b.arr - a.arr);
@@ -3448,7 +3523,9 @@ export default function Dashboard() {
                           ],
                         };
                       }
-                      return <DrillPanel spec={spec} onClear={() => setAfDrill(null)} />;
+                      return roSpec
+                        ? <DrillPanel spec={roSpec} onClear={() => setAfDrill(null)} />
+                        : <DrillPanel spec={spec} onClear={() => setAfDrill(null)} />;
                     })()}
                   </div>
                 </Card>

@@ -89,7 +89,7 @@ async function buildPayload(): Promise<Payload> {
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
     // NOTE: order here MUST match the destructured variables below.
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows, liveArrPullRows, salesCycleRows, funnelRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows, liveArrPullRows, salesCycleRows, funnelRows, renewalOngoingRows, renewalHistoryRows, renewalDealLogRows] =
       await getSheetValuesBatch([
         { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
@@ -152,6 +152,14 @@ async function buildPayload(): Promise<Payload> {
         // Every region × segment × period slice is precomputed there, so the dashboard picks a
         // row and never combines rates — the one thing §3 of the brief forbids.
         { tab: "Funnel Conversion", range: "A1:BZ2000" },
+        // Renewal ongoing = Closed Won contracts in "Contract Paused" past their end date, which
+        // Salesforce zeroes out of Live ARR. Formula tab rewritten by refresh-arr-from-sfdc.mjs: a
+        // key→value block (renewal_ongoing, live_plus_renewal_ongoing, …) then the deal list.
+        { tab: "Renewal_Ongoing", range: "A1:J400" },
+        // One row per day of those same sheet-computed figures — the line's history.
+        { tab: "Renewal_Ongoing_History", range: "A2:G2000" },
+        // Each month's deal list (last run of the month = month-end), so past months stay clickable.
+        { tab: "Renewal_Ongoing_Deals", range: "A2:K20000" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -515,6 +523,54 @@ async function buildPayload(): Promise<Payload> {
         median: typeof r[7] === "number" ? (r[7] as number) : null,
       })),
       funnel,
+      // Renewal ongoing — read as-is from the sheet; null when the tab is missing or its key block
+      // is not numeric, so the card hides instead of showing a made-up zero.
+      renewalOngoing: (() => {
+        const kv = parseKeyValue(renewalOngoingRows);
+        if (kv.renewal_ongoing == null || kv.live_plus_renewal_ongoing == null) return null;
+        const hdr = (renewalOngoingRows ?? []).findIndex((r) => r?.[0] === "Id");
+        type Row = (string | number | null)[];
+        const toDeal = (r: Row) => ({
+            id: String(r[0]), opp: String(r[1] ?? ""), account: String(r[2] ?? ""), owner: String(r[3] ?? ""),
+            liveDate: String(r[4] ?? ""), endDate: String(r[5] ?? ""),
+            arr: typeof r[6] === "number" ? (r[6] as number) : 0,
+            daysPastEnd: typeof r[7] === "number" ? (r[7] as number) : null,
+            counted: r[8] === "Ongoing", treatment: String(r[8] ?? ""), url: String(r[9] ?? ""),
+          });
+        const deals = hdr < 0 ? [] : (renewalOngoingRows ?? []).slice(hdr + 1)
+          .filter((r) => String(r?.[0] ?? "").length > 0).map(toDeal);
+        // Month view = the LAST daily snapshot in each month (month-end once the month closes).
+        // Picks sheet rows; adds nothing up.
+        const monthly: Record<string, { renewalOngoing: number; deals: number; notCounted: number; liveArr: number | null; livePlus: number | null; asOf: string }> = {};
+        for (const r of renewalHistoryRows ?? []) {
+          if (typeof r?.[0] !== "string" || typeof r?.[1] !== "number") continue;
+          monthly[String(r[0]).slice(0, 7)] = {
+            renewalOngoing: r[1] as number,
+            deals: typeof r[2] === "number" ? (r[2] as number) : 0,
+            liveArr: typeof r[4] === "number" ? (r[4] as number) : null,
+            livePlus: typeof r[5] === "number" ? (r[5] as number) : null,
+            notCounted: typeof r[6] === "number" ? (r[6] as number) : 0,
+            asOf: String(r[0]),
+          };
+        }
+        const dealsByMonth: Record<string, ReturnType<typeof toDeal>[]> = {};
+        for (const r of renewalDealLogRows ?? []) {
+          if (!r?.[0] || !r?.[1]) continue;
+          (dealsByMonth[String(r[0])] ??= []).push(toDeal(r.slice(1)));
+        }
+        return {
+          asOf: String((renewalOngoingRows ?? []).find((r) => r?.[0] === "as_of")?.[1] ?? ""),
+          renewalOngoing: kv.renewal_ongoing,
+          deals: kv.renewal_ongoing_deals ?? 0,
+          ended30d: kv.renewal_ongoing_30d ?? 0,
+          notCounted: kv.renewal_paused_renewed ?? 0,
+          liveArr: kv.live_arr ?? null,
+          livePlus: kv.live_plus_renewal_ongoing,
+          dealList: deals,
+          monthly,
+          dealsByMonth,
+        };
+      })(),
       salesCycleDeals: scDealRows.map((r) => ({
         region: String(r[0]), quarter: String(r[1]), segment: String(r[2] ?? ""),
         deal: String(r[3] ?? ""), account: String(r[4] ?? ""), owner: String(r[5] ?? ""),
