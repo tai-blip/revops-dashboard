@@ -180,7 +180,11 @@ async function main() {
     "Owner","Merchant Segment","Location Tier","Deal Country","Region","Channel of Contact","Locations",
     "ChatAgent Enabled","Managed Services Y1 (USD)",  // R, S — feed the full-book product-line split
     "Signed Date",  // T — when the deal was booked (Closed Won date, else CloseDate/live) → powers Booked ARR
+    "Opportunity","Account",  // U, V — names, so the Renewal_Ongoing deal list reads without a lookup
+    "Renewal Ongoing",        // W — per-row formula: "Ongoing" / "Renewed — successor live" / blank
   ]];
+  // USER_ENTERED would read a name starting with = + - @ as a formula; force those to text.
+  const txt = (v) => { const t = String(v ?? ""); return /^[=+\-@]/.test(t) ? `'${t}` : t; };
   won.forEach((x, i) => {
     const r = i + 2;
     pull.push([
@@ -194,6 +198,17 @@ async function main() {
       x.Locations_in_Contract__c ?? 0,
       x.ChatAgent_Enabled__c === true, x.Managed_Services_Year_1_Total__c ?? 0,
       (x.Date_Reached_Closed_Won__c || x.CloseDate || x.ContractLiveDate__c || "").slice(0, 10),
+      txt(x.Name), txt(x.Account?.Name),
+      // RENEWAL ONGOING (Andrew / Stephen, Weekly Sales/Rev Ops Sync 2026-10-02). Salesforce drops a
+      // contract to $0 the day it ends, so a renewal still being negotiated vanishes from Live ARR
+      // and reads like churn. Those deals sit in Status "Contract Paused" past their end date (the
+      // same set as the Deal Desk "Contract Paused Report"). The date test is the exact complement
+      // of Live ARR's (E > TODAY), so one row can never be in both.
+      // Guard: if the account already has a LIVE "2.Renewals" contract that started no earlier than
+      // 60 days before this one ended, the renewal landed and only the old row's Status was never
+      // flipped (e.g. Da Paolo, TimeGroup) — that renewal is in Live ARR, so this row is not counted.
+      // 60 days, not "any live contract": sister-location contracts (Pepper Lunch) must not qualify.
+      `=IF(AND(G${r}="Contract Paused",D${r}<=TODAY(),E${r}<=TODAY()),IF(COUNTIFS($B$2:$B$${LAST},B${r},$F$2:$F$${LAST},"2.Renewals",$D$2:$D$${LAST},">="&(E${r}-60),$D$2:$D$${LAST},"<="&TODAY(),$E$2:$E$${LAST},">"&TODAY(),$G$2:$G$${LAST},"<>Contracts Ended (Churned)")>0,"Renewed — successor live","Ongoing"),"")`,
     ]);
   });
 
@@ -596,6 +611,31 @@ async function main() {
     }),
   ];
 
+  // 6b) Renewal_Ongoing — the formula tab behind the "Renewal ongoing" line. Every number is a
+  //     formula over SOQL_Pull col W, rewritten each run (like ARR_MoM_Rebuild) because SOQL_Pull
+  //     is deleted and recreated, which would leave a write-once tab pointing at #REF!.
+  //     Live ARR itself is untouched: the agreed view is three separate lines — Live ARR, Renewal
+  //     ongoing, and their sum — so the definition finance ties to does not move.
+  const SF_LIGHTNING = "https://fun-ruby-7024.lightning.force.com";
+  const PC = (c) => `SOQL_Pull!$${c}$2:$${c}$${LAST}`;
+  const renewalTab = [
+    ["RENEWAL ONGOING — Closed Won contracts in \"Contract Paused\" status that are past their end date", "", "", "", "", "", "", "", "", `Updated ${topStamp}`],
+    ["Salesforce drops these to $0 the day the contract ends, so they are NOT in Live ARR (it would read as churn). Shown as a separate line beside Live ARR. A paused row whose account already has a live Renewal that started within 60 days of its end is listed but not counted — that renewal is already in Live ARR."],
+    ["key", "value", "what it is"],
+    ["as_of", `=TEXT(TODAY(),"yyyy-mm-dd")`, "The date the formulas below evaluate against"],
+    ["renewal_ongoing", `=SUMIFS(${PC("C")},${PC("W")},"Ongoing")`, "Renewal ongoing — paused, past end, not yet renewed (ARR, USD)"],
+    ["renewal_ongoing_deals", `=COUNTIFS(${PC("W")},"Ongoing")`, "Deals behind renewal_ongoing"],
+    ["renewal_ongoing_30d", `=SUMIFS(${PC("C")},${PC("W")},"Ongoing",${PC("E")},"<"&(TODAY()-30))`, "Of which ended more than 30 days ago"],
+    ["renewal_paused_renewed", `=SUMIFS(${PC("C")},${PC("W")},"Renewed — successor live")`, "Paused rows NOT counted — a live renewal already covers them"],
+    ["live_arr", `=ARR_MoM_Rebuild!$W$1`, "Live ARR as of today — the Command headline, unchanged"],
+    ["live_plus_renewal_ongoing", `=B9+B5`, "Live ARR + renewal ongoing"],
+    [""],
+    ["Id", "Opportunity", "Account", "Owner", "Contract live", "Contract end", "ARR (USD)", "Days past end", "Treatment", "Salesforce"],
+    // One spilled formula = the deal list. Counted rows first, then by ARR. IFNA blanks only the
+    // "no matches" case, so a genuine error (#REF!) still shows instead of an empty list.
+    [`=IFNA(ARRAYFORMULA(SORT(FILTER({${PC("A")},${PC("U")},${PC("V")},${PC("K")},TEXT(${PC("D")},"yyyy-mm-dd"),TEXT(${PC("E")},"yyyy-mm-dd"),${PC("C")},TODAY()-${PC("E")},${PC("W")},"${SF_LIGHTNING}/lightning/r/Opportunity/"&${PC("A")}&"/view"},${PC("W")}<>""),9,TRUE,7,FALSE)),"")`],
+  ];
+
   // 7) Create-or-replace + bulk write (one values.update per tab)
   const meta = await api.spreadsheets.get({ spreadsheetId: SHEET_ID, fields: "sheets.properties(sheetId,title)" });
   const byTitle = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
@@ -610,7 +650,7 @@ async function main() {
   // left them evaluating to `#REF! Unresolved sheet name 'ARR_Funnel'` within 4 hours of every
   // rebuild, which also silently dropped the dashboard's Booked ARR tile to its in-code fallback.
   // lastCol "AD" (col 30) so the AA:AB tier-totals block is cleared along with the A:Y data.
-  const KEEP_IN_PLACE = { ARR_MoM_Rebuild: { rowCount: mom.length + 20, columnCount: 26, lastCol: "Z" }, ARR_WoW_Rebuild: { rowCount: wow.length + 20, columnCount: 10, lastCol: "J" }, ARR_Forward: { rowCount: 44, columnCount: 6, lastCol: "F" }, ARR_Funnel: { rowCount: funnel.length + 10, columnCount: 30, lastCol: "AD" } };
+  const KEEP_IN_PLACE = { ARR_MoM_Rebuild: { rowCount: mom.length + 20, columnCount: 26, lastCol: "Z" }, ARR_WoW_Rebuild: { rowCount: wow.length + 20, columnCount: 10, lastCol: "J" }, ARR_Forward: { rowCount: 44, columnCount: 6, lastCol: "F" }, ARR_Funnel: { rowCount: funnel.length + 10, columnCount: 30, lastCol: "AD" }, Renewal_Ongoing: { rowCount: 400, columnCount: 12, lastCol: "L" } };
   const reqs = [];
   for (const t of ["SOQL_Pull","SOQL_ClosedDeals","ARR_MoM_Rebuild","ARR_WoW_Rebuild","ARR_MoM_Segments","ACV_MoM","ARR_per_Location_MoM","SOQL_PaymentMix","Top_Booked_ARR","ARR_Forward","Cash_Forecast","ARR_Funnel"])
     if (byTitle[t] != null && !(t in KEEP_IN_PLACE)) reqs.push({ deleteSheet: { sheetId: byTitle[t] } });
@@ -660,6 +700,7 @@ async function main() {
       { range: "Cash_Forecast!A1", values: cashFc },
       { range: "ARR_Funnel!A1", values: funnel },
       { range: "ARR_Funnel!AA1", values: funnelSummary },
+      { range: "Renewal_Ongoing!A1", values: renewalTab },
     ],
   } });
   // RAW so month labels ("2026-08", "Aug 2026") stay TEXT — USER_ENTERED would coerce them to dates.
@@ -667,6 +708,29 @@ async function main() {
     valueInputOption: "RAW",
     data: [{ range: "ARR_Forward!A1", values: arrForward }],
   } });
+
+  // 7b) Renewal ongoing history — so the line can be tracked over time. Salesforce keeps no
+  //     history of Status, so past values cannot be rebuilt later: this log IS the history. It
+  //     stores the sheet's own computed results (read back from Renewal_Ongoing, never recomputed
+  //     here), one row per day. Runs every 4h, so today's row is overwritten until the day ends.
+  try {
+    const kvRows = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: "Renewal_Ongoing!A4:B10", valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];
+    const kv = Object.fromEntries(kvRows.map((r) => [r[0], r[1]]));
+    const HIST = "Renewal_Ongoing_History";
+    if (byTitle[HIST] == null) await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: [{ addSheet: { properties: { title: HIST } } }] } });
+    const hist = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${HIST}!A:A` })).data.values || [];
+    const head = ["Date", "Renewal ongoing", "Deals", "Ended 30+ days", "Live ARR", "Live ARR + renewal ongoing", "Not counted (renewal already live)"];
+    const snap = [kv.as_of, kv.renewal_ongoing, kv.renewal_ongoing_deals, kv.renewal_ongoing_30d, kv.live_arr, kv.live_plus_renewal_ongoing, kv.renewal_paused_renewed];
+    if (typeof kv.as_of === "string" && snap.slice(1).every((v) => typeof v === "number")) {
+      const at = hist.findIndex((r) => r[0] === kv.as_of);
+      const row = at >= 0 ? at + 1 : Math.max(hist.length, 1) + 1;
+      await api.spreadsheets.values.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { valueInputOption: "RAW", data: [
+        { range: `${HIST}!A1`, values: [head] },
+        { range: `${HIST}!A${row}`, values: [snap] },
+      ] } });
+      console.log(`Renewal ongoing ${kv.as_of}: $${Math.round(kv.renewal_ongoing).toLocaleString()} (${kv.renewal_ongoing_deals} deals) · Live ARR + renewal ongoing $${Math.round(kv.live_plus_renewal_ongoing).toLocaleString()}`);
+    } else console.warn("Renewal ongoing snapshot skipped — Renewal_Ongoing key block not numeric:", kv);
+  } catch (e) { console.warn("Renewal ongoing snapshot failed (non-fatal):", e.message); }
 
   // 8) Report latest month + MAPE vs target
   const back = (await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `ARR_MoM_Rebuild!A2:G${months.length+1}`, valueRenderOption: "UNFORMATTED_VALUE" })).data.values || [];

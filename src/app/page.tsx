@@ -44,6 +44,15 @@ type DashboardData = {
   };
   arrMom?: { label: string; totalARR: number; momChange: number; momGrowth: number }[];
   liveArrToday?: number | null;
+  // Renewal ongoing (Renewal_Ongoing tab): paused contracts past their end date, which Salesforce
+  // drops out of Live ARR. Every figure is a sheet cell; null when the tab is missing.
+  renewalOngoing?: {
+    asOf: string; renewalOngoing: number; deals: number; ended30d: number; notCounted: number;
+    liveArr: number | null; livePlus: number;
+    dealList: { id: string; opp: string; account: string; owner: string; liveDate: string; endDate: string;
+      arr: number; daysPastEnd: number | null; counted: boolean; treatment: string; url: string }[];
+    history: { date: string; renewalOngoing: number; deals: number; liveArr: number | null; livePlus: number | null }[];
+  } | null;
   headlineSource?: Record<string, number>; // key→value block from the Headline tab (single source)
   headlineTrend?: { ym: string; active: number; newARR: number; churn: number; mom: number }[]; // ARR-trend table (drives the Command chart)
   targetsSource?: Record<string, number>; // key→value block from the Targets tab (plan + rollups)
@@ -578,6 +587,9 @@ export default function Dashboard() {
   // ARR Funnel (Pilot → Contracted → Billed): which month + which column was clicked. The deal
   // sets come from the API (arrFunnel.stock[].ids → arrFunnel.dealIndex) — nothing recomputed here.
   const [afDrill, setAfDrill] = useState<{ ym: string; label: string; bucket: string; col: string; cell: number } | null>(null);
+  // Renewal ongoing card: which deal set is open — the counted renewals, or the paused rows not
+  // counted because a live renewal already covers them.
+  const [roDrill, setRoDrill] = useState<"counted" | "excluded" | null>(null);
   // Forecast tab — Closed Won / YTD click-through. Separate from fDrill because it lists CLOSED
   // deals (from closedWonFeed) rather than open pipeline; the two never show at once.
   const [cwDrill, setCwDrill] = useState<{ owners: string[]; label: string; scope: "q" | "y"; cell: number; tier?: "Contracted" | "Billed" } | null>(null);
@@ -1283,13 +1295,131 @@ export default function Dashboard() {
 
   const chartPoints = period === "monthly" ? arrMomPoints : data.arr.weekly;
 
+  // Live ARR → Renewal ongoing → Live ARR + renewal ongoing, as three separate boxes (agreed with
+  // Andrew and Stephen at the 2026-10-02 Weekly Sales/Rev Ops Sync: keep Live ARR unchanged, show
+  // the renewals Salesforce has zeroed out beside it, and track the line over time). Shown on the
+  // Command tab and atop Booked ARR & Cashflow. Every figure is a Renewal_Ongoing sheet cell.
+  const renderRenewalOngoing = () => {
+    const R = data.renewalOngoing;
+    if (!R) return null;
+    const counted = R.dealList.filter((d) => d.counted);
+    const excluded = R.dealList.filter((d) => !d.counted);
+    // History: the last snapshot of each week, newest 8 weeks — picks rows, never re-adds them.
+    const byWeek = new Map<string, (typeof R.history)[number]>();
+    for (const h of R.history) byWeek.set(getWeekStart(h.date), h);
+    const weeks = [...byWeek.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(-8);
+    const box = (hero: boolean, color: string) => ({
+      flex: "1 1 200px", border: `1.5px solid ${hero ? color : C.bd}`, borderRadius: 10,
+      padding: "12px 14px", background: hero ? C.s2 : "transparent",
+    });
+    const op = { fontSize: 22, fontWeight: 800 as const, color: C.t3, alignSelf: "center" as const, padding: "0 2px" };
+    const big = { fontSize: 22, fontWeight: 800 as const, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 };
+    const small = { fontSize: 11, color: C.t3, marginTop: 2 };
+    const set = roDrill === "excluded" ? excluded : counted;
+    const spec: DrillSpec<(typeof R.dealList)[number]> | null = roDrill == null ? null : {
+      title: `renewal-ongoing-${roDrill}-${R.asOf}`,
+      source: "Renewal_Ongoing tab — Contract Paused deals past their end date (SOQL_Pull col W)",
+      chips: [R.asOf, roDrill === "counted" ? "Renewal ongoing" : "Not counted — renewal already live"],
+      note: roDrill === "counted"
+        ? (total) => Math.abs(total - R.renewalOngoing) > 1
+          ? `The box reads ${fmt(R.renewalOngoing)} but these deals sum to ${fmt(total)} — worth a look.`
+          : `Ties to the box exactly (${fmt(R.renewalOngoing)}).`
+        : "Paused in Salesforce, but the account already has a live Renewal that started within 60 days of this contract's end — that renewal is in Live ARR, so counting this row too would double it. The old row's Status just needs flipping to Contract Renewed.",
+      rows: set,
+      amount: (d) => d.arr,
+      amountLabel: "ARR",
+      emptyHint: "No deals in this set today.",
+      cols: [
+        { label: "Deal", l: true, csv: (d) => d.opp,
+          render: (d) => d.url ? <a href={d.url} target="_blank" rel="noreferrer" style={{ color: C.navy }}>{d.opp || d.id}</a> : (d.opp || d.id) },
+        { label: "Account", l: true, csv: (d) => d.account, render: (d) => d.account || "—" },
+        { label: "Owner", l: true, csv: (d) => d.owner, render: (d) => d.owner || "—" },
+        { label: "Contract live", l: true, csv: (d) => d.liveDate, render: (d) => d.liveDate || "—" },
+        { label: "Ended", l: true, csv: (d) => d.endDate, render: (d) => d.endDate || "—" },
+        { label: "Days past end", mono: true, csv: (d) => d.daysPastEnd ?? "",
+          render: (d) => d.daysPastEnd == null ? "—" : <span style={{ color: d.daysPastEnd > 30 ? C.red : C.t1 }}>{d.daysPastEnd}</span> },
+        { label: "ARR", mono: true, bold: true, csv: (d) => d.arr, render: (d) => fmt(d.arr) },
+      ],
+    };
+    return (
+      <Card title="Live ARR + renewals in motion"
+        sub={`As of ${R.asOf} · Salesforce drops a contract to $0 the day it ends, so a renewal still being worked on falls out of Live ARR and looks like churn. Renewal ongoing = Closed Won contracts in "Contract Paused" past their end date. Live ARR itself is unchanged.`}
+        accent={C.teal}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "14px 20px 6px" }}>
+          <div style={box(false, C.navy)}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: C.navy }}>Live ARR</div>
+            <div style={big}>{R.liveArr != null ? fmt(R.liveArr) : "—"}</div>
+            <div style={small}>the Command headline · unchanged</div>
+          </div>
+          <div style={op}>+</div>
+          <div style={{ ...box(false, C.teal), cursor: "pointer" }} role="button" tabIndex={0}
+            title="Show the deals behind this number"
+            onClick={() => setRoDrill(roDrill === "counted" ? null : "counted")}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setRoDrill(roDrill === "counted" ? null : "counted"); }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: C.teal }}>Renewal ongoing</div>
+            <div style={{ ...big, ...drillable }}>{fmt(R.renewalOngoing)}</div>
+            <div style={small}>{R.deals} deals · {fmt(R.ended30d)} ended 30+ days ago</div>
+            <div style={{ fontSize: 10.5, color: C.t3, fontFamily: "var(--font-dm-mono)", marginTop: 1 }}>
+              {R.deals} deals <span style={{ color: C.teal, fontWeight: 700 }}>→</span>
+            </div>
+          </div>
+          <div style={op}>=</div>
+          <div style={box(true, C.teal)}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: C.teal }}>Live ARR + renewal ongoing</div>
+            <div style={big}>{fmt(R.livePlus)}</div>
+            <div style={small}>if every paused renewal lands</div>
+          </div>
+        </div>
+        {R.notCounted !== 0 && (
+          <div style={{ padding: "2px 20px 6px", fontSize: 11.5, color: C.t3 }}>
+            Not counted: <span style={{ ...drillable, color: C.t2 }} onClick={() => setRoDrill(roDrill === "excluded" ? null : "excluded")}>
+              {fmt(R.notCounted)} across {excluded.length} paused {excluded.length === 1 ? "deal" : "deals"}
+            </span> whose renewal is already live (counted in Live ARR).
+          </div>
+        )}
+        {weeks.length > 0 && (
+          <div style={{ overflowX: "auto", padding: "6px 20px 4px" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bd}` }}>
+                  <th style={{ textAlign: "left", padding: "6px 16px 6px 0", fontSize: 11, color: C.t3, fontWeight: 600 }}>
+                    Week of · tracked since {R.history[0]?.date}
+                  </th>
+                  {weeks.map(([wk, h]) => <Th key={wk}>{h.date === R.asOf ? <b>today</b> : wk.slice(5).replace("-", "/")}</Th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {([
+                  { label: "Live ARR", c: C.navy, get: (h: (typeof R.history)[number]) => h.liveArr },
+                  { label: "Renewal ongoing", c: C.teal, get: (h: (typeof R.history)[number]) => h.renewalOngoing },
+                  { label: "Live ARR + renewal ongoing", c: C.t1, get: (h: (typeof R.history)[number]) => h.livePlus, total: true },
+                ]).map((row) => (
+                  <tr key={row.label} style={{ borderBottom: `1px solid ${C.s1}`, background: row.total ? C.s2 : undefined }}>
+                    <td style={{ padding: "8px 16px 8px 0", fontSize: 12.5, fontWeight: row.total ? 700 : 600, color: row.c, whiteSpace: "nowrap" }}>{row.label}</td>
+                    {weeks.map(([wk, h]) => { const v = row.get(h); return <Td key={wk} mono bold={!!row.total}>{v != null ? fmt(v) : "—"}</Td>; })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 10.5, color: C.t3, padding: "6px 0 0" }}>
+              Last daily snapshot of each week (Renewal_Ongoing_History tab). Salesforce keeps no history of contract Status, so tracking starts the day this line went live.
+            </div>
+          </div>
+        )}
+        <div style={{ padding: "8px 20px 14px" }}>
+          {roDrill != null && <DrillPanel spec={spec} onClear={() => setRoDrill(null)} />}
+        </div>
+      </Card>
+    );
+  };
+
   return (
     <div style={{ fontFamily: "var(--font-dm-sans)", background: C.bg, minHeight: "100vh" }}>
       <div style={{ background: C.card, borderBottom: `1px solid ${C.bd}` }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 30px 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.navy }}>
-              {data.demo ? "Horizon Dining Group — Q3 FY26" : "Momos Forecast — Q3 FY26"}
+              {data.demo ? `Horizon Dining Group — ${SALES_Q[currentSalesQ()].label}` : `Momos Forecast — ${SALES_Q[currentSalesQ()].label}`}
             </div>
             <div style={{ fontSize: 12, color: C.t3 }}>
               {data.demo && (
@@ -1377,6 +1507,7 @@ export default function Dashboard() {
                 </Card>
               );
             })()}
+            {renderRenewalOngoing()}
             <div style={{ height: 16 }} />
 
 
@@ -1926,7 +2057,7 @@ export default function Dashboard() {
           </Card>
 
           <Card
-            title="Pipeline generation by AE — Q3 FY26"
+            title={`Pipeline generation by AE — ${SALES_Q[currentSalesQ()].label}`}
             sub="New pipeline created this quarter — total contract value (Amount) of opps reaching SQL, vs each AE's quarterly pipe-generation target. Open pipeline shown for context."
             accent={C.coral}
           >
@@ -3192,6 +3323,7 @@ export default function Dashboard() {
         const short = (s: string) => (s || "").split(" ")[0];
         return (
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 30px" }}>
+            {renderRenewalOngoing()}
             {/* ARR Funnel — Pilot (in trial) → Contracted (signed, not paying) → Billed (paying), MoM.
                 Contracted + Billed = Live ARR, the Command tab's headline figure. */}
             {data.arrFunnel && data.arrFunnel.stock.length > 0 && (() => {
