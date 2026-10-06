@@ -16,7 +16,11 @@ const endARR = [4500000, 4801692, 5109119, 5566969, 6033581, 5690808, 6210436, 6
 const newARR = newBiz.map((v, i) => v + expansion[i]);
 for (let i = 6; i <= 11; i++) newARR[i] = endARR[i] - endARR[i - 1]; // rebased H2 net-new = MoM of ending path
 const cumTarget = newARR.map((_, i) => newARR.slice(0, i + 1).reduce((s, v) => s + v, 0));
-const q3Target = newARR[6] + newARR[7] + newARR[8];
+// ---- Current sales quarter — the ONE block to change at each quarter rollover ----
+// Key names below stay q3_* (page.tsx + the numbers gate read them); the window is CUR_Q's.
+// Targets plan rows: row 7 = Jan, so Oct–Dec = rows 16–18.
+const CUR_Q = { label: "Q4", start: "DATE(2026,10,1)", end: "DATE(2027,1,1)", months: [9, 10, 11], planRows: "$B$16:$B$18" };
+const q3Target = CUR_Q.months.reduce((s, i) => s + newARR[i], 0);
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // ---- Formula helpers: read ARR_MoM_Rebuild by month-end date (col B), so no hardcoded rows ----
@@ -36,9 +40,10 @@ const cumF = (n, col) => `SUMIFS(${A}!$${col}:$${col},${A}!$B:$B,">="&DATE(2026,
 const cumNew = (n) => fut(n, cumF(n, "Q"));
 const cumChn = (n) => fut(n, cumF(n, "J"));
 const pctPlan = (n) => fut(n, `IFERROR(TEXT(${cumF(n, "Q")}/${cumTarget[n - 1]},"0.0%"),"")`);
-// Q3 New ARR booked QTD (includes current month via EOMONTH(TODAY)); pace helpers.
-const q3Qtd = `SUMIFS(${A}!$Q:$Q,${A}!$B:$B,">="&DATE(2026,7,1),${A}!$B:$B,"<="&EOMONTH(TODAY(),0))`;
-const weeksLeft = `ROUNDUP((DATE(2026,10,1)-TODAY())/7,0)`;
+// Current-quarter New ARR booked QTD (includes current month via EOMONTH(TODAY)); pace helpers.
+const q3Qtd = `SUMIFS(${A}!$Q:$Q,${A}!$B:$B,">="&${CUR_Q.start},${A}!$B:$B,"<="&EOMONTH(TODAY(),0))`;
+const daysLeftF = `${CUR_Q.end}-TODAY()`;
+const weeksLeft = `ROUNDUP((${daysLeftF})/7,0)`;
 const wLast = `INDEX(${W}!$B$2:$B,COUNTA(${W}!$A$2:$A))`;                 // latest weekly Active ARR
 const wPrev = `INDEX(${W}!$B$2:$B,COUNTA(${W}!$A$2:$A)-1)`;
 // Exec-summary helpers (current calendar month / prior month) for the machine-readable block.
@@ -76,10 +81,11 @@ const pipeCreatedWeekF = `INDEX('${PW}'!$A:$I,MATCH("New ARR pipeline Created ($
 const pipeCreatedWeekPrevF = `INDEX('${PW}'!$A:$I,MATCH("New ARR pipeline Created ($)",'${PW}'!$A:$A,0),8)`;
 const pipeWowF = `IFERROR((${pipeCreatedWeekF}-${pipeCreatedWeekPrevF})/${pipeCreatedWeekPrevF},"")`;
 const renewalF = `'ARR_Forward'!$B$1`;                 // "up for renewal this month" (renewalDue)
-const q3TargetF = `SUM('${TG}'!$B$13:$B$15)`;          // Q3 plan (Jul/Aug/Sep) — single home = Targets tab
+const q3TargetF = `SUM('${TG}'!${CUR_Q.planRows})`;    // current-quarter plan — single home = Targets tab
 const q3PctF = `IFERROR(${q3Qtd}/(${q3TargetF}),"")`;
 const genPctF = `IFERROR(${pipeCreatedQ3F}/(${pipeQuotaF}),"")`;
-const elapsedF = `IFERROR(1-(DATE(2026,10,1)-TODAY())/(DATE(2026,10,1)-DATE(2026,7,2)),"")`;
+const elapsedExpr = `1-(${daysLeftF})/(${CUR_Q.end}-${CUR_Q.start})`;
+const elapsedF = `IFERROR(${elapsedExpr},"")`;
 
 async function main() {
   const api = google.sheets({ version: "v4", auth: gAuth });
@@ -117,21 +123,21 @@ async function main() {
     ["ym", "active", "new_arr", "churn", "mom"],
     ...trendRows,
     B,
-    ["② DAYS LEFT IN Q3 · GAP TO TARGET (New ARR = Net New + Expansion)"],
-    ["Source: ARR_MoM_Rebuild — New ARR Added (col Q), summed over Q3 · target = fixed finance plan"],
-    ["Days left in Q3", "=DATE(2026,10,1)-TODAY()"],
+    [`② DAYS LEFT IN ${CUR_Q.label} · GAP TO TARGET (New ARR = Net New + Expansion)`],
+    [`Source: ARR_MoM_Rebuild — New ARR Added (col Q), summed over ${CUR_Q.label} · target = fixed finance plan`],
+    [`Days left in ${CUR_Q.label}`, `=${daysLeftF}`],
     ["Weeks left", `=${weeksLeft}`],
-    ["Q3 New ARR target (from Targets plan)", `=${q3TargetF}`],
-    ["Q3 New ARR booked (QTD)", `=${q3Qtd}`],
+    [`${CUR_Q.label} New ARR target (from Targets plan)`, `=${q3TargetF}`],
+    [`${CUR_Q.label} New ARR booked (QTD)`, `=${q3Qtd}`],
     ["Gap to target", `=(${q3TargetF})-${q3Qtd}`],
     ["ARR needed / week", `=((${q3TargetF})-${q3Qtd})/${weeksLeft}`],
     B,
-    ["③ LAST WEEK vs PACE · Q3 QTD vs TARGET"],
+    [`③ LAST WEEK vs PACE · ${CUR_Q.label} QTD vs TARGET`],
     ["Source: ARR_WoW_Rebuild — Active ARR (col B) · ARR_MoM_Rebuild — New ARR (col Q)"],
     ["Latest weekly Active ARR", `=${wLast}`],
     ["WoW change", `=IFERROR(TEXT((${wLast}-${wPrev})/${wPrev},"+0.0%;-0.0%"),"—")`],
-    ["Q3 % of target (QTD)", `=IFERROR(TEXT(${q3Qtd}/${Math.round(q3Target)},"0.0%"),"—")`],
-    ["Quarter elapsed", `=IFERROR(TEXT(1-(DATE(2026,10,1)-TODAY())/(DATE(2026,10,1)-DATE(2026,7,2)),"0.0%"),"—")`],
+    [`${CUR_Q.label} % of target (QTD)`, `=IFERROR(TEXT(${q3Qtd}/${Math.round(q3Target)},"0.0%"),"—")`],
+    ["Quarter elapsed", `=IFERROR(TEXT(${elapsedExpr},"0.0%"),"—")`],
     B,
     ["④ PIPELINE PULSE — Week over Week (last 8 weeks)"],
     ["Source: ARR_WoW_Rebuild — week start (col A), Active ARR (col B), New ARR added (col G)"],
@@ -186,15 +192,15 @@ async function main() {
     ["pipe_wow_pct", `=${pipeWowF}`, "Exec: pipeline creation WoW (fraction)"],
     ["pipe_gap", `=MAX(0,(${pipeQuotaF})-(${pipeCreatedQ3F}))`, "Command: pipeline gap to quota"],
     ["pipe_needed_week", `=IFERROR(MAX(0,(${pipeQuotaF})-(${pipeCreatedQ3F}))/${weeksLeft},0)`, "Command: pipeline needed/week"],
-    ["q3_target", `=${q3TargetF}`, "Gap: Q3 New ARR target (from Targets tab plan)"],
-    ["q3_booked", `=${q3Qtd}`, "Gap: Q3 New ARR booked (QTD)"],
-    ["gap_to_target", `=(${q3TargetF})-${q3Qtd}`, "Gap: Q3 gap to target"],
-    ["days_left", "=DATE(2026,10,1)-TODAY()", "Gap: days left in Q3"],
+    ["q3_target", `=${q3TargetF}`, `Gap: ${CUR_Q.label} New ARR target (from Targets tab plan)`],
+    ["q3_booked", `=${q3Qtd}`, `Gap: ${CUR_Q.label} New ARR booked (QTD)`],
+    ["gap_to_target", `=(${q3TargetF})-${q3Qtd}`, `Gap: ${CUR_Q.label} gap to target`],
+    ["days_left", `=${daysLeftF}`, `Gap: days left in ${CUR_Q.label}`],
     ["weeks_left", `=${weeksLeft}`, "Gap: weeks left"],
     ["arr_needed_week", `=((${q3TargetF})-${q3Qtd})/${weeksLeft}`, "Gap: ARR needed/week"],
     ["last_week_active", `=${wLast}`, "Pace: latest weekly Active ARR"],
     ["wow_pct", `=${wowPctF}`, "Pace: WoW change (fraction)"],
-    ["q3_pct", `=${q3PctF}`, "Pace: Q3 % of target (fraction)"],
+    ["q3_pct", `=${q3PctF}`, `Pace: ${CUR_Q.label} % of target (fraction)`],
     ["qtr_elapsed_pct", `=${elapsedF}`, "Pace: quarter elapsed (fraction)"],
   ];
 

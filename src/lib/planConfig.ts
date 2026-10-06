@@ -58,6 +58,10 @@ export function monthsInQuarter(q: string): number[] {
 // quotas are set independently (ramp/seasonality), so annual ≠ quotaQ3 × 4.
 export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; quotaAnnual: number | null; am: boolean; lead?: boolean }[] = [
   { name: "James Burdick", short: "James", quotaQ3: 255000, quotaAnnual: 1000000, am: false },
+  // Dorsa is back on the quarterly roster for Q4 (Tai, 2026-10-06) with a $265.5k Q4 quota from
+  // the Targets tab (ae_quota_q4_dorsa_mahmoudnia). She had no Q3 quota after leaving 2026-09-09,
+  // so quotaQ3 is null — the Q3 fallback never applies to her.
+  { name: "Dorsa Mahmoudnia", short: "Dorsa", quotaQ3: null, quotaAnnual: 883200, am: false },
   // Jed Rutstein returned to the team 2026-09-15 (his book was reassigned back to him). $250k Q3
   // quota, also written to Targets as ae_quota_q3_jed_rutstein so the sheet and this list agree.
   { name: "Jed Rutstein", short: "Jed", quotaQ3: 250000, quotaAnnual: 750000, am: false },
@@ -72,13 +76,14 @@ export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; q
   // so he no longer contributes to the team quota denominator. quotaQ3 null → no team-quota effect;
   // his own actuals still render on his card.
   // NOTE: this list is the FALLBACK for the sheet. The live quota source is the Targets tab
-  // (ae_quota_q3_* keys) that the "AE Attainment (Official)" cells look up — keep the two in step.
+  // (ae_quota_<quarter>_* keys, e.g. ae_quota_q4_*) — route.ts reads the current quarter's key
+  // and only falls back to quotaQ3 here during Q3. Quarterly quotas are never hardcoded for Q4+.
   // Davi's quota was also deleted from the Targets tab on 2026-09-15.
   { name: "David Dubinski", short: "Davi", quotaQ3: null, quotaAnnual: null, am: false, lead: true },
 ];
 
-// AEs excluded from the FORECAST tab only (not AE Attainment). Empty since 2026-09-09:
-// the only entry was Dorsa, and she is no longer on the roster, so the exclusion is moot.
+// AEs excluded from the FORECAST tab only (not AE Attainment). Empty: Dorsa (the only past
+// entry) is back on the roster for Q4 and should show.
 export const FORECAST_EXCLUDE = new Set<string>([]);
 
 export const CURRENT_LIVE_ARR_FALLBACK = 5690808;

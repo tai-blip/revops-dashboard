@@ -229,10 +229,14 @@ async function buildPayload(): Promise<Payload> {
     const q = currentSalesQ();
     const qDef = SALES_Q[q];
     const latestArr = arr.monthly[arr.monthly.length - 1]?.activeARR ?? CURRENT_LIVE_ARR_FALLBACK;
+    // Quarterly quota comes from the Targets tab key for the CURRENT quarter
+    // (ae_quota_q4_james_burdick, …). The in-code quotaQ3 is only a fallback during Q3 —
+    // outside Q3 a rep with no Targets key has no quota rather than a stale Q3 number.
+    const quotaKey = (name: string) => `ae_quota_${q.toLowerCase()}_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
     const roster = AE_ROSTER.filter((a) => !FORECAST_EXCLUDE.has(a.name)).map((a) => ({
       name: a.name,
       short: a.short,
-      quota: a.quotaQ3,
+      quota: targetsSource[quotaKey(a.name)] ?? (q === "Q3" ? a.quotaQ3 : null),
       am: a.am,
       lead: a.lead ?? false,
     }));

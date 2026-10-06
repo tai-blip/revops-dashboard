@@ -292,16 +292,18 @@ async function main() {
     fix: "ARR_MoM_Rebuild col Q (=N+O) in scripts/refresh-arr-from-sfdc.mjs.",
   });
 
-  // A5. Q3 New ARR booked (QTD) = same flow, quarter-start through current month-end.
-  //     Matches the Headline SUMIFS: col B (month-end) from Jul 1 to EOMONTH(TODAY()).
-  const qLo = firstOfMonth(y, 6); // Jul 1 — Q3 FY26 per SALES_Q
+  // A5. Quarter New ARR booked (QTD) = same flow, quarter-start through current month-end.
+  //     Matches the Headline SUMIFS (key still named q3_booked): col B (month-end) from the
+  //     quarter's 1st to EOMONTH(TODAY()). Sales quarters are calendar quarters here (Q4 = Oct 1).
+  const qLo = firstOfMonth(y, Math.floor(m / 3) * 3);
+  const qName = `Q${Math.floor(m / 3) + 1}`;
   const q3Agg = await soqlAgg(sf, `
     SELECT SUM(convertCurrency(AnnualContractValueARR__c)) arr
     FROM Opportunity
     WHERE StageName IN ('Billing','Closed Won')
       AND RecordType.Name IN ('1.New Business','3.Business Expansion')
       AND ContractLiveDate__c > ${qLo} AND ContractLiveDate__c <= ${moHi}`);
-  cross("Q3 New ARR booked (QTD)", H.q3_booked, q3Agg.arr, {
+  cross(`${qName} New ARR booked (QTD)`, H.q3_booked, q3Agg.arr, {
     tolPct: 0.01,
     fix: "Headline q3_booked SUMIFS over ARR_MoM_Rebuild col Q (scripts/build-headline-tab.mjs).",
   });
