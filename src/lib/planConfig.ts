@@ -60,8 +60,9 @@ export const AE_ROSTER: { name: string; short: string; quotaQ3: number | null; q
   { name: "James Burdick", short: "James", quotaQ3: 255000, quotaAnnual: 1000000, am: false },
   // Dorsa is back on the quarterly roster for Q4 (Tai, 2026-10-06) with a $265.5k Q4 quota from
   // the Targets tab (ae_quota_q4_dorsa_mahmoudnia). She had no Q3 quota after leaving 2026-09-09,
-  // so quotaQ3 is null — the Q3 fallback never applies to her.
-  { name: "Dorsa Mahmoudnia", short: "Dorsa", quotaQ3: null, quotaAnnual: 883200, am: false },
+  // so quotaQ3 is null — the Q3 fallback never applies to her. quotaAnnual is not read by the app;
+  // her annual goal comes from the AE_Annual_Potential tab, so it is not duplicated here.
+  { name: "Dorsa Mahmoudnia", short: "Dorsa", quotaQ3: null, quotaAnnual: null, am: false },
   // Jed Rutstein returned to the team 2026-09-15 (his book was reassigned back to him). $250k Q3
   // quota, also written to Targets as ae_quota_q3_jed_rutstein so the sheet and this list agree.
   { name: "Jed Rutstein", short: "Jed", quotaQ3: 250000, quotaAnnual: 750000, am: false },
