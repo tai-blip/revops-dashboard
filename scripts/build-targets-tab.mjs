@@ -10,21 +10,33 @@ import { google } from "googleapis";
 const gAuth = new google.auth.JWT({ email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, key: Buffer.from(process.env.GOOGLE_PRIVATE_KEY_B64, "base64").toString("utf-8"), scopes: ["https://www.googleapis.com/auth/spreadsheets"] });
 const NAVY = { red: 0.13, green: 0.19, blue: 0.32 };
 
-// ---- Per-AE Q3 quotas. Must match src/lib/planConfig.ts AE_ROSTER (the in-code fallback). ----
-// Davi carries the residual: the other reps' assigned quotas less what the team had already
-// closed. Derived once on 2026-08-28 and FROZEN — recomputing it live would drop his quota every
-// time a teammate closed something, moving his attainment for reasons that are not his.
-//   other reps' Q3 quotas   1,105,000  (James 255k, Dorsa 250k, Jed 250k, Jill 200k, Mathias 150k)
-//   less team Q3 closed won  −274,670  (New Business + Expansion, roster owners, as of 28 Aug)
-//   = 830,330, rounded        830,000
-// Mathias is 150k, confirmed by Tai 2026-09-06 — the attainment sheet had 250k, which was wrong
-// and would have made the residual 100k too small had it been used.
-const AE_QUOTAS = [
-  ["James Burdick", 255000, "Q3 quota — James Burdick"],
-  ["Jill Bucci", 200000, "Q3 quota — Jill Bucci (quarterly figure, not the $520k H2 total)"],
-  ["Mathias Berthelemot", 150000, "Q3 quota — Mathias Berthelemot"],
-  ["David Dubinski", 830000, "Q3 quota — David Dubinski (frozen residual, see note above)"],
-];
+// ---- Per-AE quarterly quotas, one block per quarter. Must match the live Targets tab — the
+// "AE Attainment (Official)" quota cells MATCH these keys, and route.ts reads the CURRENT
+// quarter's keys for the Forecast tab. Keep past quarters: a rerun clears the whole tab.
+// Q3: Davi's frozen $830k residual was deleted 2026-09-15 (Tai); Jed returned 2026-09-15 at $250k.
+// Mathias is 150k, confirmed by Tai 2026-09-06 (the attainment sheet once had 250k, wrong).
+// Q4: set by Tai 2026-10-06. Dorsa back on the roster; David (lead) carries no quota.
+const AE_QUOTAS = {
+  q3: [
+    ["James Burdick", 255000, "Q3 quota — James Burdick"],
+    ["Jed Rutstein", 250000, "Q3 quota — Jed Rutstein"],
+    ["Jill Bucci", 200000, "Q3 quota — Jill Bucci (quarterly figure, not the $520k H2 total)"],
+    ["Mathias Berthelemot", 150000, "Q3 quota — Mathias Berthelemot"],
+  ],
+  q4: [
+    ["James Burdick", 312500, "Q4 2026 ACV quota — James Burdick"],
+    ["Dorsa Mahmoudnia", 265500, "Q4 2026 ACV quota — Dorsa Mahmoudnia"],
+    ["Jed Rutstein", 250000, "Q4 2026 ACV quota — Jed Rutstein"],
+    ["Jill Bucci", 320000, "Q4 2026 ACV quota — Jill Bucci"],
+    ["Mathias Berthelemot", 150000, "Q4 2026 ACV quota — Mathias Berthelemot"],
+  ],
+};
+const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+
+// ---- Current sales quarter — the ONE block to change at each quarter rollover ----
+// Key names stay q3_* where the dashboard already reads them; the window is CUR_Q's.
+// Plan rows: row 7 = Jan, so Oct–Dec = months index 9..11.
+const CUR_Q = { label: "Q4", start: "DATE(2026,10,1)", end: "DATE(2027,1,1)", months: [9, 10, 11], span: "Oct–Dec" };
 
 // ---- Fixed finance plan (ported EXACTLY from planConfig.ts), Jan..Dec 2026 ----
 const newBiz = [251698, 257202, 262647, 383856, 391254, 431734, 431370, 438347, 589757, 683008, 739043, 825669];
@@ -47,12 +59,11 @@ const ME = (n) => `EOMONTH(${D1(n)},0)`;
 const idxQ = (n) => `IFERROR(INDEX(${A}!$Q:$Q,MATCH(${ME(n)},${A}!$B:$B,0)),0)`;
 const fut = (n, inner) => `=IF(${D1(n)}>TODAY(),"",${inner})`;
 const booked = (n) => fut(n, idxQ(n));
-// Booked New ARR summed over a date window (YTD / Q3-to-date, current month included via EOMONTH(TODAY)).
+// Booked New ARR summed over a date window (YTD / quarter-to-date, current month included via EOMONTH(TODAY)).
 const bookedYtd = `SUMIFS(${A}!$Q:$Q,${A}!$B:$B,">="&DATE(2026,1,1),${A}!$B:$B,"<="&EOMONTH(TODAY(),0))`;
-const bookedQ3 = `SUMIFS(${A}!$Q:$Q,${A}!$B:$B,">="&DATE(2026,7,1),${A}!$B:$B,"<="&EOMONTH(TODAY(),0))`;
-const weeksLeft = `ROUNDUP((DATE(2026,10,1)-TODAY())/7,0)`;
-// Q3 New ARR target = plan for Jul+Aug+Sep (literals). QTD target = quarter months already started.
-const q3Target = newARR[6] + newARR[7] + newARR[8];
+const bookedQ3 = `SUMIFS(${A}!$Q:$Q,${A}!$B:$B,">="&${CUR_Q.start},${A}!$B:$B,"<="&EOMONTH(TODAY(),0))`;
+const weeksLeft = `ROUNDUP((${CUR_Q.end}-TODAY())/7,0)`;
+// Current-quarter New ARR target = plan for its three months. QTD target = quarter months already started.
 // YTD target through the current month = sum of plan New ARR for months whose 1st has arrived.
 // Built as a SUMPRODUCT over a small in-sheet plan range so it stays auditable and self-updating.
 
@@ -68,13 +79,13 @@ async function main() {
   const planLastRow = planFirstRow + 11; // Dec
   const PN = `$B$${planFirstRow}:$B$${planLastRow}`; // plan New ARR target column (B)
   const PS = `$A$${planFirstRow}:$A$${planLastRow}`; // month-start date column (A, hidden helper)
-  // Q3 target = Jul+Aug+Sep plan cells. This tab is the single HOME of the plan; the dashboard
+  // Quarter target = the current quarter's three plan cells. This tab is the single HOME of the plan; the dashboard
   // reads q3_target from here for BOTH the Targets & Progress and Command gap cards.
-  const Q3SUM = `SUM($B$${planFirstRow + 6}:$B$${planFirstRow + 8})`;
+  const Q3SUM = `SUM($B$${planFirstRow + CUR_Q.months[0]}:$B$${planFirstRow + CUR_Q.months[2]})`;
   // YTD plan target through the current calendar month (month whose 1st <= today).
   const ytdTargetF = `SUMPRODUCT((${PS}<=TODAY())*${PN})`;
-  // Q3 QTD plan target (Jul/Aug/Sep months already started).
-  const qtdTargetF = `SUMPRODUCT((${PS}<=TODAY())*(${PS}>=DATE(2026,7,1))*(${PS}<DATE(2026,10,1))*${PN})`;
+  // Quarter-to-date plan target (this quarter's months already started).
+  const qtdTargetF = `SUMPRODUCT((${PS}<=TODAY())*(${PS}>=${CUR_Q.start})*(${PS}<${CUR_Q.end})*${PN})`;
 
   const values = [
     ["TARGETS — live mirror of the Targets & Progress tab"],
@@ -104,14 +115,14 @@ async function main() {
       "",                            // Attainment % — filled by the row-relative patch below
     ]),
     B,
-    ["③ YTD & Q3 PROGRESS"],
+    [`③ YTD & ${CUR_Q.label} PROGRESS`],
     ["Source: ① plan targets + ARR_MoM_Rebuild booked (col Q)"],
     ["YTD New ARR target (through this month)", `=${ytdTargetF}`],
     ["YTD New ARR booked", `=${bookedYtd}`],
-    ["Q3 New ARR target (fixed plan)", `=${Q3SUM}`],
-    ["Q3 New ARR booked (QTD)", `=${bookedQ3}`],
-    ["Gap to Q3 target", `=${Q3SUM}-${bookedQ3}`],
-    ["Weeks left in Q3", `=${weeksLeft}`],
+    [`${CUR_Q.label} New ARR target (fixed plan)`, `=${Q3SUM}`],
+    [`${CUR_Q.label} New ARR booked (QTD)`, `=${bookedQ3}`],
+    [`Gap to ${CUR_Q.label} target`, `=${Q3SUM}-${bookedQ3}`],
+    [`Weeks left in ${CUR_Q.label}`, `=${weeksLeft}`],
     ["New ARR needed / week", `=(${Q3SUM}-${bookedQ3})/${weeksLeft}`],
     B,
     // Machine-readable key→value block — the dashboard reads THIS by key (col A → col B).
@@ -120,15 +131,15 @@ async function main() {
     // gap_to_target/arr_needed_week/weeks_left/days_left continue to come from Headline.
     ["══ MACHINE-READABLE — powers the dashboard Targets tab · DO NOT EDIT ══"],
     ["key", "value", "feeds"],
-    ["q3_target", `=${Q3SUM}`, "Q3 New ARR target (Σ Jul–Sep plan) — single plan source"],
+    ["q3_target", `=${Q3SUM}`, `${CUR_Q.label} New ARR target (Σ ${CUR_Q.span} plan) — single plan source`],
     ["ytd_new_arr_target", `=${ytdTargetF}`, "YTD New ARR target (through current month)"],
     ["ytd_new_arr_booked", `=${bookedYtd}`, "YTD New ARR booked"],
-    ["qtd_arr_target", `=${qtdTargetF}`, "Q3 QTD target (started months) — Command pace"],
+    ["qtd_arr_target", `=${qtdTargetF}`, `${CUR_Q.label} QTD target (started months) — Command pace`],
     ["fy26_new_arr_target", `=SUM($B$${planFirstRow}:$B$${planLastRow})`, "FY26 New ARR target (Σ plan months)"],
     ["fy26_ending_arr_target", `=$C$${planLastRow}`, "FY26 Ending ARR target (Dec year-end)"],
     ...months.map((n) => [`plan_newarr_m${n}`, `=$B$${planFirstRow + n - 1}`, `Plan New ARR target — ${MON[n - 1]}`]),
     ...months.map((n) => [`plan_endarr_m${n}`, `=$C$${planFirstRow + n - 1}`, `Plan Ending ARR target — ${MON[n - 1]}`]),
-    // ── Per-AE Q3 quotas. THE single source. ────────────────────────────────────────────────
+    // ── Per-AE quarterly quotas. THE single source. ────────────────────────────────────────────────
     // These used to exist in three places at once — planConfig.ts AE_ROSTER, and hand-typed twice
     // inside "AE Attainment (Official)" (rows 5-10 and again 15-20). On 2026-08-28 Davi's residual
     // was worked out and written to planConfig only; the sheet copies never got it. His quota cell
@@ -136,16 +147,20 @@ async function main() {
     // every single day: a rep with actuals and no quota inflates team attainment, because his ARR
     // lands in the numerator with nothing under it.
     // Now the attainment tab's quota cells POINT HERE, so there is one number to change.
-    ...AE_QUOTAS.map(([name, q, note]) => [`ae_quota_q3_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`, q, note]),
-    ["ae_quota_q3_total", "", "Σ per-AE Q3 quota — the team denominator (formula patched in below)"],
+    ...Object.entries(AE_QUOTAS).flatMap(([qk, list]) => [
+      ...list.map(([name, q, note]) => [`ae_quota_${qk}_${slug(name)}`, q, note]),
+      [`ae_quota_${qk}_total`, "", `Σ per-AE ${qk.toUpperCase()} quota — the team denominator (formula patched in below)`],
+    ]),
   ];
 
   // The AE-quota total sums the quota rows rather than carrying a number this script added up:
   // the sheet owns the arithmetic, so editing one rep's quota moves the denominator too.
-  const qFirst = values.findIndex((r) => String(r[0]).startsWith("ae_quota_q3_")) + 1;   // 1-based
-  const qLast = qFirst + AE_QUOTAS.length - 1;
-  const qTotalIx = values.findIndex((r) => r[0] === "ae_quota_q3_total");
-  if (qTotalIx > -1) values[qTotalIx][1] = `=SUM($B$${qFirst}:$B$${qLast})`;
+  for (const [qk, list] of Object.entries(AE_QUOTAS)) {
+    const qFirst = values.findIndex((r) => String(r[0]).startsWith(`ae_quota_${qk}_`)) + 1;   // 1-based
+    const qLast = qFirst + list.length - 1;
+    const qTotalIx = values.findIndex((r) => r[0] === `ae_quota_${qk}_total`);
+    if (qTotalIx > -1) values[qTotalIx][1] = `=SUM($B$${qFirst}:$B$${qLast})`;
+  }
 
   // Patch section ②'s Δ / attainment formulas to reference their OWN rows (now that the layout
   // is fixed). Section ② "Month" header is at index (find it), data rows follow.
@@ -204,6 +219,6 @@ async function main() {
   await api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: fmtReqs } });
 
   console.log("Targets tab (formula-driven) built → https://docs.google.com/spreadsheets/d/" + ID + "/edit#gid=" + gid);
-  console.log("Plan targets are literals-in-sheet (auditable single source); booked/YTD/Q3 are live formulas into ARR_MoM_Rebuild.");
+  console.log("Plan targets are literals-in-sheet (auditable single source); booked/YTD/quarter are live formulas into ARR_MoM_Rebuild.");
 }
 main().catch((e) => { console.error(e); process.exit(1); });

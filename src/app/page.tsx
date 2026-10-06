@@ -2241,7 +2241,9 @@ export default function Dashboard() {
                   const quota = rep.quota;
                   const attain = quota && quota > 0 ? cwTotal / quota : null;
                   const pipeGen = q3CreatedByOwner[rep.name] ?? 0;
-                  const pipeTarget = AE_PLAN[rep.name]?.pipeGenTargetQ3 ?? 0;
+                  // Pipe quota from the Pipeline tab (→ AE Attainment (Official), current quarter);
+                  // AE_PLAN's Q3 figure is only the fallback when the sheet has no row for the rep.
+                  const pipeTarget = data.pipeline.aeBreakdown.find((r) => r.name === rep.name)?.quota ?? AE_PLAN[rep.name]?.pipeGenTargetQ3 ?? 0;
                   const coverage = data.coverageByOwner?.[rep.name] ?? 0;
                   const covMult = quota && quota > 0 ? coverage / quota : null;
                   const isAE = !rep.am && !rep.lead;
