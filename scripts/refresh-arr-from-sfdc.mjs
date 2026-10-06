@@ -728,6 +728,17 @@ async function main() {
         { range: `${HIST}!A1`, values: [head] },
         { range: `${HIST}!A${row}`, values: [snap] },
       ] } });
+      // Month's deal list, so each month's cell on the dashboard stays clickable after the month
+      // closes. One block per month, replaced on every run — the last run of a month leaves its
+      // month-end list. Rows are the sheet's own FILTER output, copied as-is.
+      const LOG = "Renewal_Ongoing_Deals";
+      const ym = kv.as_of.slice(0, 7);
+      const list = ((await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: "Renewal_Ongoing!A13:J400", valueRenderOption: "UNFORMATTED_VALUE" })).data.values || []).filter((r) => r[0]);
+      if (byTitle[LOG] == null) await api.spreadsheets.batchUpdate({ spreadsheetId: SHEET_ID, requestBody: { requests: [{ addSheet: { properties: { title: LOG } } }] } });
+      const old = ((await api.spreadsheets.values.get({ spreadsheetId: SHEET_ID, range: `${LOG}!A2:K20000`, valueRenderOption: "UNFORMATTED_VALUE" })).data.values || []).filter((r) => r[0] && r[0] !== ym);
+      const logRows = [["Month", "Id", "Opportunity", "Account", "Owner", "Contract live", "Contract end", "ARR (USD)", "Days past end", "Treatment", "Salesforce"], ...old, ...list.map((r) => [ym, ...r])];
+      await api.spreadsheets.values.clear({ spreadsheetId: SHEET_ID, range: `${LOG}!A1:K20000` });
+      await api.spreadsheets.values.update({ spreadsheetId: SHEET_ID, range: `${LOG}!A1`, valueInputOption: "RAW", requestBody: { values: logRows } });
       console.log(`Renewal ongoing ${kv.as_of}: $${Math.round(kv.renewal_ongoing).toLocaleString()} (${kv.renewal_ongoing_deals} deals) · Live ARR + renewal ongoing $${Math.round(kv.live_plus_renewal_ongoing).toLocaleString()}`);
     } else console.warn("Renewal ongoing snapshot skipped — Renewal_Ongoing key block not numeric:", kv);
   } catch (e) { console.warn("Renewal ongoing snapshot failed (non-fatal):", e.message); }

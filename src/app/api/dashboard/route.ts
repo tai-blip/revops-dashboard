@@ -89,7 +89,7 @@ async function buildPayload(): Promise<Payload> {
     // Reading each tab individually (~19 gets/load) blows the Sheets "60 reads/min/user"
     // quota under concurrent traffic; batching collapses it to ~2 reads per load.
     // NOTE: order here MUST match the destructured variables below.
-    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows, liveArrPullRows, salesCycleRows, funnelRows, renewalOngoingRows, renewalHistoryRows] =
+    const [wowRows, arrMomRows, aeRows, pipelineRows, pipelineWowRows, query1Rows, query2Rows, forecastingRows, closedDealsRows, arrMomRebuildRows, acvMomRows, perLocRows, paymentMixRows, aeAnnualRows, topBookedRows, arrForwardRows, dealTrackerRows, cashForecastRows, arrFunnelRows, headlineRows, targetsRows, forecastPotentialRows, bookedSnapRows, agingRows, dealBreakdownRows, liveArrPullRows, salesCycleRows, funnelRows, renewalOngoingRows, renewalHistoryRows, renewalDealLogRows] =
       await getSheetValuesBatch([
         { tab: "ARR_WoW_Rebuild", range: "A1:J30" },
         // Legacy manual tab (deleted 2026-07-24; ARR_MoM_Rebuild is canonical) — tolerated as fallback.
@@ -158,6 +158,8 @@ async function buildPayload(): Promise<Payload> {
         { tab: "Renewal_Ongoing", range: "A1:J400" },
         // One row per day of those same sheet-computed figures — the line's history.
         { tab: "Renewal_Ongoing_History", range: "A2:G2000" },
+        // Each month's deal list (last run of the month = month-end), so past months stay clickable.
+        { tab: "Renewal_Ongoing_Deals", range: "A2:K20000" },
       ]);
     // Parse a source tab's machine-readable key→value block (col A = key, col B = numeric value).
     const parseKeyValue = (rows: (string | number | null)[][] | undefined): Record<string, number> => {
@@ -527,23 +529,35 @@ async function buildPayload(): Promise<Payload> {
         const kv = parseKeyValue(renewalOngoingRows);
         if (kv.renewal_ongoing == null || kv.live_plus_renewal_ongoing == null) return null;
         const hdr = (renewalOngoingRows ?? []).findIndex((r) => r?.[0] === "Id");
-        const deals = hdr < 0 ? [] : (renewalOngoingRows ?? []).slice(hdr + 1)
-          .filter((r) => String(r?.[0] ?? "").length > 0)
-          .map((r) => ({
+        type Row = (string | number | null)[];
+        const toDeal = (r: Row) => ({
             id: String(r[0]), opp: String(r[1] ?? ""), account: String(r[2] ?? ""), owner: String(r[3] ?? ""),
             liveDate: String(r[4] ?? ""), endDate: String(r[5] ?? ""),
             arr: typeof r[6] === "number" ? (r[6] as number) : 0,
             daysPastEnd: typeof r[7] === "number" ? (r[7] as number) : null,
             counted: r[8] === "Ongoing", treatment: String(r[8] ?? ""), url: String(r[9] ?? ""),
-          }));
-        const history = (renewalHistoryRows ?? [])
-          .filter((r) => typeof r?.[0] === "string" && typeof r?.[1] === "number")
-          .map((r) => ({
-            date: String(r[0]), renewalOngoing: r[1] as number,
+          });
+        const deals = hdr < 0 ? [] : (renewalOngoingRows ?? []).slice(hdr + 1)
+          .filter((r) => String(r?.[0] ?? "").length > 0).map(toDeal);
+        // Month view = the LAST daily snapshot in each month (month-end once the month closes).
+        // Picks sheet rows; adds nothing up.
+        const monthly: Record<string, { renewalOngoing: number; deals: number; notCounted: number; liveArr: number | null; livePlus: number | null; asOf: string }> = {};
+        for (const r of renewalHistoryRows ?? []) {
+          if (typeof r?.[0] !== "string" || typeof r?.[1] !== "number") continue;
+          monthly[String(r[0]).slice(0, 7)] = {
+            renewalOngoing: r[1] as number,
             deals: typeof r[2] === "number" ? (r[2] as number) : 0,
             liveArr: typeof r[4] === "number" ? (r[4] as number) : null,
             livePlus: typeof r[5] === "number" ? (r[5] as number) : null,
-          }));
+            notCounted: typeof r[6] === "number" ? (r[6] as number) : 0,
+            asOf: String(r[0]),
+          };
+        }
+        const dealsByMonth: Record<string, ReturnType<typeof toDeal>[]> = {};
+        for (const r of renewalDealLogRows ?? []) {
+          if (!r?.[0] || !r?.[1]) continue;
+          (dealsByMonth[String(r[0])] ??= []).push(toDeal(r.slice(1)));
+        }
         return {
           asOf: String((renewalOngoingRows ?? []).find((r) => r?.[0] === "as_of")?.[1] ?? ""),
           renewalOngoing: kv.renewal_ongoing,
@@ -553,7 +567,8 @@ async function buildPayload(): Promise<Payload> {
           liveArr: kv.live_arr ?? null,
           livePlus: kv.live_plus_renewal_ongoing,
           dealList: deals,
-          history,
+          monthly,
+          dealsByMonth,
         };
       })(),
       salesCycleDeals: scDealRows.map((r) => ({
