@@ -243,14 +243,14 @@ const TABS = [
   ["productarr", "Product ARR"],
 ] as const;
 
-// Is a Pipeline-WoW MoM month label (e.g. "Jul-26") inside Q3 FY26 (Jul–Sep 2026)?
+// Is a Pipeline-WoW MoM month label (e.g. "Oct-26") inside the given sales quarter's months?
 const MONTH_ABBR = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-function isQ3Fy26(label: string): boolean {
+function isInSalesQ(label: string, q: string): boolean {
   const m = /^([A-Za-z]{3})-(\d{2})$/.exec(label.trim());
   if (!m) return false;
   const mi = MONTH_ABBR.indexOf(m[1].toLowerCase());
   const yr = 2000 + parseInt(m[2], 10);
-  return yr === 2026 && (mi === 6 || mi === 7 || mi === 8);
+  return yr === Number(SALES_Q[q].start.slice(0, 4)) && monthsInQuarter(q).includes(mi);
 }
 
 // MoM progression card (styled after the Pipeline WoW card): pill per series,
@@ -565,6 +565,9 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<string>("command");
+  // Current sales quarter ("Q4") — every quarter label on the page follows it, not a hardcoded "Q3".
+  const curQ = currentSalesQ();
+  const curQLabel = SALES_Q[curQ].label;
   const [period, setPeriod] = useState<"monthly" | "weekly">("monthly");
   const [trendRep, setTrendRep] = useState<string>("James Burdick");
   const [pipeAeFilter, setPipeAeFilter] = useState<string>("All");
@@ -768,10 +771,10 @@ export default function Dashboard() {
     if (!data) return out;
     if (data.pipelineGen) { for (const [rep, o] of Object.entries(data.pipelineGen.byOwner)) out[rep] = o.arr; return out; }
     const { months, reps } = data.pipelineWow.newArrMom;
-    const q3Idx = months.map((m, i) => (isQ3Fy26(m) ? i : -1)).filter((i) => i >= 0);
+    const q3Idx = months.map((m, i) => (isInSalesQ(m, curQ) ? i : -1)).filter((i) => i >= 0);
     for (const [rep, vals] of Object.entries(reps)) { if (/^all\b/i.test(rep)) continue; out[rep] = q3Idx.reduce((s, i) => s + (vals[i] ?? 0), 0); }
     return out;
-  }, [data]);
+  }, [data, curQ]);
 
   // Count of quarter-created opps per AE — same server source (open + closed-lost).
   const q3CreatedCountByOwner = useMemo(() => {
@@ -779,10 +782,10 @@ export default function Dashboard() {
     if (!data) return out;
     if (data.pipelineGen) { for (const [rep, o] of Object.entries(data.pipelineGen.byOwner)) out[rep] = o.count; return out; }
     const { months, reps } = data.pipelineWow.newOppsMom;
-    const q3Idx = months.map((m, i) => (isQ3Fy26(m) ? i : -1)).filter((i) => i >= 0);
+    const q3Idx = months.map((m, i) => (isInSalesQ(m, curQ) ? i : -1)).filter((i) => i >= 0);
     for (const [rep, vals] of Object.entries(reps)) { if (/^all\b/i.test(rep)) continue; out[rep] = q3Idx.reduce((s, i) => s + (vals[i] ?? 0), 0); }
     return out;
-  }, [data]);
+  }, [data, curQ]);
 
   function getWeekStart(dateStr: string): string {
     const d = new Date(dateStr + "T00:00:00Z");
@@ -877,9 +880,11 @@ export default function Dashboard() {
     );
     // gen_pct is stored as a fraction on Headline; fall back to the ratio of the sourced values.
     const genPct = data.headlineSource?.gen_pct != null ? data.headlineSource.gen_pct * 100 : quota > 0 ? (gen / quota) * 100 : 0;
-    const qStart = new Date("2026-07-02").getTime();
-    const qEnd = new Date("2026-10-01").getTime();
-    const elapsedPct = Math.min(100, Math.max(0, ((Date.now() - qStart) / (qEnd - qStart)) * 100));
+    // Share of the quarter gone = Headline qtr_elapsed_pct (a fraction); the current quarter's
+    // SALES_Q dates are only the fallback when the key is missing.
+    const qStart = new Date(SALES_Q[curQ].start).getTime();
+    const qEnd = new Date(SALES_Q[curQ].end).getTime();
+    const elapsedPct = H("qtr_elapsed_pct", Math.min(1, Math.max(0, (Date.now() - qStart) / (qEnd - qStart)))) * 100;
     const paceRatio = elapsedPct > 0 ? genPct / elapsedPct : 0;
     const genStatus =
       paceRatio >= 0.9
@@ -938,7 +943,7 @@ export default function Dashboard() {
       arrStatus,
       currentMonth,
     };
-  }, [data, q3CreatedByOwner, wowMetrics]);
+  }, [data, q3CreatedByOwner, wowMetrics, curQ]);
 
   const tabSummaries = useMemo(() => {
     if (!data || !execSummary) return null;
@@ -1000,7 +1005,7 @@ export default function Dashboard() {
 
     return {
       command: {
-        sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the Q3 quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
+        sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the ${curQ} quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
         stats: [
           { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const, sub: "signed contracts — SFDC stages Billing + Closed Won (contract-live & not churned) · as of today" },
           { label: "New ARR (mo)", value: fmt(data.headlineSource?.new_arr_mo ?? S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
@@ -1031,18 +1036,18 @@ export default function Dashboard() {
         // Spell out the basis. This module reports leadership's OFFICIAL attainment — New Business
         // only — while the Forecast tab's Closed column counts New Business + Expansion. Two
         // legitimate numbers, and without the label they read as one number gone stale.
-        sentence: `Quarter-to-date the team has attained ${fmt(teamActual)} on the official basis (New Business only) — ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} Q3 quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` New ARR (Net New + Expansion) is ${fmt(newArrNbExp)}, skewing ${nbPct.toFixed(0)}% Net New.` : ""}`,
+        sentence: `Quarter-to-date the team has attained ${fmt(teamActual)} on the official basis (New Business only) — ${teamPct.toFixed(1)}% of the ${fmt(teamQuota)} ${curQ} quota${top ? `, with ${top.name} leading at ${gp(top.pctOfQuota)}` : ""}.${mixTotal > 0 ? ` New ARR (Net New + Expansion) is ${fmt(newArrNbExp)}, skewing ${nbPct.toFixed(0)}% Net New.` : ""}`,
         stats: [
           { label: "New ARR (current mo)", value: fmt(S.currentMonth?.newARR), sub: `Net New + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
-          { label: "Team New ARR Q3", value: fmt(newArrNbExp), sub: `Net New + Expansion · per contract live date · ${qStart}→${qEndExcl}` },
-          { label: "Team quota Q3", value: fmt(teamQuota), sub: `across ${data.aeAttainment.reps.length} AEs` },
+          { label: `Team New ARR ${curQ}`, value: fmt(newArrNbExp), sub: `Net New + Expansion · per contract live date · ${qStart}→${qEndExcl}` },
+          { label: `Team quota ${curQ}`, value: fmt(teamQuota), sub: `across ${data.aeAttainment.reps.length} AEs` },
           { label: "% of quota", value: teamPct.toFixed(1) + "%", sub: `attainment ${fmt(teamActual)} · ${S.elapsedPct.toFixed(0)}% of quarter gone`, tone: teamPct >= S.elapsedPct ? ("good" as const) : ("bad" as const) },
         ],
       },
       pipeline: {
-        sentence: `Q3 pipeline generation stands at ${fmt(S.gen)} — ${S.genPct.toFixed(0)}% of the ${fmt(S.quota)} quota with ${S.elapsedPct.toFixed(0)}% of the quarter gone (${S.genStatus.label.toLowerCase()}). Open pipeline totals ${fmt(totalPipe)} across ${totalOpps} opportunities at ${S.coverage.toFixed(1)}x coverage.${wowPhrase}`,
+        sentence: `${curQ} pipeline generation stands at ${fmt(S.gen)} — ${S.genPct.toFixed(0)}% of the ${fmt(S.quota)} quota with ${S.elapsedPct.toFixed(0)}% of the quarter gone (${S.genStatus.label.toLowerCase()}). Open pipeline totals ${fmt(totalPipe)} across ${totalOpps} opportunities at ${S.coverage.toFixed(1)}x coverage.${wowPhrase}`,
         stats: [
-          { label: "Created in Q3", value: fmt(S.gen), sub: `${S.genPct.toFixed(0)}% of ${fmt(S.quota)} quota`, tone: S.genStatus.tone },
+          { label: `Created in ${curQ}`, value: fmt(S.gen), sub: `${S.genPct.toFixed(0)}% of ${fmt(S.quota)} quota`, tone: S.genStatus.tone },
           // Split three ways, not two. Early and late are sized differently — SQL/SAL carry no
           // ARR yet so they use Amount, SQO/Trial use real ARR — but those four stages are only
           // 4 of the 13 an open deal can sit in. Showing just early and late invited the obvious
@@ -1053,7 +1058,7 @@ export default function Dashboard() {
               ? `early ${fmt(pipeEarly)} · late ${fmt(pipeLate)} · other ${fmt(pipeOther)}`
               : `${totalOpps} opportunities` },
           { label: "New Pipeline this week", value: fmt(arrThisWeek), sub: S.wowDelta != null ? `${S.wowDelta >= 0 ? "+" : "−"}${Math.abs(Math.round(S.wowDelta))}% WoW` : undefined, tone: (S.wowDelta ?? 0) >= 0 ? ("good" as const) : ("bad" as const) },
-          { label: "Coverage", value: S.coverage.toFixed(2) + "x", sub: "open pipe vs Q3 quota", tone: S.coverage >= 3 ? ("good" as const) : ("warn" as const) },
+          { label: "Coverage", value: S.coverage.toFixed(2) + "x", sub: `open pipe vs ${curQ} quota`, tone: S.coverage >= 3 ? ("good" as const) : ("warn" as const) },
         ],
       },
       forecast: {
@@ -1075,7 +1080,7 @@ export default function Dashboard() {
         ],
       },
       attainment: {
-        sentence: `Team attainment is ${teamPct.toFixed(1)}% of the Q3 quota (${fmt(teamActual)} of ${fmt(teamQuota)}).${top ? ` Top: ${top.name} at ${gp(top.pctOfQuota)}.` : ""}${bottom && bottom !== top ? ` Lowest: ${bottom.name} at ${gp(bottom.pctOfQuota)}.` : ""}${below10 > 0 ? ` ${below10} of ${reps.length} AEs are below 10%.` : ""}`,
+        sentence: `Team attainment is ${teamPct.toFixed(1)}% of the ${curQ} quota (${fmt(teamActual)} of ${fmt(teamQuota)}).${top ? ` Top: ${top.name} at ${gp(top.pctOfQuota)}.` : ""}${bottom && bottom !== top ? ` Lowest: ${bottom.name} at ${gp(bottom.pctOfQuota)}.` : ""}${below10 > 0 ? ` ${below10} of ${reps.length} AEs are below 10%.` : ""}`,
         stats: [
           { label: "Team actual", value: fmt(teamActual), sub: `of ${fmt(teamQuota)} quota` },
           { label: "Team % of quota", value: teamPct.toFixed(1) + "%", sub: `${S.elapsedPct.toFixed(0)}% of quarter gone`, tone: teamPct >= S.elapsedPct ? ("good" as const) : ("bad" as const) },
@@ -1110,7 +1115,7 @@ export default function Dashboard() {
         };
       })(),
     };
-  }, [data, execSummary, wowMetrics]);
+  }, [data, execSummary, wowMetrics, curQ]);
 
   const pathToPlan = useMemo(() => {
     if (!data) return null;
@@ -1301,7 +1306,7 @@ export default function Dashboard() {
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 30px 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <div style={{ fontSize: 22, fontWeight: 700, color: C.navy }}>
-              {data.demo ? `Horizon Dining Group — ${SALES_Q[currentSalesQ()].label}` : `Momos Forecast — ${SALES_Q[currentSalesQ()].label}`}
+              {data.demo ? `Horizon Dining Group — ${curQLabel}` : `Momos Forecast — ${curQLabel}`}
             </div>
             <div style={{ fontSize: 12, color: C.t3 }}>
               {data.demo && (
@@ -1600,8 +1605,8 @@ export default function Dashboard() {
                   </span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
-                  <KV label="Actual (Q3)" v={fmt(derived.teamActual)} />
-                  <KV label="Quota (Q3)" v={fmt(derived.teamQuota)} />
+                  <KV label={`Actual (${curQ})`} v={fmt(derived.teamActual)} />
+                  <KV label={`Quota (${curQ})`} v={fmt(derived.teamQuota)} />
                   <KV
                     label="% of Quota"
                     v={pct(derived.teamPctOfQuota)}
@@ -1951,7 +1956,7 @@ export default function Dashboard() {
           </Card>
 
           <Card
-            title={`Pipeline generation by AE — ${SALES_Q[currentSalesQ()].label}`}
+            title={`Pipeline generation by AE — ${curQLabel}`}
             sub="New pipeline created this quarter — total contract value (Amount) of opps reaching SQL, vs each AE's quarterly pipe-generation target. Open pipeline shown for context."
             accent={C.coral}
           >
@@ -2223,7 +2228,7 @@ export default function Dashboard() {
             );
             const attByName: Record<string, { actual: number; nb?: number; exp?: number }> = {};
             for (const a of data.aeAttainment.reps) attByName[a.name] = a;
-            // Q3 month labels (e.g. Jul-26/Aug-26/Sep-26) for summing MoM ARR blocks.
+            // Current-quarter month labels (e.g. Oct-26/Nov-26/Dec-26) for summing MoM ARR blocks.
             const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
             const qMonthSet = new Set<string>();
             {
@@ -2290,7 +2295,7 @@ export default function Dashboard() {
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20 }}>
                         <div>
-                          {label("Quota Q3")}
+                          {label(`Quota ${curQ}`)}
                           <div style={{ fontSize: 21, fontWeight: 700, fontFamily: "var(--font-dm-mono)", color: C.t1, marginTop: 3 }}>{quota != null && quota > 0 ? kM(quota) : "\u2014"}</div>
                         </div>
                         <div>
@@ -3162,7 +3167,7 @@ export default function Dashboard() {
             const n = steps.length;
             let running = 0;
             return (
-              <Card title="Year-end projection vs annual target" sub="End-of-Q2 live ARR plus Q3 Potential ARR (from the Quarter Forecast), versus the FY26 ending-ARR target." accent={C.navy}>
+              <Card title="Year-end projection vs annual target" sub={`Live ARR today plus ${curQ} Potential ARR (from the Quarter Forecast), versus the FY26 ending-ARR target.`} accent={C.navy}>
                 <div style={{ padding: "16px 20px" }}>
                   <div style={{ position: "relative", height: PLOT, borderBottom: `1px solid ${C.bd}` }}>
                     {steps.map((s, i) => {
