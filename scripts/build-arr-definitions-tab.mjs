@@ -76,6 +76,26 @@ const ROLLUPS = [
     rule: "Live ARR + Pilot. Renamed from \"Booked Pilot\" on 2026-08-27; before that, \"Booked ARR\" meant the pilot book alone." },
 ];
 
+// The refresh job writes many tabs back to back, and Google caps a service account at 60 write
+// requests per minute. On 2026-10-11 this step — the last writer — hit that cap and failed the
+// whole run. Retry quota / transient errors with backoff long enough to cross into the next minute.
+function isTransient(e) {
+  const code = Number(e?.code ?? e?.status ?? e?.response?.status);
+  if ([408, 429, 500, 502, 503, 504].includes(code)) return true;
+  return /quota exceeded|rate.?limit|user rate|backend error|timeout|timed out|econnreset|socket hang|fetch failed|temporarily|try again/i.test(String(e?.message ?? e ?? ""));
+}
+async function retry(label, fn, tries = 6, baseMs = 2000) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); }
+    catch (e) {
+      if (i >= tries - 1 || !isTransient(e)) throw e;
+      const wait = baseMs * 2 ** i + Math.floor(Math.random() * 500);
+      console.warn(`  ↻ retry ${label} (${i + 1}/${tries - 1}) in ${wait}ms — ${e.message || e}`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
 async function main() {
   const dash = await loadDash();
   const AF = dash.arrFunnel;
@@ -141,27 +161,27 @@ async function main() {
 
   const api = google.sheets({ version: "v4", auth: gAuth });
   const ID = process.env.GOOGLE_SHEET_ID;
-  const meta = await api.spreadsheets.get({ spreadsheetId: ID, fields: "sheets.properties(sheetId,title,gridProperties)" });
+  const meta = await retry("sheet meta", () => api.spreadsheets.get({ spreadsheetId: ID, fields: "sheets.properties(sheetId,title,gridProperties)" }));
   let sheet = meta.data.sheets.find((s) => s.properties.title === TAB);
   if (!sheet) {
-    const add = await api.spreadsheets.batchUpdate({ spreadsheetId: ID,
-      requestBody: { requests: [{ addSheet: { properties: { title: TAB, gridProperties: { rowCount: rows.length + 200, columnCount: 14, frozenRowCount: 0 } } } }] } });
+    const add = await retry("add tab", () => api.spreadsheets.batchUpdate({ spreadsheetId: ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: TAB, gridProperties: { rowCount: rows.length + 200, columnCount: 14, frozenRowCount: 0 } } } }] } }));
     sheet = { properties: add.data.replies[0].addSheet.properties };
     console.log(`created tab "${TAB}"`);
   }
   // Grow the grid before writing — a values.update past the grid edge is rejected outright.
   const gp = sheet.properties.gridProperties ?? {};
   if ((gp.rowCount ?? 0) < rows.length + 50 || (gp.columnCount ?? 0) < 14) {
-    await api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: [{
+    await retry("grow grid", () => api.spreadsheets.batchUpdate({ spreadsheetId: ID, requestBody: { requests: [{
       updateSheetProperties: { properties: { sheetId: sheet.properties.sheetId,
         gridProperties: { rowCount: Math.max(rows.length + 200, gp.rowCount ?? 0), columnCount: Math.max(14, gp.columnCount ?? 0) } },
-        fields: "gridProperties.rowCount,gridProperties.columnCount" } }] } });
+        fields: "gridProperties.rowCount,gridProperties.columnCount" } }] } }));
   }
   // Clear then write. RAW: every cell here is a value the dashboard computed — writing it
   // USER_ENTERED would let a leading "+" or "-" be parsed as a broken formula.
-  await api.spreadsheets.values.clear({ spreadsheetId: ID, range: `'${TAB}'!A1:N100000` });
-  await api.spreadsheets.values.update({ spreadsheetId: ID, range: `'${TAB}'!A1`,
-    valueInputOption: "RAW", requestBody: { values: rows.map((r) => (r.length ? r : [""])) } });
+  await retry("clear", () => api.spreadsheets.values.clear({ spreadsheetId: ID, range: `'${TAB}'!A1:N100000` }));
+  await retry("write", () => api.spreadsheets.values.update({ spreadsheetId: ID, range: `'${TAB}'!A1`,
+    valueInputOption: "RAW", requestBody: { values: rows.map((r) => (r.length ? r : [""])) } }));
 
   console.log(`"${TAB}" written — ${rows.length} rows.`);
   console.log(`  as of ${now.label}: Pilot $${money(now.booked).toLocaleString()} · Contracted $${money(now.contracted).toLocaleString()} · Billed $${money(now.live).toLocaleString()}`);

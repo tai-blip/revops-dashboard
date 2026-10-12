@@ -12,6 +12,19 @@
 // This is intentionally read-only and self-contained (no repo imports) so the weekly
 // cloud agent can run it headless.
 import { google } from "googleapis";
+import { readFileSync } from "node:fs";
+
+// Reps the dashboard leaves OUT of team attainment on both sides (Account Managers and Enterprise
+// leads — Mathias and David today; Tai's call 2026-09-15, see page.tsx teamExclude). Read from the
+// am/lead flags in AE_ROSTER when the repo is present; the fallback keeps this script self-contained.
+const TEAM_EXCLUDE = (() => {
+  try {
+    const src = readFileSync(new URL("../src/lib/planConfig.ts", import.meta.url), "utf8");
+    const names = [...src.matchAll(/\{\s*name:\s*"([^"]+)"[^}]*\b(?:am:\s*true|lead:\s*true)/g)].map((m) => m[1]);
+    if (names.length) return new Set(names);
+  } catch { /* no repo checkout */ }
+  return new Set(["Mathias Berthelemot", "David Dubinski"]);
+})();
 
 const auth = new google.auth.JWT({
   email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -119,6 +132,10 @@ async function main() {
       if (!r[0] || typeof r[0] !== "string") break;
       reps.push({ name: r[0], quota: num(r[1]), actual: num(r[3]) });
     }
+    // Same basis as the dashboard's team tile: AE team only. An excluded lead with actuals and no
+    // quota (David) inflates nothing, because he is in neither the numerator nor the denominator.
+    const excluded = reps.filter((r) => TEAM_EXCLUDE.has(r.name));
+    reps.splice(0, reps.length, ...reps.filter((r) => !TEAM_EXCLUDE.has(r.name)));
     const teamQuota = reps.reduce((s, r) => s + r.quota, 0);
     const teamActual = reps.reduce((s, r) => s + r.actual, 0);
     const orphans = reps.filter((r) => r.actual > 0 && r.quota <= 0);
@@ -132,7 +149,7 @@ async function main() {
         "Assign a quota (or exclude from both numerator and denominator) in the AE Attainment (Official) sheet. Roster/quotas: src/lib/planConfig.ts AE_ROSTER; build: scripts/build-ae-attainment-official.mjs. Team rollup: src/app/page.tsx:546-547."
       );
     } else {
-      add("PASS", "AE attainment quota integrity", `Team ${usd(teamActual)} / ${usd(teamQuota)} = ${pct(teamPct)}; every rep with actuals has a quota.`);
+      add("PASS", "AE attainment quota integrity", `AE team ${usd(teamActual)} / ${usd(teamQuota)} = ${pct(teamPct)}; every rep with actuals has a quota.${excluded.length ? ` Tracked outside the team total (AM/lead): ${excluded.map((r) => `${r.name} ${usd(r.actual)}`).join(", ")}.` : ""}`);
     }
   }
 

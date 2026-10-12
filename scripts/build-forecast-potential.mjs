@@ -21,9 +21,13 @@ const gAuth = new google.auth.JWT({
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const TAB = "Forecast Potential";
 
-// Forecast roster (matches AE_ROSTER minus FORECAST_EXCLUDE=Dorsa in the dashboard).
+// Forecast roster — every AE_ROSTER member the Forecast tab shows (FORECAST_EXCLUDE is empty
+// since Q4). Dorsa and Jed carry Q4 quotas, so they need rows even when their open book is empty;
+// the daily roster-drift audit fails if this list falls behind AE_ROSTER.
 const AES = [
   ["James", "James Burdick"],
+  ["Dorsa", "Dorsa Mahmoudnia"],
+  ["Jed", "Jed Rutstein"],
   ["Jill", "Jill Bucci"],
   ["Mathias", "Mathias Berthelemot"],
   ["Davi", "David Dubinski"],
