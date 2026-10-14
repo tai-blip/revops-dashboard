@@ -1007,7 +1007,13 @@ export default function Dashboard() {
       command: {
         sentence: `ARR sits at ${fmt(S.arrNow)} — ${fmt(S.gap)} from the $10M milestone. Pipeline generation is ${S.genStatus.tone === "good" ? "on pace" : "behind pace"} at ${S.genPct.toFixed(0)}% of the ${curQ} quota with ${(100 - S.elapsedPct).toFixed(0)}% of the quarter remaining${S.wowDelta != null ? (S.wowDelta >= 0 ? ` while weekly pipeline creation rebounded +${Math.round(S.wowDelta)}% WoW` : ` while weekly pipeline creation declined ${Math.round(S.wowDelta)}% WoW`) : ""}.`,
         stats: [
-          { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const, sub: "signed contracts — SFDC stages Billing + Closed Won (contract-live & not churned) · as of today" },
+          // Headline = Live ARR + renewal ongoing (Tai, 2026-10-12, after Andrew asked for the ~$6M
+          // figure at the top on the 10-07 forecast call). Both parts and their sum are Renewal_Ongoing
+          // sheet cells; the sub keeps the split visible so Live ARR itself is never hidden.
+          data.renewalOngoing
+            ? { label: "Live ARR + renewals", value: fmt(data.renewalOngoing.livePlus), tone: "good" as const,
+                sub: `${fmt(data.renewalOngoing.liveArr ?? S.arrNow)} live + ${fmt(data.renewalOngoing.renewalOngoing)} renewal ongoing` }
+            : { label: "Live ARR", value: fmt(S.arrNow), tone: "good" as const, sub: "as of today" },
           { label: "New ARR (mo)", value: fmt(data.headlineSource?.new_arr_mo ?? S.currentMonth?.newARR), sub: `New Biz + Expansion · per contract live date${S.currentMonth?.label ? " · " + S.currentMonth.label : ""}` },
           { label: "Churned (mo)", value: fmt(data.headlineSource?.churn_mo ?? S.currentMonth?.churnedARR), sub: S.currentMonth?.label, tone: "bad" as const },
           // "Up for renewal" counts only contracts whose renewal is still OPEN — one already
